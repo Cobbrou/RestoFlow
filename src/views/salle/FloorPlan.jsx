@@ -1,0 +1,181 @@
+import { useState } from "react";
+import { Users, Clock, Lock, CalendarClock } from "lucide-react";
+import { tableStatus, STATUS_META, orderTotal, elapsed } from "../../utils/index.js";
+
+/**
+ * FloorPlan — Plan de salle interactif.
+ *
+ * Mode desktop : tables positionnées librement sur un fond quadrillé (en %).
+ * Mode mobile  : grille 2 colonnes de cartes.
+ *
+ * Interactions :
+ *  - Clic sur une table → ouvre sa commande (onOpen)
+ *  - Clic droit / appui long → bascule l'alerte (onToggleAlert)
+ */
+export default function FloorPlan({ tables, orders, now, onOpen, onToggleAlert, isMobile }) {
+  if (isMobile) {
+    return (
+      <div className="p-3">
+        <div className="mb-3">
+          <h1 className="rf-display text-xl font-semibold text-[#2B2622]">Plan de salle</h1>
+          <p className="text-xs text-[#6B6355]">Touchez une table pour ouvrir sa commande</p>
+        </div>
+
+        {/* Légende défilable */}
+        <div className="flex gap-1.5 overflow-x-auto rf-scrollbar pb-3 -mx-3 px-3">
+          {Object.entries(STATUS_META).map(([k, v]) => (
+            <span key={k} className="text-[10px] whitespace-nowrap px-2 py-1 rounded-full bg-black/5 text-[#5B5346]">
+              {v.dot} {v.label}
+            </span>
+          ))}
+        </div>
+
+        {/* Grille de tables */}
+        <div className="grid grid-cols-2 gap-2.5">
+          {tables.map((t) => {
+            const order  = orders.find((o) => o.tableId === t.id);
+            const status = tableStatus(t, order);
+            const meta   = STATUS_META[status];
+            const readyCount = order ? order.items.filter((i) => i.status === "ready").length : 0;
+
+            return (
+              <button
+                key={t.id}
+                onClick={() => onOpen(t)}
+                onContextMenu={(e) => { e.preventDefault(); onToggleAlert(t.id); }}
+                className={`rf-tap relative text-left rounded-2xl border-2 bg-white p-3 min-h-[104px] flex flex-col ${status === "alert" ? "rf-flash-alert" : ""} ${status === "ready" ? "rf-pulse-ready" : ""}`}
+                style={{ borderColor: meta.color }}
+              >
+                {t.reserved && (
+                  <span className="absolute -top-2 -right-2 flex items-center gap-0.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full shadow" style={{ background: "#5B5346", color: "#FAF6EE" }}>
+                    <Lock size={8} /> RÉSERVÉE
+                  </span>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="rf-black text-xl leading-none text-[#2B2622]">{t.number}</span>
+                  <span className="text-base">{meta.dot}</span>
+                </div>
+                <span className="text-[11px] text-[#8A8378] flex items-center gap-1 mt-1">
+                  <Users size={11} />{t.seats} pers.
+                </span>
+                {t.reserved && t.reservationTime && (
+                  <span className="text-[10px] text-[#5B5346] flex items-center gap-1">
+                    <CalendarClock size={10} />
+                    {t.reservationName || "Réservation"} · {t.reservationTime}
+                  </span>
+                )}
+                <span className="text-[11px] font-semibold mt-auto pt-1.5" style={{ color: meta.color }}>
+                  {readyCount > 0 ? `${readyCount} prêt(s)` : meta.label}
+                </span>
+                {order && orderTotal(order) > 0 && (
+                  <span className="text-[11px] font-bold text-[#2B2622]">
+                    {orderTotal(order).toLocaleString("fr-FR", { minimumFractionDigits: 2 })} € · {elapsed(order.createdAt, now)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-[#9A917E] text-center mt-3">Appui long sur une table pour signaler un problème</p>
+      </div>
+    );
+  }
+
+  // ── Mode desktop ──────────────────────────────────────────────────────────
+  return (
+    <div className="p-5">
+      <div className="flex items-baseline justify-between mb-4">
+        <div>
+          <h1 className="rf-display text-2xl font-semibold text-[#2B2622]">Plan de salle</h1>
+          <p className="text-sm text-[#6B6355]">Sélectionnez une table pour prendre ou consulter une commande</p>
+        </div>
+        <Legend />
+      </div>
+
+      {/* Plateau */}
+      <div
+        className="relative rounded-2xl border border-[#E4DAC6]"
+        style={{ height: 560, background: "repeating-linear-gradient(45deg,#F3EDDD,#F3EDDD 22px,#EFE7D2 22px,#EFE7D2 44px)" }}
+      >
+        {tables.map((t) => {
+          const order  = orders.find((o) => o.tableId === t.id);
+          const status = tableStatus(t, order);
+          const meta   = STATUS_META[status];
+          const size   = t.seats <= 2 ? 78 : t.seats <= 4 ? 96 : 118;
+          const shape  = t.seats <= 4 ? "9999px" : "20px";
+          const total  = order ? orderTotal(order) : 0;
+
+          return (
+            <button
+              key={t.id}
+              onClick={() => onOpen(t)}
+              onContextMenu={(e) => { e.preventDefault(); onToggleAlert(t.id); }}
+              title={t.reserved
+                ? `Réservée${t.reservationName ? " — " + t.reservationName : ""}${t.reservationTime ? " à " + t.reservationTime : ""}`
+                : "Clic droit : signaler / lever une alerte"}
+              className={`rf-tap absolute flex flex-col items-center justify-center border-2 shadow-md ${status === "alert" ? "rf-flash-alert" : ""} ${status === "ready" ? "rf-pulse-ready" : ""}`}
+              style={{
+                left: `${t.x}%`, top: `${t.y}%`,
+                width: size, height: size,
+                borderRadius: shape,
+                background: "#FFFDF7",
+                borderColor: meta.color,
+                transform: "translate(-50%, -50%)",
+              }}
+            >
+              <span className="rf-black text-lg leading-none text-[#2B2622]">{t.number}</span>
+              <span className="text-[10px] text-[#8A8378] flex items-center gap-0.5 mt-0.5">
+                <Users size={10} />{t.seats}
+              </span>
+
+              {/* Dot statut */}
+              <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center text-[10px]" style={{ background: meta.color }}>
+                <span style={{ filter: "grayscale(1) brightness(3)" }}>●</span>
+              </span>
+
+              {/* Badge réservation */}
+              {t.reserved && (
+                <span className="absolute -top-2 -left-2 flex items-center gap-0.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full shadow whitespace-nowrap" style={{ background: "#5B5346", color: "#FAF6EE" }}>
+                  <Lock size={8} /> RÉSERVÉE
+                </span>
+              )}
+
+              {/* Montant */}
+              {total > 0 && (
+                <span className="absolute -bottom-6 text-[11px] font-semibold text-[#5B5346] whitespace-nowrap">
+                  {total.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
+                </span>
+              )}
+
+              {/* Heure ou réservation */}
+              {order?.createdAt ? (
+                <span className="absolute -bottom-[38px] text-[9px] text-[#9A917E] whitespace-nowrap flex items-center gap-0.5">
+                  <Clock size={8} />{elapsed(order.createdAt, now)}
+                </span>
+              ) : (
+                !order && t.reserved && (t.reservationName || t.reservationTime) && (
+                  <span className="absolute -bottom-[38px] text-[9px] text-[#5B5346] whitespace-nowrap flex items-center gap-0.5 font-semibold">
+                    <CalendarClock size={8} />
+                    {t.reservationName || "Réservée"}{t.reservationTime ? ` · ${t.reservationTime}` : ""}
+                  </span>
+                )
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Legend() {
+  return (
+    <div className="flex gap-3 flex-wrap text-xs text-[#5B5346]">
+      {Object.entries(STATUS_META).map(([k, v]) => (
+        <span key={k} className="flex items-center gap-1">
+          <span>{v.dot}</span>{v.label}
+        </span>
+      ))}
+    </div>
+  );
+}
