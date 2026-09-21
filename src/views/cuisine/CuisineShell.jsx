@@ -141,6 +141,13 @@ function KitchenTicket({ order, table, now, column, products, onStart, onReady }
             <div key={it.id} className="rf-mono text-[12.5px]">
               {isAllergy && <AllergyBadge item={it} product={product} compact />}
               <div className="font-semibold">{it.qty} × {it.name}</div>
+              {it.composition?.length > 0 && (
+                <div className="text-[11px] opacity-80 pl-3 space-y-0.5 mt-0.5">
+                  {it.composition.map((g, i) => (
+                    <div key={i}>• {g.title ? `${g.title} : ` : ""}{Array.isArray(g.names) ? g.names.join(", ") : (g.names || "")}</div>
+                  ))}
+                </div>
+              )}
               {it.notes && !isAllergy && <div className="text-[11px] opacity-70 pl-3">↳ {it.notes}</div>}
             </div>
           );
@@ -226,6 +233,13 @@ function KitchenByTable({ tables, orders, now, products }) {
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <div>{icon} {it.qty} × {it.name}</div>
+                            {it.composition?.length > 0 && (
+                              <div className="text-[11px] opacity-80 pl-4 space-y-0.5 mt-0.5">
+                                {it.composition.map((g, i) => (
+                                  <div key={i}>• {g.title ? `${g.title} : ` : ""}{Array.isArray(g.names) ? g.names.join(", ") : (g.names || "")}</div>
+                                ))}
+                              </div>
+                            )}
                             {it.notes && !isAllergy && <div className="text-[11px] opacity-70 pl-4">↳ {it.notes}</div>}
                           </div>
                           <span className="text-[10px] opacity-60 uppercase shrink-0">{it.status}</span>
