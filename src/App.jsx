@@ -32,7 +32,7 @@ export default function App() {
 
   // ── État principal ─────────────────────────────────────────
   const [tables,   setTables]   = useState(seedTables);
-  const [orders,   setOrders]   = useState(() => seedOrders(seedTables()));
+  const [orders,   setOrders]   = useState([]);
   const [history,  setHistory]  = useState(seedHistory);
   const [products, setProducts] = useState(PRODUCTS_SEED);
   const [menus,    setMenus]    = useState(seedMenus);
@@ -41,7 +41,7 @@ export default function App() {
   const [role,        setRole]        = useState("serveur");   // serveur | cuisine | dashboard | gestion
   const [serverView,  setServerView]  = useState("plan");      // plan | commande
   const [cuisineView, setCuisineView] = useState("board");     // board | table
-  const [gestionView, setGestionView] = useState("tables");    // tables | produits | menus
+  const [gestionView, setGestionView] = useState("tables");    // tables | produits | menus | historique
 
   // ── Table active (vue commande) ────────────────────────────
   const [activeTableId, setActiveTableId] = useState(null);
@@ -356,6 +356,7 @@ export default function App() {
           orders={orders}
           products={products}
           menus={menus}
+          history={history}
           onAddTable={addTable}
           onUpdateTable={updateTable}
           onDeleteTable={deleteTable}

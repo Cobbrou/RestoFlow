@@ -1,22 +1,25 @@
 import { useState } from "react";
-import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban } from "lucide-react";
+import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { isAvailable, money } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
+import { uid } from "../../data/seed.js";
 
 /**
- * Gestion — Back-office avec 3 sous-vues :
- *  - tables   : gestion du plan de salle (CRUD + réservations)
- *  - produits : catalogue produits (CRUD + disponibilité)
- *  - menus    : menus composés (CRUD)
+ * Gestion — Back-office avec 4 sous-vues :
+ *  - tables     : gestion du plan de salle (CRUD + réservations)
+ *  - produits   : catalogue produits (CRUD + disponibilité)
+ *  - menus      : menus composés (CRUD)
+ *  - historique : historique des paiements encaissés
  */
 export default function Gestion(props) {
   const { view, setView } = props;
 
   const tabs = [
-    { id: "tables",   label: "Tables",   icon: Table2 },
-    { id: "produits", label: "Produits", icon: Package },
-    { id: "menus",    label: "Menus",    icon: LayoutList },
+    { id: "tables",     label: "Tables",     icon: Table2 },
+    { id: "produits",   label: "Produits",   icon: Package },
+    { id: "menus",      label: "Menus",      icon: LayoutList },
+    { id: "historique", label: "Historique", icon: Receipt },
   ];
 
   return (
@@ -24,7 +27,7 @@ export default function Gestion(props) {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="rf-display text-2xl font-semibold text-[#2B2622]">Gestion</h1>
-          <p className="text-sm text-[#6B6355]">Tables, catalogue produits et menus du restaurant</p>
+          <p className="text-sm text-[#6B6355]">Tables, catalogue produits, menus et historique des paiements</p>
         </div>
         <div className="flex gap-1 p-1 rounded-full bg-black/5">
           {tabs.map((t) => {
@@ -41,9 +44,10 @@ export default function Gestion(props) {
         </div>
       </div>
 
-      {view === "tables"   && <TableManager {...props} />}
-      {view === "produits" && <ProductManager {...props} />}
-      {view === "menus"    && <MenuManager {...props} />}
+      {view === "tables"     && <TableManager {...props} />}
+      {view === "produits"   && <ProductManager {...props} />}
+      {view === "menus"      && <MenuManager {...props} />}
+      {view === "historique" && <HistoryManager history={props.history || []} />}
     </div>
   );
 }
@@ -424,14 +428,23 @@ function MenuManager({ products, menus, onAddMenu, onUpdateMenu, onDeleteMenu })
 function MenuForm({ menu, products, onCancel, onSave }) {
   const [name,   setName]   = useState(menu?.name   ?? "");
   const [price,  setPrice]  = useState(menu?.price  ?? "");
-  const [emoji,  setEmoji]  = useState(menu?.emoji  ?? "🍽️");
+  const [emoji,  setEmoji]  = useState(menu?.emoji  ?? "📋");
   const [desc,   setDesc]   = useState(menu?.desc   ?? "");
-  const [groups, setGroups] = useState(menu?.groups ?? []);
+  const [groups, setGroups] = useState(
+    menu?.groups ?? [{ id: uid("grp"), title: "Entrée", count: 1, productIds: [] }]
+  );
   const realCats = CATEGORIES.filter((c) => c.id !== "menus");
-  const valid = name.trim() && price !== "" && !isNaN(Number(price));
+
+  // Validation stricte : chaque groupe doit avoir au moins autant de produits que le nombre de choix requis
+  const valid =
+    name.trim() &&
+    price !== "" &&
+    !isNaN(Number(price)) &&
+    groups.length > 0 &&
+    groups.every((g) => g.title.trim() && g.count >= 1 && g.productIds.length >= g.count);
 
   const addGroup = () => {
-    setGroups((prev) => [...prev, { id: `g${Date.now()}`, title: "Nouveau groupe", count: 1, productIds: [] }]);
+    setGroups((prev) => [...prev, { id: uid("grp"), title: `Étape ${prev.length + 1}`, count: 1, productIds: [] }]);
   };
 
   const updateGroup = (id, patch) => {
@@ -451,73 +464,230 @@ function MenuForm({ menu, products, onCancel, onSave }) {
   };
 
   return (
-    <Modal title={menu ? `Modifier : ${menu.name}` : "Nouveau menu"} onClose={onCancel} wide>
-      <div className="grid grid-cols-[64px_1fr] gap-3">
+    <Modal title={menu ? "Modifier le menu" : "Nouveau menu"} onClose={onCancel} wide>
+      <div className="grid grid-cols-[64px_1fr_120px] gap-3">
         <Field label="Icône">
           <input className={inputCls + " text-center text-xl"} value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={2} />
         </Field>
         <Field label="Nom du menu">
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex : Menu Midi" />
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex : Menu Burger" />
         </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
         <Field label="Prix (€)">
           <input type="number" step="0.5" min={0} className={inputCls} value={price} onChange={(e) => setPrice(e.target.value)} />
         </Field>
-        <Field label="Description (optionnel)">
-          <input className={inputCls} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Affiché sous le nom" />
-        </Field>
       </div>
+      <p className="text-[11px] text-[#8A8378] mb-3">
+        Composez le menu en étapes de choix (ex. «&nbsp;Entrée&nbsp;» au choix parmi plusieurs plats). Le serveur devra sélectionner une option par étape avant d'ajouter le menu à la commande.
+      </p>
 
       {/* Groupes de choix */}
-      <p className="text-xs font-bold uppercase tracking-wide text-[#6B6355] mt-2 mb-2">Étapes de choix</p>
-      <div className="space-y-4 max-h-[300px] overflow-y-auto rf-scrollbar pr-1">
+      <div className="space-y-3">
         {groups.map((g) => (
-          <div key={g.id} className="rounded-xl border border-black/10 p-3 bg-black/[.01]">
-            <div className="flex items-center gap-2 mb-2">
+          <div key={g.id} className="border border-black/10 rounded-xl p-3">
+            <div className="flex items-center gap-2 mb-2.5">
               <input value={g.title} onChange={(e) => updateGroup(g.id, { title: e.target.value })}
-                className={inputCls + " flex-1"} placeholder="Nom de l'étape (ex : Plat)" />
-              <Field label="">
-                <input type="number" min={1} value={g.count} onChange={(e) => updateGroup(g.id, { count: Number(e.target.value) })}
-                  className={inputCls + " w-16"} title="Nb de choix" />
-              </Field>
-              <button onClick={() => removeGroup(g.id)} className="rf-tap p-1.5 rounded-full bg-black/5 text-[#C1361B] shrink-0"><Trash2 size={13} /></button>
+                placeholder="Ex : Entrée" className={inputCls + " flex-1 font-semibold"} />
+              <label className="flex items-center gap-1.5 text-xs text-[#6B6355] shrink-0">
+                Choix
+                <input type="number" min={1} max={Math.max(1, g.productIds.length)} value={g.count}
+                  onChange={(e) => updateGroup(g.id, { count: Math.max(1, Number(e.target.value)) })}
+                  className="w-14 px-2 py-1.5 rounded-lg border border-black/15 text-sm outline-none text-center" />
+              </label>
+              {groups.length > 1 && (
+                <button onClick={() => removeGroup(g.id)} className="rf-tap p-1.5 rounded-full bg-black/5 text-[#C1361B] shrink-0"><Trash2 size={13} /></button>
+              )}
             </div>
-            <p className="text-[10px] text-[#9A917E] mb-1.5">Produits proposés dans cette étape :</p>
-            <div className="flex flex-wrap gap-1.5">
-              {products.map((p) => {
-                const cat = realCats.find((c) => c.id === p.cat);
-                const selected = g.productIds.includes(p.id);
-                return (
-                  <button key={p.id} onClick={() => toggleProduct(g.id, p.id)}
-                    className="rf-tap text-[10px] px-2 py-1 rounded-full border font-semibold"
-                    style={{
-                      background:  selected ? (cat?.accent || "#2B2622") : "white",
-                      color:       selected ? "#FAF6EE" : "#5B5346",
-                      borderColor: selected ? (cat?.accent || "#2B2622") : "rgba(0,0,0,.1)",
-                    }}>
-                    {p.emoji} {p.name}
-                  </button>
-                );
+            <div className="grid grid-cols-2 gap-1.5 max-h-[180px] overflow-y-auto rf-scrollbar pr-1">
+              {realCats.map((c) => {
+                const catProducts = products.filter((p) => p.cat === c.id);
+                return catProducts.map((p) => {
+                  const checked = g.productIds.includes(p.id);
+                  return (
+                    <button type="button" key={p.id} onClick={() => toggleProduct(g.id, p.id)}
+                      className="rf-tap flex items-center gap-2 text-left px-2.5 py-1.5 rounded-lg border text-xs"
+                      style={{ borderColor: checked ? "#C1440E" : "rgba(0,0,0,.1)", background: checked ? "#C1440E12" : "white" }}>
+                      <span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ background: checked ? "#C1440E" : "rgba(0,0,0,.08)" }}>
+                        {checked && <span style={{ color: "white", fontSize: 10, fontWeight: 900 }}>✓</span>}
+                      </span>
+                      <span className="flex-1 truncate">{p.emoji} {p.name}</span>
+                    </button>
+                  );
+                });
               })}
             </div>
+            {g.count > g.productIds.length && (
+              <p className="text-[10px] text-[#C1361B] mt-1.5">Sélectionnez au moins {g.count} produit(s) pour cette étape.</p>
+            )}
           </div>
         ))}
       </div>
       <button onClick={addGroup}
-        className="rf-tap w-full mt-3 py-2 rounded-xl border-2 border-dashed border-black/15 text-xs font-semibold text-[#5B5346] flex items-center justify-center gap-1 hover:bg-black/5">
-        <Plus size={13} /> Ajouter une étape de choix
+        className="rf-tap w-full mt-3 py-2 rounded-xl text-xs font-semibold bg-black/5 flex items-center justify-center gap-1.5">
+        <Plus size={14} /> Ajouter une étape de choix
       </button>
 
       <div className="flex gap-2 mt-4">
         <button onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
         <button disabled={!valid}
-          onClick={() => onSave({ name: name.trim(), price: Number(price), emoji: emoji || "🍽️", desc: desc.trim(), groups })}
+          onClick={() => onSave({ name: name.trim(), price: Number(price), emoji: emoji || "📋", desc: desc.trim(), groups })}
           className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
           style={{ background: "#C1440E" }}>
           Enregistrer
         </button>
       </div>
     </Modal>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   HISTORIQUE DES PAIEMENTS
+══════════════════════════════════════════════════════════════ */
+
+const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, autre: Wallet };
+const METHOD_LABELS = { carte: "Carte",    especes: "Espèces", autre: "Autre" };
+
+function HistoryManager({ history }) {
+  const [search,       setSearch]       = useState("");
+  const [methodFilter, setMethodFilter] = useState(null);
+  const [detailId,     setDetailId]     = useState(null);
+
+  const sorted   = [...history].sort((a, b) => b.createdAt - a.createdAt);
+  const filtered = sorted.filter((h) => {
+    const matchSearch  = !search || String(h.tableNumber ?? "").includes(search) ||
+      (h.server || "").toLowerCase().includes(search.toLowerCase()) ||
+      (h.orderId || "").toLowerCase().includes(search.toLowerCase());
+    const matchMethod = !methodFilter || h.paymentMethod === methodFilter;
+    return matchSearch && matchMethod;
+  });
+
+  const totalCA = filtered.reduce((s, h) => s + h.total, 0);
+  const detail  = detailId ? history.find((h) => h.id === detailId) : null;
+
+  return (
+    <div>
+      {/* Barre de filtres */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <div className="flex-1 min-w-[200px] flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2">
+          <Receipt size={14} className="text-[#8A8378]" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Recherche par table, serveur…"
+            className="bg-transparent outline-none text-sm flex-1 placeholder:text-[#9A917E]"
+          />
+        </div>
+        <div className="flex gap-1">
+          {[null, "carte", "especes", "autre"].map((m) => {
+            const Icon   = m ? METHOD_ICONS[m] : Receipt;
+            const active = methodFilter === m;
+            return (
+              <button key={m ?? "all"} onClick={() => setMethodFilter(m)}
+                className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{ background: active ? "#2B2622" : "rgba(0,0,0,.05)", color: active ? "#FAF6EE" : "#5B5346" }}>
+                <Icon size={12} /> {m ? METHOD_LABELS[m] : "Tous"}
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-sm font-bold text-[#2B2622] shrink-0">
+          {filtered.length} paiement{filtered.length !== 1 ? "s" : ""} · {money(totalCA)}
+        </div>
+      </div>
+
+      {/* Liste */}
+      {filtered.length === 0 ? (
+        <p className="text-sm text-[#9A917E] text-center py-12">Aucun paiement dans l'historique.</p>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((h) => {
+            const date       = new Date(h.createdAt);
+            const MethodIcon = METHOD_ICONS[h.paymentMethod] || Wallet;
+            return (
+              <div key={h.id}
+                className="rf-tap rounded-xl border border-black/10 bg-white px-4 py-3 flex items-center gap-3 cursor-pointer hover:border-black/25"
+                onClick={() => setDetailId(h.id)}>
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#C1440E18" }}>
+                  <MethodIcon size={16} style={{ color: "#C1440E" }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="rf-mono text-xs font-bold text-[#2B2622]">
+                      {h.tableNumber ? `Table ${h.tableNumber}` : "—"}
+                    </span>
+                    {h.server && <span className="text-[11px] text-[#8A8378]">· {h.server}</span>}
+                    <span className="text-[10px] text-[#9A917E] ml-auto shrink-0">
+                      {date.toLocaleDateString("fr-FR")} {date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[11px] text-[#5B5346]">
+                      {h.items?.length ?? 0} article{(h.items?.length ?? 0) !== 1 ? "s" : ""}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "#2B262212", color: "#5B5346" }}>
+                      {METHOD_LABELS[h.paymentMethod] || (h.paymentMethod ?? "—")}
+                    </span>
+                  </div>
+                </div>
+                <span className="rf-mono text-base font-bold text-[#2B2622] shrink-0">{money(h.total)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal détail paiement */}
+      {detail && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6" onClick={() => setDetailId(null)}>
+          <div className="rf-anim-pop bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto rf-scrollbar shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-black/10 sticky top-0 bg-white">
+              <h3 className="rf-display text-lg font-semibold text-[#2B2622]">
+                Ticket — {detail.tableNumber ? `Table ${detail.tableNumber}` : "—"}
+              </h3>
+              <button onClick={() => setDetailId(null)} className="rf-tap p-1.5 rounded-full bg-black/5 text-lg leading-none">×</button>
+            </div>
+            <div className="p-5 rf-ticket">
+              <div className="text-center mb-3">
+                <p className="rf-black text-lg tracking-wide">RESTOFLOW</p>
+                <p className="text-[10px] opacity-70">Ticket de caisse</p>
+              </div>
+              <div className="rf-mono text-[11px] space-y-0.5 mb-2">
+                {detail.tableNumber && <div className="flex justify-between"><span>Table</span><span>{detail.tableNumber}</span></div>}
+                <div className="flex justify-between"><span>Commande</span><span>#{(detail.orderId || detail.id).slice(-4).toUpperCase()}</span></div>
+                <div className="flex justify-between"><span>Date</span><span>{new Date(detail.createdAt).toLocaleDateString("fr-FR")}</span></div>
+                <div className="flex justify-between"><span>Heure</span><span>{new Date(detail.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
+                {detail.server && <div className="flex justify-between"><span>Serveur</span><span>{detail.server}</span></div>}
+              </div>
+              <div className="border-t border-dashed border-black/30 my-2" />
+              <div className="space-y-1">
+                {(detail.items || []).map((it, idx) => (
+                  <div key={it.id ?? idx} className="rf-mono text-[12px]">
+                    <div className="flex justify-between gap-2">
+                      <span className="flex-1">{it.qty} × {it.name}</span>
+                      <span>{money(it.price * it.qty)}</span>
+                    </div>
+                    <div className="text-[10px] opacity-60">{money(it.price)} / unité</div>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-dashed border-black/30 my-2" />
+              <div className="rf-mono text-[11px] flex justify-between opacity-80"><span>Sous-total</span><span>{money(detail.total)}</span></div>
+              <div className="rf-mono text-[14px] flex justify-between font-bold mt-1"><span>TOTAL TTC</span><span>{money(detail.total)}</span></div>
+              {detail.paymentMethod && (
+                <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
+                  <span>Paiement</span><span>{METHOD_LABELS[detail.paymentMethod] || detail.paymentMethod}</span>
+                </div>
+              )}
+              <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>
+            </div>
+            <div className="px-5 pb-5 flex gap-2">
+              <button onClick={() => setDetailId(null)} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Fermer</button>
+              <button onClick={() => window.print()} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5" style={{ background: "#C1440E" }}>
+                🖨️ Imprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
