@@ -6,6 +6,7 @@ import {
 import { CATEGORIES } from "../../data/categories.js";
 import { isAvailable, noteIndicatesAllergy, elapsed, money } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
+import PaymentModal from "./PaymentModal.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    OrderTaking — Écran de prise de commande (côté serveur)
@@ -156,11 +157,15 @@ export default function OrderTaking({
           </div>
         )}
 
-        {allServedNoDraft && (
-          <button onClick={() => setPaying(true)} className="rf-tap w-full py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-1.5" style={{ background: "#2B2622" }}>
+        {allServedNoDraft ? (
+          <button onClick={() => setPaying(true)} className="rf-tap w-full py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm" style={{ background: "#2B2622" }}>
             <Receipt size={14} /> Encaisser & libérer la table
           </button>
-        )}
+        ) : sentItems.length > 0 && draftItems.length === 0 ? (
+          <button onClick={() => setPaying(true)} className="rf-tap w-full py-2 rounded-xl font-semibold text-xs text-[#2B2622] border border-[#2B2622]/20 bg-black/5 hover:bg-black/10 flex items-center justify-center gap-1.5">
+            <Receipt size={14} /> Partager / Encaisser la note
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -183,7 +188,11 @@ export default function OrderTaking({
           order={order}
           table={table}
           onCancel={() => setPaying(false)}
-          onConfirm={(method) => { const r = onCheckout(method); setPaying(false); setReceipt(r); }}
+          onConfirm={(method, payments) => {
+            const r = onCheckout(method, payments);
+            setPaying(false);
+            setReceipt(r);
+          }}
         />
       )}
       {receipt && (
@@ -470,108 +479,157 @@ function MenuComposer({ menu, products, onCancel, onConfirm }) {
   );
 }
 
-/* ── Encaissement ──────────────────────────────────────────── */
-
-const PAYMENT_METHODS = [
-  { id: "carte",    label: "Carte",   icon: "💳" },
-  { id: "especes",  label: "Espèces", icon: "💵" },
-  { id: "autre",    label: "Autre",   icon: "👛" },
-];
-
-function PaymentModal({ order, table, onCancel, onConfirm }) {
-  const [method, setMethod] = useState(null);
-  const items = order.items.filter((i) => i.status !== "draft");
-  const total = items.reduce((s, i) => s + i.price * i.qty, 0);
-
-  return (
-    <Modal title={`Encaissement — Table ${table.number}`} onClose={onCancel} wide>
-      <div className="space-y-1 max-h-[280px] overflow-y-auto rf-scrollbar mb-3 pr-1">
-        <div className="grid grid-cols-[1fr_60px_70px_70px] gap-2 text-[10px] font-bold uppercase tracking-wide text-[#8A8378] px-1 pb-1">
-          <span>Article</span><span className="text-center">Qté</span><span className="text-right">P.U.</span><span className="text-right">Total</span>
-        </div>
-        {items.map((it) => (
-          <div key={it.id} className="rounded-lg border border-black/5 bg-black/[.02] px-2.5 py-2">
-            <div className="grid grid-cols-[1fr_60px_70px_70px] gap-2 items-center text-sm">
-              <span className="font-semibold text-[#2B2622] truncate">{it.name}</span>
-              <span className="text-center text-[#5B5346]">{it.qty}</span>
-              <span className="text-right text-[#5B5346]">{money(it.price)}</span>
-              <span className="text-right font-bold text-[#2B2622]">{money(it.price * it.qty)}</span>
-            </div>
-            {it.notes && (
-              <p className={`text-[11px] mt-1 ${noteIndicatesAllergy(it.notes) ? "font-extrabold" : "text-[#8A8378]"}`}
-                style={noteIndicatesAllergy(it.notes) ? { color: "#C1361B" } : undefined}>
-                {noteIndicatesAllergy(it.notes) ? "⚠ ALLERGIE — " : "↳ "}{it.notes}
-              </p>
-            )}
-          </div>
-        ))}
-      </div>
-      <div className="flex justify-between text-base font-bold text-[#2B2622] py-2 border-t border-black/10 mb-4">
-        <span>Total à payer</span><span>{money(total)}</span>
-      </div>
-      <p className="text-xs font-semibold text-[#6B6355] mb-2">Moyen de paiement</p>
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        {PAYMENT_METHODS.map((m) => {
-          const selected = method === m.id;
-          return (
-            <button key={m.id} onClick={() => setMethod(m.id)}
-              className="rf-tap flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border-2 text-xs font-semibold"
-              style={{ borderColor: selected ? "#C1440E" : "rgba(0,0,0,.1)", background: selected ? "#C1440E12" : "white", color: selected ? "#C1440E" : "#5B5346" }}>
-              <span className="text-2xl">{m.icon}</span> {m.label}
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex gap-2">
-        <button onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
-        <button disabled={!method} onClick={() => onConfirm(method)} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: "#2B2622" }}>
-          Confirmer le paiement
-        </button>
-      </div>
-    </Modal>
-  );
-}
+/* ── Encaissement & Reçus ──────────────────────────────────── */
 
 function ReceiptModal({ receipt, onClose }) {
   const date = new Date(receipt.paidAt);
-  const methodLabel = { carte: "Carte bancaire", especes: "Espèces", autre: "Autre" }[receipt.paymentMethod] || receipt.paymentMethod;
+  const isSplit = receipt.payments && receipt.payments.length > 1;
+  const [selectedPaymentIndex, setSelectedPaymentIndex] = useState(-1); // -1: Global, >=0: individual
+
+  const activePayment = selectedPaymentIndex >= 0 ? receipt.payments[selectedPaymentIndex] : null;
+
+  const methodLabelMap = {
+    carte: "Carte bancaire",
+    especes: "Espèces",
+    autre: "Autre",
+    partage: "Addition partagée",
+  };
+
+  const getMethodLabel = (m) => methodLabelMap[m] || m || "—";
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6" onClick={onClose}>
-      <div className="rf-anim-pop bg-white rounded-2xl w-full max-w-sm max-h-[85vh] overflow-y-auto rf-scrollbar shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div id="rf-print-receipt" className="rf-ticket p-5">
-          <div className="text-center mb-3">
-            <p className="rf-black text-lg tracking-wide">RESTOFLOW</p>
-            <p className="text-[10px] opacity-70">Ticket de caisse</p>
-          </div>
-          <div className="rf-mono text-[11px] space-y-0.5 mb-2">
-            <div className="flex justify-between"><span>Table</span><span>{receipt.tableNumber ?? "—"}</span></div>
-            <div className="flex justify-between"><span>Commande</span><span>#{receipt.orderId.slice(-4).toUpperCase()}</span></div>
-            <div className="flex justify-between"><span>Date</span><span>{date.toLocaleDateString("fr-FR")}</span></div>
-            <div className="flex justify-between"><span>Heure</span><span>{date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
-            <div className="flex justify-between"><span>Serveur</span><span>{receipt.server}</span></div>
-          </div>
-          <div className="border-t border-dashed border-black/30 my-2" />
-          <div className="space-y-1">
-            {receipt.items.map((it) => (
-              <div key={it.id} className="rf-mono text-[12px]">
-                <div className="flex justify-between gap-2">
-                  <span className="flex-1">{it.qty} × {it.name}</span>
-                  <span>{money(it.price * it.qty)}</span>
-                </div>
-                <div className="flex justify-between text-[10px] opacity-60"><span>{money(it.price)} / unité</span></div>
-              </div>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 sm:p-6" onClick={onClose}>
+      <div className="rf-anim-pop bg-white rounded-2xl w-full max-w-sm max-h-[88vh] flex flex-col overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
+        {/* Onglets de sélection de ticket si paiement partagé */}
+        {isSplit && (
+          <div className="p-2 border-b border-black/10 bg-[#FAF6EE] flex items-center gap-1 overflow-x-auto rf-scrollbar">
+            <button
+              onClick={() => setSelectedPaymentIndex(-1)}
+              className={`rf-tap px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+                selectedPaymentIndex === -1
+                  ? "bg-[#2B2622] text-white"
+                  : "bg-black/5 text-[#5B5346] hover:bg-black/10"
+              }`}
+            >
+              Ticket Global
+            </button>
+            {receipt.payments.map((p, idx) => (
+              <button
+                key={p.id || idx}
+                onClick={() => setSelectedPaymentIndex(idx)}
+                className={`rf-tap px-2 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+                  selectedPaymentIndex === idx
+                    ? "bg-[#2B2622] text-white"
+                    : "bg-black/5 text-[#5B5346] hover:bg-black/10"
+                }`}
+              >
+                {p.label || `Part ${idx + 1}`}
+              </button>
             ))}
           </div>
-          <div className="border-t border-dashed border-black/30 my-2" />
-          <div className="rf-mono text-[11px] flex justify-between opacity-80"><span>Sous-total</span><span>{money(receipt.total)}</span></div>
-          <div className="rf-mono text-[14px] flex justify-between font-bold mt-1"><span>TOTAL TTC</span><span>{money(receipt.total)}</span></div>
-          <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5"><span>Paiement</span><span>{methodLabel}</span></div>
-          <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>
+        )}
+
+        <div className="flex-1 overflow-y-auto rf-scrollbar p-5">
+          <div id="rf-print-receipt" className="rf-ticket">
+            <div className="text-center mb-3">
+              <p className="rf-black text-lg tracking-wide">RESTOFLOW</p>
+              <p className="text-[10px] opacity-70">
+                {activePayment ? `Reçu individuel — ${activePayment.label}` : "Ticket de caisse"}
+              </p>
+            </div>
+
+            <div className="rf-mono text-[11px] space-y-0.5 mb-2">
+              <div className="flex justify-between"><span>Table</span><span>{receipt.tableNumber ?? "—"}</span></div>
+              <div className="flex justify-between"><span>Commande</span><span>#{receipt.orderId.slice(-4).toUpperCase()}</span></div>
+              <div className="flex justify-between"><span>Date</span><span>{date.toLocaleDateString("fr-FR")}</span></div>
+              <div className="flex justify-between"><span>Heure</span><span>{date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
+              <div className="flex justify-between"><span>Serveur</span><span>{receipt.server}</span></div>
+              {activePayment && (
+                <div className="flex justify-between font-bold text-[#2B2622]">
+                  <span>Convive / Part</span><span>{activePayment.label}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-dashed border-black/30 my-2" />
+
+            {/* Articles */}
+            <div className="space-y-1">
+              {activePayment && activePayment.items && activePayment.items.length > 0 ? (
+                activePayment.items.map((it, idx) => (
+                  <div key={idx} className="rf-mono text-[12px]">
+                    <div className="flex justify-between gap-2">
+                      <span className="flex-1">{it.qty} × {it.name}</span>
+                      <span>{money(it.price * (typeof it.qty === 'number' ? it.qty : 1))}</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                receipt.items.map((it) => (
+                  <div key={it.id} className="rf-mono text-[12px]">
+                    <div className="flex justify-between gap-2">
+                      <span className="flex-1">{it.qty} × {it.name}</span>
+                      <span>{money(it.price * it.qty)}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px] opacity-60"><span>{money(it.price)} / unité</span></div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="border-t border-dashed border-black/30 my-2" />
+
+            {/* Totaux */}
+            {activePayment ? (
+              <>
+                <div className="rf-mono text-[11px] flex justify-between opacity-80">
+                  <span>Total commande</span><span>{money(receipt.total)}</span>
+                </div>
+                <div className="rf-mono text-[14px] flex justify-between font-bold mt-1">
+                  <span>PART RÉGLÉE</span><span>{money(activePayment.amount)}</span>
+                </div>
+                <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
+                  <span>Moyen de règlement</span><span>{getMethodLabel(activePayment.method)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="rf-mono text-[11px] flex justify-between opacity-80">
+                  <span>Sous-total</span><span>{money(receipt.total)}</span>
+                </div>
+                <div className="rf-mono text-[14px] flex justify-between font-bold mt-1">
+                  <span>TOTAL TTC</span><span>{money(receipt.total)}</span>
+                </div>
+                <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
+                  <span>Paiement</span><span>{getMethodLabel(receipt.paymentMethod)}</span>
+                </div>
+
+                {isSplit && (
+                  <div className="mt-3 pt-2 border-t border-dashed border-black/20">
+                    <p className="rf-mono text-[10px] font-bold uppercase tracking-wider mb-1">
+                      Ventilation des règlements ({receipt.payments.length}) :
+                    </p>
+                    <div className="space-y-1">
+                      {receipt.payments.map((p, idx) => (
+                        <div key={p.id || idx} className="rf-mono text-[11px] flex justify-between">
+                          <span className="opacity-80">• {p.label} ({getMethodLabel(p.method)})</span>
+                          <span className="font-bold">{money(p.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>
+          </div>
         </div>
-        <div className="p-4 border-t border-black/10 flex gap-2">
+
+        <div className="p-4 border-t border-black/10 flex gap-2 bg-white">
           <button onClick={onClose} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Fermer</button>
           <button onClick={() => window.print()} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5" style={{ background: "#C1440E" }}>
-            🖨️ Imprimer le ticket
+            🖨️ Imprimer {activePayment ? "cette part" : "le ticket"}
           </button>
         </div>
       </div>

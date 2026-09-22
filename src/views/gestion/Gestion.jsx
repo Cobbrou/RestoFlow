@@ -543,8 +543,8 @@ function MenuForm({ menu, products, onCancel, onSave }) {
    HISTORIQUE DES PAIEMENTS
 ══════════════════════════════════════════════════════════════ */
 
-const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, autre: Wallet };
-const METHOD_LABELS = { carte: "Carte",    especes: "Espèces", autre: "Autre" };
+const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, autre: Wallet, partage: Users };
+const METHOD_LABELS = { carte: "Carte",    especes: "Espèces", autre: "Autre",  partage: "Partagé" };
 
 function HistoryManager({ history }) {
   const [search,       setSearch]       = useState("");
@@ -577,7 +577,7 @@ function HistoryManager({ history }) {
           />
         </div>
         <div className="flex gap-1">
-          {[null, "carte", "especes", "autre"].map((m) => {
+          {[null, "carte", "especes", "partage", "autre"].map((m) => {
             const Icon   = m ? METHOD_ICONS[m] : Receipt;
             const active = methodFilter === m;
             return (
@@ -675,6 +675,21 @@ function HistoryManager({ history }) {
               {detail.paymentMethod && (
                 <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
                   <span>Paiement</span><span>{METHOD_LABELS[detail.paymentMethod] || detail.paymentMethod}</span>
+                </div>
+              )}
+              {detail.payments && detail.payments.length > 1 && (
+                <div className="mt-3 pt-2 border-t border-dashed border-black/20">
+                  <p className="rf-mono text-[10px] font-bold uppercase tracking-wider mb-1">
+                    Ventilation des règlements ({detail.payments.length}) :
+                  </p>
+                  <div className="space-y-1">
+                    {detail.payments.map((p, idx) => (
+                      <div key={p.id || idx} className="rf-mono text-[11px] flex justify-between">
+                        <span className="opacity-80">• {p.label} ({METHOD_LABELS[p.method] || p.method})</span>
+                        <span className="font-bold">{money(p.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>

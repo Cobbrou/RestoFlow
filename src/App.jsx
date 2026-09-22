@@ -14,6 +14,9 @@ import { PRODUCTS_SEED } from "./data/products.js";
 import { menuToProduct } from "./utils/index.js";
 import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
 
+const initialTables = seedTables();
+const initialOrders = seedOrders(initialTables);
+
 /**
  * App — Composant racine de RestoFlow.
  *
@@ -31,8 +34,8 @@ export default function App() {
   const isMobile = containerWidth < 640;
 
   // ── État principal ─────────────────────────────────────────
-  const [tables,   setTables]   = useState(seedTables);
-  const [orders,   setOrders]   = useState([]);
+  const [tables,   setTables]   = useState(initialTables);
+  const [orders,   setOrders]   = useState(initialOrders);
   const [history,  setHistory]  = useState(seedHistory);
   const [products, setProducts] = useState(PRODUCTS_SEED);
   const [menus,    setMenus]    = useState(seedMenus);
@@ -198,15 +201,22 @@ export default function App() {
 
   /**
    * Encaissement : archive dans l'historique, libère la table.
+   * Prend en charge les paiements uniques ou partagés (multi-règlements).
    * @returns {object|null} ticket de caisse
    */
-  const checkoutOrder = (orderId, paymentMethod) => {
+  const checkoutOrder = (orderId, paymentMethod, payments = null) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return null;
     const table    = tables.find((t) => t.id === order.tableId);
     const paidItems = order.items.filter((i) => i.status !== "draft");
     const total    = paidItems.reduce((s, i) => s + i.price * i.qty, 0);
     const paidAt   = Date.now();
+
+    const paymentList = payments && payments.length > 0 ? payments : [
+      { id: uid("pay"), label: "Paiement unique", amount: total, method: paymentMethod, paidAt },
+    ];
+
+    const finalMethod = paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
     const receipt = {
       id: uid("rcpt"),
@@ -215,13 +225,24 @@ export default function App() {
       server:        order.server,
       items:         paidItems,
       total,
-      paymentMethod,
+      paymentMethod: finalMethod,
+      payments:      paymentList,
       paidAt,
     };
 
     setHistory((prev) => [
       ...prev,
-      { id: uid("hist"), createdAt: paidAt, server: order.server, items: paidItems, total, tableNumber: table?.number, paymentMethod, orderId: order.id },
+      {
+        id: uid("hist"),
+        createdAt: paidAt,
+        server: order.server,
+        items: paidItems,
+        total,
+        tableNumber: table?.number,
+        paymentMethod: finalMethod,
+        payments: paymentList,
+        orderId: order.id,
+      },
     ]);
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
     setTables((prev) => prev.map((t) => (t.id === order.tableId ? { ...t, alert: false } : t)));
@@ -322,7 +343,7 @@ export default function App() {
           onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
           onSend={() => sendToKitchen(activeOrder.id)}
           onServe={() => serveAndMaybeFree(activeOrder.id)}
-          onCheckout={(method) => checkoutOrder(activeOrder.id, method)}
+          onCheckout={(method, payments) => checkoutOrder(activeOrder.id, method, payments)}
           onBackToPlan={() => setServerView("plan")}
           onToast={pushToast}
         />
