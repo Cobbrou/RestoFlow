@@ -6,6 +6,8 @@ import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
 
+import { hasPermission } from "../../utils/permissions.js";
+
 /**
  * Gestion — Back-office avec 5 sous-vues :
  *  - tables     : gestion du plan de salle (CRUD + réservations)
@@ -15,7 +17,7 @@ import StaffRoleManager from "./StaffRoleManager.jsx";
  *  - equipe     : rôles, permissions et membres du personnel
  */
 export default function Gestion(props) {
-  const { view, setView } = props;
+  const { view, setView, currentStaff, roles } = props;
 
   const tabs = [
     { id: "tables",     label: "Tables",         icon: Table2 },
@@ -25,6 +27,28 @@ export default function Gestion(props) {
     { id: "equipe",     label: "Équipe & Rôles", icon: ShieldCheck },
   ];
 
+  const currentRoleObj = roles?.find((r) => r.id === currentStaff?.roleId);
+
+  const canAccessSubtab = (tabId) => {
+    if (!currentStaff) return false;
+    if (currentStaff.roleId === "admin") return true;
+    switch (tabId) {
+      case "tables":     return hasPermission(currentStaff, currentRoleObj, "gestion.tables");
+      case "produits":   return hasPermission(currentStaff, currentRoleObj, "gestion.products");
+      case "menus":      return hasPermission(currentStaff, currentRoleObj, "gestion.menus");
+      case "historique": return hasPermission(currentStaff, currentRoleObj, "caisse.history");
+      case "equipe":     return hasPermission(currentStaff, currentRoleObj, "gestion.staff");
+      default:           return false;
+    }
+  };
+
+  const visibleTabs = tabs.filter((t) => canAccessSubtab(t.id));
+
+  // Auto-redirection si la vue active n'est pas autorisée
+  if (visibleTabs.length > 0 && !canAccessSubtab(view)) {
+    setView(visibleTabs[0].id);
+  }
+
   return (
     <div className="p-5">
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
@@ -33,7 +57,7 @@ export default function Gestion(props) {
           <p className="text-sm text-[#6B6355]">Tables, catalogue produits, menus, historique des encaissements et gestion de l'équipe</p>
         </div>
         <div className="flex gap-1 p-1 rounded-full bg-black/5 flex-wrap">
-          {tabs.map((t) => {
+          {visibleTabs.map((t) => {
             const Icon = t.icon;
             const active = view === t.id;
             return (
@@ -247,7 +271,7 @@ function ProductManager({ products, onAddProduct, onUpdateProduct, onDeleteProdu
             <div key={p.id} className="rounded-xl border border-black/10 bg-white p-3 flex gap-3">
               <div className="w-11 h-11 rounded-lg flex items-center justify-center text-xl shrink-0"
                 style={{ background: (cat?.accent || "#999") + "22", filter: available ? "none" : "grayscale(1)" }}>
-                {p.emoji}
+                {p.emoji || "🍽️"}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-1">
@@ -386,7 +410,7 @@ function MenuManager({ products, menus, onAddMenu, onUpdateMenu, onDeleteMenu })
             <div key={m.id} className="rounded-xl border border-black/10 bg-white p-3.5">
               <div className="flex items-start justify-between gap-2 mb-1.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-xl">{m.emoji}</span>
+                  <span className="text-xl">{m.emoji || "📋"}</span>
                   <span className="rf-display text-base font-semibold text-[#2B2622]">{m.name}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">

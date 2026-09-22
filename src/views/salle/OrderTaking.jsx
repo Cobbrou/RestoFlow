@@ -282,7 +282,7 @@ function ProductCard({ p, isMobile, onTap }) {
       )}
       <div className={`rounded-lg flex items-center justify-center shrink-0 ${isMobile ? "w-14 h-14 text-3xl" : "w-12 h-12 text-2xl"}`}
         style={{ background: (cat?.accent || "#999") + "22", filter: available ? "none" : "grayscale(1)" }}>
-        {p.emoji}
+        {p.emoji || "🍽️"}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-1">

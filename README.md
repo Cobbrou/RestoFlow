@@ -165,11 +165,11 @@ Pour le déploiement multi-postes en restaurant avec plusieurs tablettes synchro
 
 Le projet évolue selon une feuille de route structurée en plusieurs jalons :
 
-### 🟡 Phase 1 : Câblage Backend & Synchronisation Temps Réel *(Prochaine étape)*
-- [ ] Création du serveur **NestJS** et modélisation du schéma **Prisma**.
-- [ ] Remplacement de l'état React local par une synchronisation **Socket.IO** multi-écrans.
-- [ ] Gestion des reconnexions réseau automatiques avec mise en mémoire tampon des requêtes.
-- [ ] Authentification par code PIN individuel à la prise de commande pour traçabilité du serveur.
+### 🟢 Phase 1 : Câblage Backend & Synchronisation Temps Réel *(Terminée)*
+- [x] Création du serveur **NestJS** et modélisation du schéma **Prisma**.
+- [x] Remplacement de l'état React local par une synchronisation **Socket.IO** multi-écrans.
+- [x] Gestion des reconnexions réseau automatiques avec mise en mémoire tampon des requêtes.
+- [x] Authentification par code PIN individuel à la prise de commande pour traçabilité du serveur.
 
 ### 🟢 Phase 2 : Gestion des Stocks & Fiches Techniques
 - [ ] Décompte automatique des stocks d'ingrédients à chaque validation de commande.

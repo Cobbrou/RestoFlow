@@ -1,0 +1,115 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Role {
+  id          String   @id
+  name        String
+  description String
+  color       String
+  isSystem    Boolean  @default(false)
+  permissions String   // JSON array string of permission strings, e.g. '["salle.view", ...]'
+  staff       Staff[]
+}
+
+model Staff {
+  id        String   @id
+  name      String
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id])
+  pin       String   // PIN code (4 digits, e.g. "1011")
+  email     String?
+  phone     String?
+  active    Boolean  @default(true)
+  avatarBg  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+}
+
+model Table {
+  id                String   @id
+  number            Int      @unique
+  seats             Int
+  x                 Float
+  y                 Float
+  reserved          Boolean  @default(false)
+  alert             Boolean  @default(false)
+  reservationName   String?
+  reservationPeople Int?
+  reservationTime   String?
+  reservationNote   String?
+  orders            Order[]
+}
+
+model Category {
+  id     String @id
+  name   String
+  accent String
+}
+
+model Product {
+  id        String   @id
+  name      String
+  cat       String
+  price     Float
+  desc      String
+  emoji     String?  @default("🍽️")
+  allergens String   // JSON array string of allergen tags, e.g. '["Gluten", "Lactose"]'
+  available Boolean  @default(true)
+  isMenu    Boolean  @default(false)
+}
+
+model Menu {
+  id        String  @id
+  name      String
+  price     Float
+  desc      String
+  emoji     String? @default("📋")
+  available Boolean @default(true)
+  groups    String  // JSON string containing menu step choices and options
+}
+
+model Order {
+  id        String      @id
+  tableId   String
+  table     Table       @relation(fields: [tableId], references: [id])
+  serverId  String?
+  serverRef Staff?      @relation(fields: [serverId], references: [id])
+  server    String      // Cached server display name (e.g. "Léa")
+  status    String      @default("open") // "open" | "closed"
+  createdAt DateTime    @default(now())
+  sentAt    DateTime?
+  items     OrderItem[]
+}
+
+model OrderItem {
+  id          String   @id
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  name        String
+  price       Float
+  qty         Int      @default(1)
+  notes       String?  @default("")
+  status      String   @default("draft") // "draft" | "new" | "preparing" | "ready" | "served"
+  isMenu      Boolean  @default(false)
+  composition String?  // JSON string of selected items if composed menu
+}
+
+model OrderHistory {
+  id            String   @id
+  orderId       String
+  tableNumber   Int?
+  server        String
+  items         String   // JSON snapshot of paid items
+  total         Float
+  paymentMethod String
+  payments      String   // JSON snapshot of payment breakdowns
+  createdAt     DateTime @default(now())
+}

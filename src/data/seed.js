@@ -26,7 +26,7 @@ function makeItem(status, notes) {
 /** Génère les tables initiales à partir du layout */
 export function seedTables() {
   return TABLE_LAYOUT.map((t) => ({
-    id: uid("tbl"),
+    id: `tbl_${t.number}`,
     number: t.number,
     seats: t.seats,
     x: t.x,
