@@ -245,7 +245,21 @@ export default function App() {
       },
     ]);
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
-    setTables((prev) => prev.map((t) => (t.id === order.tableId ? { ...t, alert: false } : t)));
+    setTables((prev) =>
+      prev.map((t) =>
+        t.id === order.tableId
+          ? {
+              ...t,
+              alert: false,
+              reserved: false,
+              reservationName: "",
+              reservationPeople: "",
+              reservationTime: "",
+              reservationNote: "",
+            }
+          : t
+      )
+    );
     return receipt;
   };
 
