@@ -1,35 +1,38 @@
 import { useState } from "react";
-import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet } from "lucide-react";
+import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { isAvailable, money } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
+import StaffRoleManager from "./StaffRoleManager.jsx";
 
 /**
- * Gestion — Back-office avec 4 sous-vues :
+ * Gestion — Back-office avec 5 sous-vues :
  *  - tables     : gestion du plan de salle (CRUD + réservations)
  *  - produits   : catalogue produits (CRUD + disponibilité)
  *  - menus      : menus composés (CRUD)
  *  - historique : historique des paiements encaissés
+ *  - equipe     : rôles, permissions et membres du personnel
  */
 export default function Gestion(props) {
   const { view, setView } = props;
 
   const tabs = [
-    { id: "tables",     label: "Tables",     icon: Table2 },
-    { id: "produits",   label: "Produits",   icon: Package },
-    { id: "menus",      label: "Menus",      icon: LayoutList },
-    { id: "historique", label: "Historique", icon: Receipt },
+    { id: "tables",     label: "Tables",         icon: Table2 },
+    { id: "produits",   label: "Produits",       icon: Package },
+    { id: "menus",      label: "Menus",          icon: LayoutList },
+    { id: "historique", label: "Historique",     icon: Receipt },
+    { id: "equipe",     label: "Équipe & Rôles", icon: ShieldCheck },
   ];
 
   return (
     <div className="p-5">
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="rf-display text-2xl font-semibold text-[#2B2622]">Gestion</h1>
-          <p className="text-sm text-[#6B6355]">Tables, catalogue produits, menus et historique des paiements</p>
+          <p className="text-sm text-[#6B6355]">Tables, catalogue produits, menus, historique des encaissements et gestion de l'équipe</p>
         </div>
-        <div className="flex gap-1 p-1 rounded-full bg-black/5">
+        <div className="flex gap-1 p-1 rounded-full bg-black/5 flex-wrap">
           {tabs.map((t) => {
             const Icon = t.icon;
             const active = view === t.id;
@@ -48,6 +51,7 @@ export default function Gestion(props) {
       {view === "produits"   && <ProductManager {...props} />}
       {view === "menus"      && <MenuManager {...props} />}
       {view === "historique" && <HistoryManager history={props.history || []} />}
+      {view === "equipe"     && <StaffRoleManager {...props} />}
     </div>
   );
 }

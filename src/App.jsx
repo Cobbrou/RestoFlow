@@ -11,6 +11,7 @@ import Gestion from "./views/gestion/Gestion.jsx";
 
 import { seedTables, seedOrders, seedHistory, seedMenus, uid } from "./data/seed.js";
 import { PRODUCTS_SEED } from "./data/products.js";
+import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct } from "./utils/index.js";
 import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
 
@@ -21,7 +22,7 @@ const initialOrders = seedOrders(initialTables);
  * App — Composant racine de RestoFlow.
  *
  * Gère l'état global de l'application :
- *  - tables, orders, history, products, menus
+ *  - tables, orders, history, products, menus, staff, roles
  *  - role actif (serveur | cuisine | dashboard | gestion)
  *  - toasts et notifications audio
  *
@@ -39,12 +40,14 @@ export default function App() {
   const [history,  setHistory]  = useState(seedHistory);
   const [products, setProducts] = useState(PRODUCTS_SEED);
   const [menus,    setMenus]    = useState(seedMenus);
+  const [staff,    setStaff]    = useState(INITIAL_STAFF);
+  const [roles,    setRoles]    = useState(INITIAL_ROLES);
 
   // ── Navigation ─────────────────────────────────────────────
   const [role,        setRole]        = useState("serveur");   // serveur | cuisine | dashboard | gestion
   const [serverView,  setServerView]  = useState("plan");      // plan | commande
   const [cuisineView, setCuisineView] = useState("board");     // board | table
-  const [gestionView, setGestionView] = useState("tables");    // tables | produits | menus | historique
+  const [gestionView, setGestionView] = useState("tables");    // tables | produits | menus | historique | equipe
 
   // ── Table active (vue commande) ────────────────────────────
   const [activeTableId, setActiveTableId] = useState(null);
@@ -311,6 +314,15 @@ export default function App() {
   const updateMenu = (id, data) => setMenus((prev) => prev.map((m) => (m.id === id ? { ...m, ...data } : m)));
   const deleteMenu = (id) => setMenus((prev) => prev.filter((m) => m.id !== id));
 
+  // ── Actions Gestion : équipe & rôles ────────────────────────
+  const addStaff    = (data) => setStaff((prev) => [...prev, { id: uid("stf"), ...data }]);
+  const updateStaff = (id, data) => setStaff((prev) => prev.map((s) => (s.id === id ? { ...s, ...data } : s)));
+  const deleteStaff = (id) => setStaff((prev) => prev.filter((s) => s.id !== id));
+
+  const addRole    = (data) => setRoles((prev) => [...prev, { id: uid("role"), isSystem: false, ...data }]);
+  const updateRole = (id, data) => setRoles((prev) => prev.map((r) => (r.id === id ? { ...r, ...data } : r)));
+  const deleteRole = (id) => setRoles((prev) => prev.filter((r) => r.id !== id));
+
   // ── Rendu ──────────────────────────────────────────────────
   const activeTable = tables.find((t) => t.id === activeTableId);
   const activeOrder = activeTable ? getActiveOrder(activeTable.id) : null;
@@ -392,6 +404,8 @@ export default function App() {
           products={products}
           menus={menus}
           history={history}
+          staff={staff}
+          roles={roles}
           onAddTable={addTable}
           onUpdateTable={updateTable}
           onDeleteTable={deleteTable}
@@ -401,6 +415,12 @@ export default function App() {
           onAddMenu={addMenu}
           onUpdateMenu={updateMenu}
           onDeleteMenu={deleteMenu}
+          onAddStaff={addStaff}
+          onUpdateStaff={updateStaff}
+          onDeleteStaff={deleteStaff}
+          onAddRole={addRole}
+          onUpdateRole={updateRole}
+          onDeleteRole={deleteRole}
         />
       )}
     </div>
