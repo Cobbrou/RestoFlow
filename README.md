@@ -22,19 +22,26 @@
 1. [Contexte initial du projet](#-contexte-initial-du-projet)
 2. [Fonctionnalités clés (Features)](#-fonctionnalités-clés-features)
    - [🛎️ Salle & Prise de commande](#1-salle--prise-de-commande)
-   - [💳 Caisse & Encaissement multi-modes](#2-caisse--encaissement-multi-modes)
-   - [🍳 Cuisine (KDS - Kitchen Display System)](#3-cuisine-kds---kitchen-display-system)
-   - [📊 Tableau de bord (Dashboard)](#4-tableau-de-bord-dashboard)
-   - [📦 Stocks, Ingrédients & Fiches Techniques](#5-stocks-ingrédients--fiches-techniques)
-   - [👥 Équipe, Sécurité & Droits d'accès (RBAC)](#6-équipe-sécurité--droits-daccès-rbac)
-   - [⚡ Synchronisation Temps Réel & Mode Déconnecté](#7-synchronisation-temps-réel--mode-déconnecté)
+   - [💳 Caisse Pro, Encaissement multi-modes & TPE](#2-caisse-pro-encaissement-multi-modes--tpe)
+   - [🖨️ Impression Thermique ESC/POS](#3-impression-thermique-escpos)
+   - [🍳 Cuisine (KDS - Kitchen Display System)](#4-cuisine-kds---kitchen-display-system)
+   - [📊 Tableau de bord (Dashboard)](#5-tableau-de-bord-dashboard)
+   - [📦 Stocks, Ingrédients & Fiches Techniques](#6-stocks-ingrédients--fiches-techniques)
+   - [👥 Équipe, Sécurité & Droits d'accès (RBAC)](#7-équipe-sécurité--droits-daccès-rbac)
+   - [⚡ Synchronisation Temps Réel & Mode Déconnecté](#8-synchronisation-temps-réel--mode-déconnecté)
 3. [Stack Technique](#-stack-technique)
 4. [Prochaines Features & Roadmap](#-prochaines-features--roadmap)
    - [Jalons de la Roadmap (v1.0)](#jalons-de-la-roadmap-v10)
    - [Perspectives & Idées futures (Post-v1.0)](#perspectives--idées-futures-post-v10)
-5. [Architecture du Projet](#-architecture-du-projet)
-6. [Démarrage Rapide](#-démarrage-rapide)
-7. [Règles Métier Clés](#-règles-métier-clés)
+5. [Axes d'Amélioration & Correctifs Identifiés](#-axes-damélioration--correctifs-identifiés)
+   - [🔒 Sécurité & Gestion des PINs](#1-sécurité--gestion-des-codes-pin-prioritaire)
+   - [🏗️ Refactorisation Backend & Découpage Modulaire](#2-refactorisation-backend--découpage-modulaire)
+   - [⚛️ Architecture Frontend & Gestion d'État](#3-architecture-frontend--gestion-détat)
+   - [🖨️ Impression Réseau Hardware Directe](#4-impression-réseau-hardware-directe-tcp-raw)
+   - [🧪 Tests Automatisés & Fiabilité Financière](#5-tests-automatisés--fiabilité-financière)
+6. [Architecture du Projet](#-architecture-du-projet)
+7. [Démarrage Rapide](#-démarrage-rapide)
+8. [Règles Métier Clés](#-règles-métier-clés)
 
 ---
 
@@ -65,16 +72,28 @@ Dans la restauration physique traditionnelle, les dysfonctionnements proviennent
   - Suivi du cycle de vie des articles : `Brouillon` ➔ `Envoyé` ➔ `En préparation` ➔ `Prêt` ➔ `Servi`.
   - **Gestion des stocks en direct** : badges d'avertissement de stock restant (*"Plus que X portions"*) et verrouillage automatique des plats en rupture.
 
-### 2. 💳 Caisse & Encaissement multi-modes
+### 2. 💳 Caisse Pro, Encaissement multi-modes & TPE
 Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'addition** pour accélérer le départ des clients :
 1. **Paiement unique** : règlement direct de la note totale en un clic (Carte, Espèces, Autre).
 2. **Parts égales** : division automatique entre 2 et 20 convives avec lissage équitable des centimes résiduels.
 3. **Par article (Split itemisé)** : affectation nominative des plats et boissons à chaque convive avec calcul du sous-total.
 4. **Montant libre / Proportionnel** : paiement libre en plusieurs règlements successifs (% ou montant saisi), avec suivi du reste à payer.
-- Génération d'un **ticket de caisse dématérialisé (reçu)** complet.
-- Libération automatique de la table et archivage dans le journal de caisse après règlement.
+- **Simulateur TPE bancaire interactif (`TpeModal`)** : flux réaliste de paiement par Carte Bancaire avec animations de paiement sans-contact (NFC) et puce EMV + code PIN, gestion des échecs et génération de télécollecte.
+- **Gestion des remises & codes promotionnels (`DiscountModal`)** : application de remises en pourcentage ou montant fixe, codes promo enregistrés (`HAPPYHOUR`, `STAFF`, `FIDELITE10`...) ou motif libre avec validation par rôle.
+- **Moteur de ventilation fiscale de la TVA** : décomposition normalisée de la TVA (taux réduit à 10% sur l'alimentaire et softs, taux normal à 20% sur les alcools) avec répartition proportionnelle au centime près des remises appliquées.
+- **Numérotation séquentielle certifiée** : attribution automatique d'un numéro d'ordre unique chronologique (ex. `FAC-2026-0001`).
 
-### 3. 🍳 Cuisine (KDS - Kitchen Display System)
+### 3. 🖨️ Impression Thermique ESC/POS
+- **Générateur binaire ESC/POS (`escpos.js`)** : création de flux d'instructions normalisés pour imprimantes thermiques compatibles 80mm et 58mm (Epson, Star Micronics, Munbyn...).
+- **4 formats de tickets dédiés** :
+  - *Ticket client (Note / Facturette)* : mentions légales obligatoires, coordonnées complètes, détail des articles, ventilation TVA et pied de page personnalisé.
+  - *Bon de commande cuisine (KDS ticket)* : gros caractères gras, table, heure d'envoi, cuisson et allergènes mis en avant.
+  - *Bon de commande bar* : format compact 58mm pour le barman.
+  - *Ticket commerçant TPE* : récapitulatif de transaction bancaire avec montant, horodatage et numéro d'autorisation.
+- **Modale de prévisualisation thermique réaliste (`ThermalReceiptPreview`)** : rendu fidèle effet papier thermique avec découpe dentelée, bascule 80mm/58mm et impression directe via CSS `@media print`.
+- **Gestionnaire Caisse & Imprimantes (`CaisseSettingsManager`)** : configuration back-office des coordonnées de l'établissement (SIRET, N° TVA, raison sociale), des imprimantes réseau (IP/port 9100) ou USB, et du catalogue de codes promotionnels.
+
+### 4. 🍳 Cuisine (KDS - Kitchen Display System)
 - **Interface sombre immersive (`#14110D`)** : optimisée pour réduire la fatigue oculaire et maximiser la lisibilité dans l'ambiance de cuisine.
 - **Deux modes d'affichage** :
   - *Board Kanban* : répartition des commandes en 3 colonnes de flux (**Nouvelles**, **En préparation**, **Prêtes**).
@@ -82,7 +101,7 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
 - **Chronomètre d'urgence en direct (TicketTimer)** : vert (< 10 min), ambre (10-20 min), rouge clignotant (> 20 min).
 - **Notifications audio & toasts** : signal sonore distinct (synthèse Web Audio API) et notification toast lors de l'arrivée d'un bon ou du passage à l'état prêt.
 
-### 4. 📊 Tableau de bord (Dashboard)
+### 5. 📊 Tableau de bord (Dashboard)
 - **KPIs en temps réel** : Chiffre d'affaires cumulé, nombre de commandes traitées, panier moyen et taux d'occupation des tables.
 - **Graphiques d'analyse (Recharts)** :
   - Évolution du chiffre d'affaires sur les 7 derniers jours (AreaChart).
@@ -90,7 +109,7 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
   - Top des produits les plus vendus (BarChart horizontal).
 - **Filtres temporels** : *Aujourd'hui*, *Cette semaine*, *Historique complet*.
 
-### 5. 📦 Stocks, Ingrédients & Fiches Techniques
+### 6. 📦 Stocks, Ingrédients & Fiches Techniques
 - **Gestion des Stocks (`StockManager`)** :
   - Suivi des ingrédients avec quantités réelles, unités de mesure (`g`, `ml`, `pièce`...) et seuils d'alerte critique.
   - Décompte automatique des stocks à chaque commande envoyée en cuisine via transaction ACID.
@@ -102,7 +121,7 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
   - Calcul dynamique du coût de revient portion (**Food Cost**), de la marge brute unitaire (€) et du coefficient multiplicateur.
   - Marqueur d'ingrédient critique : bascule automatique du plat en rupture dès épuisement de l'ingrédient.
 
-### 6. 👥 Équipe, Sécurité & Droits d'accès (RBAC)
+### 7. 👥 Équipe, Sécurité & Droits d'accès (RBAC)
 - **Authentification par Code PIN individuel** :
   - Clavier numérique tactile virtuel (`PinPadModal`) permettant un changement d'opérateur rapide entre deux prises de commande.
   - Masquage / affichage sécurisé du code PIN.
@@ -110,7 +129,7 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
   - Rôles personnalisables (Serveur, Chef de rang, Cuisine, Manager, Admin) avec palette de couleurs.
   - Matrice granulaire de permissions découpée par domaine : Salle, Cuisine, Gestion, Caisse et Administration.
 
-### 7. ⚡ Synchronisation Temps Réel & Mode Déconnecté
+### 8. ⚡ Synchronisation Temps Réel & Mode Déconnecté
 - **Passerelle WebSockets (Socket.IO)** : diffusion instantanée de tous les événements (nouvelles commandes, changements de statut, alertes de stock, règlements).
 - **Tolérance aux pannes réseau** :
   - Indicateur visuel d'état de connexion (`ConnectionBadge`).
@@ -151,18 +170,50 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
 |---|---|---|
 | **Phase 1 : Socle Fullstack & Temps Réel** | 🟢 **Terminée** | NestJS, Socket.IO Gateway, Prisma, authentification PIN, buffer offline avec synchronisation automatique. |
 | **Phase 2 : Stocks & Fiches Techniques** | 🟢 **Terminée** | Gestion des ingrédients, décompte automatique des stocks, fiches techniques, calcul du food cost et alertes de rupture. |
-| **Phase 3 : Impression, Caisse Pro & Réductions** | 🟡 **Prochaine étape** | Imprimantes thermiques ESC/POS (bar, cuisine, caisse), liaison TPE bancaire, **tickets de caisse professionnels** (mentions légales, TVA détaillée, logo) et **codes promo / remises** (% ou montant fixe). |
-| **Phase 4 : Réservations en Ligne & Salle** | 🔵 Planifiée | Widget de réservation en ligne pour les clients, affectation intelligente des tables et rappels automatiques (SMS/Email). |
-| **Phase 5 : Mode PWA & Offline Complet** | 🟣 Planifiée | Service Workers, stockage local IndexedDB, fonctionnement 100% autonome garanti lors des coupures Wi-Fi prolongées. |
-| **Phase 6 : Clôture de Caisse & Comptabilité** | 🔴 Planifiée | Génération des rapports Z et X de caisse certifiés, ventilation automatisée de la TVA et export comptable normalisé (FEC). |
+| **Phase 3 : Impression, Caisse Pro & Réductions** | 🟢 **Terminée** | Générateur thermique binaire ESC/POS (80/58mm), simulateur TPE (NFC / puce), ventilation TVA (10%/20%), remises/codes promo et modale back-office "Caisse & Imprimantes". |
+| **Phase 4 : Réservations, Salle Dynamique & Service** | 🟡 **Prochaine étape** | Widget de réservation en ligne, **gestion des "Suites" & réclame** (envoi cadencé en cuisine), **fusion & transfert de tables**, et **dispatch multi-postes (KDS Bar vs KDS Cuisine)**. |
+| **Phase 5 : Mode PWA & Offline Complet** | 🔵 Planifiée | Service Workers (`vite-plugin-pwa`), persistance locale IndexedDB, fonctionnement 100% autonome garanti lors des coupures prolongées. |
+| **Phase 6 : Clôture de Caisse & Conformité Fiscale** | 🔴 Planifiée | Rapports Z et X journaliers certifiés, journal d'encaissement inaltérable chaîné (loi anti-fraude TVA / NF525), tarification Happy Hour programmée et export comptable (FEC). |
 
 ### 💡 Perspectives & Idées futures (Post-v1.0)
 
-Ces fonctionnalités constituent des pistes d'extension majeures envisagées pour les évolutions futures après la release 1.0 :
+- 📱 **Commande à table par QR Code** : Scan d'un QR code dynamique sur la table permettant aux clients d'accéder au menu digital, de passer commande et de payer en direct depuis leur smartphone.
+- 🖥️ **Borne de commande interactive (Kiosk)** : Interface client grand écran tactile pour la prise de commande et l'encaissement en autonomie complète.
+- 🛵 **Module de Livraison intégré** : Passerelle centralisée connectée aux plateformes de livraison (Uber Eats, Deliveroo) ou module dédié pour la livraison en propre avec suivi des livreurs.
+- 💵 **Gestion des Pourboires (Tips) & Répartition** : Saisie des pourboires sur TPE et calcul automatique de la répartition équitable en fin de service.
 
-- 📱 **Commande à table par QR Code** : Scan d'un QR code dynamique sur la table permettant aux clients d'accéder au menu digital, de passer commande en direct depuis leur smartphone et d'alimenter immédiatement le KDS en cuisine.
-- 🖥️ **Borne de commande interactive (Kiosk)** : Interface client autonome sur grand écran tactile pour la prise de commande et le paiement direct en autonomie, avec injection immédiate des bons en production.
-- 🛵 **Module de Livraison intégré** : Passerelle centralisée connectée aux plateformes de livraison (Uber Eats, Deliveroo) ou module dédié pour la livraison opérée en propre par le restaurant avec suivi des courses.
+---
+
+## 🛠️ Axes d'Amélioration & Correctifs Identifiés
+
+L'analyse de l'architecture et du code source met en lumière plusieurs axes de consolidation prioritaires :
+
+### 1. 🔒 Sécurité & Gestion des codes PIN (Prioritaire)
+- **Suppression de l'exposition des PINs** : Dans [`server/src/websocket/websocket.gateway.ts`](file:///c:/Users/Utilisateur/Desktop/RestoFlow/server/src/websocket/websocket.gateway.ts), l'état initial diffusé par `sync:init` inclut actuellement le champ `pin: true` de tous les équipiers. Ce champ doit impérativement être exclu (`select: { pin: false }`) pour éviter toute divulgation via les DevTools du navigateur.
+- **Hachage cryptographique** : Remplacer le stockage des codes PIN en clair par un hachage sécurisé (ex. `bcrypt` ou `argon2`).
+- **Signature de session** : Implémenter des jetons de session (JWT éphémère ou handshake socket sécurisé) validant les droits de l'opérateur pour chaque transaction sensible.
+
+### 2. 🏗️ Refactorisation Backend & Découpage Modulaire
+- **Désengorgement de la Gateway WebSocket** : `websocket.gateway.ts` regroupe plus de 1 300 lignes contenant toute la logique métier. Il convient de déléguer ces responsabilités aux services NestJS injectables :
+  - `OrdersService` : cycle de vie et modifications de commandes.
+  - `StockService` : décompte atomique, alertes et pertes.
+  - `BillingService` : calculs de TVA, remises, encaissement et clôtures.
+  - `ConfigService` : configuration de l'établissement et des périphériques.
+
+### 3. ⚛️ Architecture Frontend & Gestion d'État
+- **Suppression du Prop Drilling dans `App.jsx`** : Le composant racine passe actuellement jusqu'à 26 props à `Gestion.jsx`. L'adoption d'un store global réactif (**Zustand**) ou de Contexts ciblés (`OrderContext`, `AuthContext`, `StockContext`) rendra le code plus lisible et maintenable.
+- **Optimisation du Bundle & Code Splitting** : Le build Vite actuel produit un chunk JavaScript monolithique de ~920 ko. L'utilisation de `React.lazy` et `Suspense` pour les vues secondaires (Dashboard Recharts, Gestion, Paramètres) permettra de réduire drastiquement le temps de chargement initial sur tablettes tactiles.
+
+### 4. 🖨️ Impression Réseau Hardware Directe (TCP Raw)
+- **Passerelle d'impression directe** : Bien que le générateur de trames binaires ESC/POS soit complet (`escpos.js`), l'envoi physique vers les imprimantes réseau de caisse ou de cuisine passe actuellement par la fenêtre d'impression du navigateur.
+- **Évolution recommandée** : Ajouter un service backend NestJS utilisant des sockets TCP directes (`net.Socket`) sur le port 9100 des imprimantes réseau pour imprimer instantanément et de façon totalement silencieuse dès validation d'un bon.
+
+### 5. 🧪 Tests Automatisés & Fiabilité Financière
+- **Intégration de Vitest** : Mettre en place une suite de tests unitaires et d'intégration pour sécuriser les algorithmes financiers critiques :
+  - Calculs de ventilation de la TVA au centime près.
+  - Répartition proportionnelle des remises et avoirs.
+  - Lissage équitable des centimes lors des partages à parts égales.
+  - Décrémentation atomique des stocks sous forte concurrence.
 
 ---
 
@@ -171,15 +222,15 @@ Ces fonctionnalités constituent des pistes d'extension majeures envisagées pou
 ```text
 RestoFlow/
 ├── index.html                  # Point d'entrée HTML
-├── package.json                # Dépendances & scripts du frontend
+├── package.json                # Dépendances & scripts du frontend (React 19, Vite, Tailwind v4)
 ├── vite.config.js              # Configuration Vite & Tailwind CSS v4
 │
 ├── server/                     # Backend NestJS & Synchronisation Temps Réel
 │   ├── package.json            # Dépendances backend (@nestjs, @prisma/client, socket.io)
 │   ├── prisma/
-│   │   ├── schema.prisma       # Schéma ORM (Tables, Staff, Orders, Stocks, Recettes...)
+│   │   ├── schema.prisma       # Schéma ORM (Tables, Staff, Orders, Stocks, Recettes, Config...)
 │   │   ├── dev.db              # Base SQLite de développement
-│   │   └── seed.ts             # Données de démonstration (carte, tables, équipiers, stocks)
+│   │   └── seed.ts             # Données de démonstration (carte, tables, équipiers, stocks, caisse)
 │   └── src/
 │       ├── main.ts             # Démarrage du serveur NestJS (port 3001)
 │       ├── app.module.ts       # Module racine
@@ -195,14 +246,14 @@ RestoFlow/
 └── src/                        # Client Frontend React 19 SPA
     ├── main.jsx                # Montage de l'application
     ├── App.jsx                 # État global, gestion des rôles et écoutes Socket.IO
-    ├── components/             # Composants partagés (TopNav, PinPadModal, ToastStack, Modal...)
+    ├── components/             # Composants partagés (TopNav, PinPadModal, TpeModal, ThermalReceiptPreview...)
     ├── services/               # Services réseau (socket.js, actionQueue.js pour le offline)
     ├── views/
-    │   ├── salle/              # Plan de salle (FloorPlan), commande (OrderTaking), caisse (PaymentModal)
+    │   ├── salle/              # Plan de salle (FloorPlan), commande (OrderTaking), caisse (PaymentModal, DiscountModal)
     │   ├── cuisine/            # Écran cuisine KDS (CuisineShell, tickets, timers)
-    │   └── gestion/            # Dashboard, Gestion, StockManager, RecipeManager, StaffRoleManager
+    │   └── gestion/            # Dashboard, Gestion, StockManager, RecipeManager, StaffRoleManager, CaisseSettingsManager
     ├── hooks/                  # Hooks (useBeep, useNow, useContainerWidth)
-    └── utils/                  # Utilitaires monétaires, calculs d'état et vérificateurs de permissions
+    └── utils/                  # Utilitaires monétaires, calculs d'état, permissions, TVA et générateur ESC/POS
 ```
 
 ---
@@ -230,6 +281,7 @@ npm run start:dev   # Lance le serveur NestJS sur http://localhost:3001
 Dans un second terminal :
 
 ```bash
+cd ..
 npm install
 npm run dev         # Lance le frontend sur http://localhost:5173
 ```
@@ -252,6 +304,7 @@ cd server && npm run build  # Compile le serveur NestJS
 4. **Décompte atomique des stocks** : Tout envoi de commande en cuisine décrémente automatiquement les ingrédients des recettes associées au sein d'une transaction sécurisée.
 5. **Rupture proactive** : Dès qu'un ingrédient critique est épuisé, tous les plats et menus dépendants sont instantanément marqués indisponibles en salle.
 6. **Traçabilité des pertes** : Toute modification manuelle de stock (démarque, casse, régularisation d'inventaire) nécessite la saisie d'un motif et l'identification de l'opérateur.
+7. **Rigueur fiscale & TVA** : Chaque encaissement applique la ventilation fiscale exacte selon la nature du produit (10% nourriture / softs, 20% alcools) avec imputation proportionnelle des remises.
 
 ---
 
