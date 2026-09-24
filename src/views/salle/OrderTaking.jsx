@@ -1,7 +1,8 @@
 import { useState } from "react";
 import {
   ArrowLeft, Search, Plus, Minus, X, StickyNote,
-  AlertTriangle, Check, LayoutList, Ban, Receipt, Tag, Sparkles, Printer
+  AlertTriangle, Check, LayoutList, Ban, Receipt, Tag, Sparkles,
+  ArrowRightLeft, Merge, BellRing
 } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { isAvailable, noteIndicatesAllergy, elapsed, money } from "../../utils/index.js";
@@ -9,6 +10,17 @@ import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
+import TableActionModal from "../../components/TableActionModal.jsx";
+
+export const COURSE_META = {
+  direct:  { label: "Direct",  emoji: "⚡", color: "#2E9E5B" },
+  entree:  { label: "Entrée",  emoji: "🥗", color: "#B5451B" },
+  plat:    { label: "Plat",    emoji: "🥩", color: "#8B5E34" },
+  dessert: { label: "Dessert", emoji: "🍰", color: "#B5793A" },
+  boisson: { label: "Boisson", emoji: "🍸", color: "#3E7CB1" },
+};
+
+const COURSE_CYCLE = ["entree", "plat", "dessert", "boisson", "direct"];
 
 /* ─────────────────────────────────────────────────────────────
    OrderTaking — Écran de prise de commande (côté serveur)
@@ -17,10 +29,15 @@ import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 export default function OrderTaking({
   table, order, now, products, isMobile,
   recipes = [], ingredients = [], config = {},
+  tables = [], orders = [],
   onBack, onAdd, onAddComposedMenu,
   onQty, onRemove, onNote,
   onSend, onServe, onCheckout, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
+  onCallCourse,
+  onChangeItemCourse,
+  onTransferTable,
+  onMergeTable,
 }) {
   const [activeCat, setActiveCat]     = useState(CATEGORIES[0].id);
   const [query, setQuery]             = useState("");
@@ -32,6 +49,7 @@ export default function OrderTaking({
   const [receipt, setReceipt]         = useState(null);
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [kitchenPrintModal, setKitchenPrintModal] = useState(false);
+  const [tableActionModal, setTableActionModal] = useState(null); // "transfer" | "merge" | null
 
   const items        = order?.items || [];
   const draftItems   = items.filter((i) => i.status === "draft");
@@ -49,7 +67,8 @@ export default function OrderTaking({
 
   const total = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
   const draftTotal   = draftItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
-  const hasReady     = items.some((i) => i.status === "ready");
+  const readyItems   = items.filter((i) => i.status === "ready");
+  const hasReady     = readyItems.length > 0;
   const allServedNoDraft = items.length > 0 && items.every((i) => i.status === "served");
 
   const filtered = products.filter(
@@ -169,6 +188,7 @@ export default function OrderTaking({
                 onQty={(d) => onQty(it.id, d)}
                 onRemove={() => onRemove(it.id)}
                 onNote={(n) => { onNote(it.id, n); setNoteFor(null); }}
+                onChangeCourse={(newCourse) => onChangeItemCourse?.(it.id, newCourse)}
               />
             ))}
           </div>
@@ -197,6 +217,27 @@ export default function OrderTaking({
           <span>{money(total)}</span>
         </div>
 
+        {/* Phase 4 : Gestion des Réclames de Suites */}
+        {sentItems.filter((i) => i.course === "plat" && i.courseStatus === "held").length > 0 && (
+          <button
+            onClick={() => onCallCourse?.("plat")}
+            className="rf-tap w-full py-2.5 rounded-xl font-bold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm bg-[#D9A441] hover:bg-[#c29135]"
+          >
+            <BellRing size={14} />
+            <span>🔔 Réclamer la suite : Plats ({sentItems.filter((i) => i.course === "plat" && i.courseStatus === "held").length})</span>
+          </button>
+        )}
+
+        {sentItems.filter((i) => i.course === "dessert" && i.courseStatus === "held").length > 0 && (
+          <button
+            onClick={() => onCallCourse?.("dessert")}
+            className="rf-tap w-full py-2.5 rounded-xl font-bold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm bg-[#B5793A] hover:bg-[#9e672e]"
+          >
+            <BellRing size={14} />
+            <span>🔔 Réclamer les Desserts ({sentItems.filter((i) => i.course === "dessert" && i.courseStatus === "held").length})</span>
+          </button>
+        )}
+
         {/* Bouton Remise & Codes Promo */}
         {items.length > 0 && (
           <button
@@ -209,8 +250,12 @@ export default function OrderTaking({
         )}
 
         {hasReady && (
-          <button onClick={onServe} className="rf-tap w-full py-2.5 rounded-xl font-semibold text-sm text-white" style={{ background: "#2E9E5B" }}>
-            ✅ Marquer comme servi
+          <button
+            onClick={onServe}
+            className="rf-tap w-full py-2.5 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-1.5 shadow-sm"
+            style={{ background: "#2E9E5B" }}
+          >
+            <span>✅ Marquer comme servi ({readyItems.length})</span>
           </button>
         )}
 
@@ -317,6 +362,27 @@ export default function OrderTaking({
           onClose={() => setKitchenPrintModal(false)}
         />
       )}
+
+      {tableActionModal && (
+        <TableActionModal
+          isOpen={!!tableActionModal}
+          initialMode={tableActionModal}
+          sourceTable={table}
+          tables={tables}
+          orders={orders}
+          onTransfer={(srcId, tgtId) => {
+            onTransferTable?.(srcId, tgtId);
+            setTableActionModal(null);
+            onBackToPlan?.();
+          }}
+          onMerge={(srcId, tgtId) => {
+            onMergeTable?.(srcId, tgtId);
+            setTableActionModal(null);
+            onBackToPlan?.();
+          }}
+          onClose={() => setTableActionModal(null)}
+        />
+      )}
     </>
   );
 
@@ -326,10 +392,30 @@ export default function OrderTaking({
       <div className="flex flex-col h-[640px]">
         <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-black/10">
           <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5 shrink-0"><ArrowLeft size={16} /></button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h2 className="rf-display text-base font-semibold text-[#2B2622] truncate">Table {table.number} · {table.seats} pers.</h2>
             <p className="text-[11px] text-[#6B6355]">{order ? `Ouverte ${elapsed(order.createdAt, now)}` : "Nouvelle commande"}</p>
           </div>
+          {order && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setTableActionModal("transfer")}
+                className="rf-tap p-1.5 rounded-lg border border-black/15 bg-black/[.03] text-[#5B5346]"
+                title="Transférer la table"
+              >
+                <ArrowRightLeft size={14} className="text-[#C1440E]" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTableActionModal("merge")}
+                className="rf-tap p-1.5 rounded-lg border border-black/15 bg-black/[.03] text-[#5B5346]"
+                title="Fusionner avec une autre table"
+              >
+                <Merge size={14} className="text-[#3E7CB1]" />
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-1.5 px-3 py-2 border-b border-black/10">
@@ -366,12 +452,34 @@ export default function OrderTaking({
   // ── Rendu desktop ──────────────────────────────────────────
   return (
     <div className="flex flex-col h-[640px]">
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-black/10">
-        <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5"><ArrowLeft size={16} /></button>
-        <div>
-          <h2 className="rf-display text-lg font-semibold text-[#2B2622]">Table {table.number} — {table.seats} personnes</h2>
-          <p className="text-xs text-[#6B6355]">{order ? `Ouverte ${elapsed(order.createdAt, now)}` : "Nouvelle commande"}</p>
+      <div className="flex items-center justify-between px-5 py-3 border-b border-black/10">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5"><ArrowLeft size={16} /></button>
+          <div>
+            <h2 className="rf-display text-lg font-semibold text-[#2B2622]">Table {table.number} — {table.seats} personnes</h2>
+            <p className="text-xs text-[#6B6355]">{order ? `Ouverte ${elapsed(order.createdAt, now)}` : "Nouvelle commande"}</p>
+          </div>
         </div>
+        {order && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTableActionModal("transfer")}
+              className="rf-tap px-3 py-1.5 rounded-xl border border-black/15 bg-black/[.02] hover:bg-black/5 text-xs font-bold text-[#5B5346] flex items-center gap-1.5 shadow-2xs"
+            >
+              <ArrowRightLeft size={13} className="text-[#C1440E]" />
+              <span>Transférer table</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTableActionModal("merge")}
+              className="rf-tap px-3 py-1.5 rounded-xl border border-black/15 bg-black/[.02] hover:bg-black/5 text-xs font-bold text-[#5B5346] flex items-center gap-1.5 shadow-2xs"
+            >
+              <Merge size={13} className="text-[#3E7CB1]" />
+              <span>Fusionner tables</span>
+            </button>
+          </div>
+        )}
       </div>
       <div className="flex flex-1 min-h-0">
         <div className="w-[62%] flex flex-col border-r border-black/10 min-h-0">{menuPanel}</div>
@@ -430,14 +538,35 @@ function ProductCard({ p, isMobile, onTap, portionsLeft }) {
   );
 }
 
-function DraftItemRow({ item, isMobile, products, noteOpen, onToggleNote, onQty, onRemove, onNote }) {
+function DraftItemRow({ item, isMobile, products, noteOpen, onToggleNote, onQty, onRemove, onNote, onChangeCourse }) {
   const isAllergy = noteIndicatesAllergy(item.notes);
   const product = products?.find((p) => p.id === item.productId);
+  const course = item.course || "direct";
+  const courseMeta = COURSE_META[course] || COURSE_META.direct;
+
   return (
     <div className="rf-anim-pop rounded-lg border border-black/10 bg-white p-2.5">
       {isAllergy && <AllergyBadge item={item} product={product} />}
       <div className="flex items-start justify-between gap-2">
-        <span className="text-sm font-semibold text-[#2B2622] flex-1">{item.qty} × {item.name}</span>
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <button
+            type="button"
+            onClick={() => {
+              const nextIdx = (COURSE_CYCLE.indexOf(course) + 1) % COURSE_CYCLE.length;
+              onChangeCourse?.(COURSE_CYCLE[nextIdx]);
+            }}
+            title="Cliquer pour cadencer (Entrée / Plat / Dessert / Boisson / Direct)"
+            className="text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 border border-black/10 hover:border-black/30 transition-colors shadow-2xs"
+            style={{
+              background: courseMeta.color + "18",
+              color: courseMeta.color,
+            }}
+          >
+            <span>{courseMeta.emoji}</span>
+            <span>{courseMeta.label}</span>
+          </button>
+          <span className="text-sm font-semibold text-[#2B2622] truncate">{item.qty} × {item.name}</span>
+        </div>
         <button onClick={onRemove} className="text-[#B5451B] shrink-0 p-0.5"><X size={isMobile ? 16 : 14} /></button>
       </div>
       {item.isMenu && item.composition?.length > 0 && (
@@ -487,14 +616,40 @@ function SentLine({ item, products }) {
   const icon = item.status === "served" ? "✅" : item.status === "ready" ? "🟢" : item.status === "preparing" ? "🟠" : "⚪";
   const isAllergy = noteIndicatesAllergy(item.notes);
   const product = products?.find((p) => p.id === item.productId);
+  const courseMeta = COURSE_META[item.course || "direct"];
+
   return (
     <div className="bg-black/[.03] rounded-lg px-2.5 py-1.5">
       {isAllergy && <AllergyBadge item={item} product={product} compact />}
       <div className="flex items-center justify-between text-xs">
-        <span className="flex items-center gap-1.5 text-[#5B5346]">
-          {icon} {item.qty} × {item.name}{item.notes && !isAllergy ? ` (${item.notes})` : ""}
+        <span className="flex items-center gap-1.5 text-[#5B5346] min-w-0">
+          {icon}
+          {item.course && item.course !== "direct" && courseMeta && (
+            <span
+              className="text-[9px] px-1.5 py-0.2 rounded-full font-bold shrink-0"
+              style={{
+                background: courseMeta.color + "20",
+                color: courseMeta.color,
+              }}
+            >
+              {courseMeta.emoji} {courseMeta.label}
+            </span>
+          )}
+          <span className="truncate">{item.qty} × {item.name}{item.notes && !isAllergy ? ` (${item.notes})` : ""}</span>
         </span>
-        <span className="font-semibold shrink-0 ml-2" style={{ color: meta.c }}>{meta.l}</span>
+        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+          {item.courseStatus === "held" && item.status !== "served" && item.status !== "ready" && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 animate-pulse">
+              ⏸️ À réclamer
+            </span>
+          )}
+          {item.courseStatus === "called" && item.status !== "served" && item.status !== "ready" && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700">
+              🔔 Réclamé
+            </span>
+          )}
+          <span className="font-semibold" style={{ color: meta.c }}>{meta.l}</span>
+        </div>
       </div>
       {item.isMenu && item.composition?.length > 0 && (
         <div className="mt-1 pl-5 space-y-0.5">

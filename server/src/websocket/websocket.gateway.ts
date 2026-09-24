@@ -41,7 +41,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   public async getFullState() {
-    const [tables, rawOrders, products, menus, roles, staff, rawHistory, rawIngredients, rawRecipes, rawMovements, rawConfig] = await Promise.all([
+    const [tables, rawOrders, products, menus, roles, staff, rawHistory, rawIngredients, rawRecipes, rawMovements, rawConfig, rawReservations] = await Promise.all([
       this.prisma.table.findMany({ orderBy: { number: "asc" } }),
       this.prisma.order.findMany({
         where: { status: "open" },
@@ -86,6 +86,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         },
       }),
       this.prisma.restaurantConfig.findUnique({ where: { id: "default" } }),
+      this.prisma.reservation.findMany({
+        orderBy: [{ date: "asc" }, { time: "asc" }],
+      }),
     ]);
 
     // Format fields with parsed JSON
@@ -96,7 +99,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       createdAt: o.createdAt.getTime(),
       sentAt: o.sentAt ? o.sentAt.getTime() : null,
       discount: o.discount ? JSON.parse(o.discount) : null,
-      items: o.items.map((i) => ({
+      items: o.items.map((i: any) => ({
         id: i.id,
         productId: i.productId,
         name: i.name,
@@ -106,10 +109,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         status: i.status,
         isMenu: i.isMenu,
         composition: i.composition ? JSON.parse(i.composition) : null,
+        course: i.course || "direct",
+        courseStatus: i.courseStatus || "direct",
+        station: i.station || (i.productId?.startsWith("p18") || i.productId?.startsWith("p19") || i.productId?.startsWith("p20") || i.productId?.startsWith("p21") ? "bar" : "kitchen"),
       })),
     }));
 
-    const parsedProducts = products.map((p) => ({
+    const parsedProducts = products.map((p: any) => ({
       id: p.id,
       name: p.name,
       cat: p.cat,
@@ -120,6 +126,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       available: p.available,
       isMenu: p.isMenu,
       vatRate: p.vatRate ?? 10,
+      station: p.station || (p.cat === "boissons" ? "bar" : "kitchen"),
     }));
 
     const parsedMenus = menus.map((m) => ({
@@ -241,6 +248,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       recipes: parsedRecipes,
       stockMovements: parsedMovements,
       config: parsedConfig,
+      reservations: rawReservations,
     };
   }
 
@@ -290,6 +298,126 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     this.server.emit("table:updated", updated);
     return { ok: true, table: updated };
+  }
+
+  // ── Handlers Phase 4 : Salle Dynamique (Transfert & Fusion de Tables) ──
+
+  @SubscribeMessage("tables:transfer")
+  async handleTableTransfer(
+    @MessageBody() data: { sourceTableId: string; targetTableId: string; staffName?: string }
+  ) {
+    const sourceTable = await this.prisma.table.findUnique({ where: { id: data.sourceTableId } });
+    const targetTable = await this.prisma.table.findUnique({ where: { id: data.targetTableId } });
+
+    if (!sourceTable || !targetTable) {
+      return { ok: false, error: "Table source ou cible introuvable" };
+    }
+
+    const order = await this.prisma.order.findFirst({
+      where: { tableId: data.sourceTableId, status: "open" },
+      include: { items: true },
+    });
+    if (!order) {
+      return { ok: false, error: "Aucune commande ouverte sur la table source" };
+    }
+
+    const existingTargetOrder = await this.prisma.order.findFirst({
+      where: { tableId: data.targetTableId, status: "open" },
+    });
+    if (existingTargetOrder) {
+      return { ok: false, error: `La table ${targetTable.number} est déjà occupée. Utilisez la fusion.` };
+    }
+
+    // Reassign order to target table
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { tableId: data.targetTableId },
+    });
+
+    // Clear alert/reservation flags on source table if necessary
+    const updatedSource = await this.prisma.table.update({
+      where: { id: data.sourceTableId },
+      data: { alert: false },
+    });
+    const updatedTarget = await this.prisma.table.findUnique({ where: { id: data.targetTableId } });
+
+    const updatedOrder = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { items: true },
+    });
+    const formattedOrder = this.formatOrder(updatedOrder);
+
+    this.server.emit("table:updated", updatedSource);
+    this.server.emit("table:updated", updatedTarget);
+    this.server.emit("order:updated", formattedOrder);
+    this.server.emit("tables:transferred", {
+      sourceTableNumber: sourceTable.number,
+      targetTableNumber: targetTable.number,
+      server: data.staffName || order.server,
+    });
+
+    return { ok: true, order: formattedOrder };
+  }
+
+  @SubscribeMessage("tables:merge")
+  async handleTableMerge(
+    @MessageBody() data: { sourceTableId: string; targetTableId: string; staffName?: string }
+  ) {
+    const sourceTable = await this.prisma.table.findUnique({ where: { id: data.sourceTableId } });
+    const targetTable = await this.prisma.table.findUnique({ where: { id: data.targetTableId } });
+
+    if (!sourceTable || !targetTable) {
+      return { ok: false, error: "Table source ou cible introuvable" };
+    }
+
+    const sourceOrder = await this.prisma.order.findFirst({
+      where: { tableId: data.sourceTableId, status: "open" },
+      include: { items: true },
+    });
+    const targetOrder = await this.prisma.order.findFirst({
+      where: { tableId: data.targetTableId, status: "open" },
+      include: { items: true },
+    });
+
+    if (!sourceOrder || !targetOrder) {
+      return { ok: false, error: "Les deux tables doivent avoir une commande ouverte pour être fusionnées" };
+    }
+
+    // Transfer items from source to target
+    await this.prisma.orderItem.updateMany({
+      where: { orderId: sourceOrder.id },
+      data: { orderId: targetOrder.id },
+    });
+
+    // Close source order
+    await this.prisma.order.update({
+      where: { id: sourceOrder.id },
+      data: { status: "closed" },
+    });
+
+    // Clear alert on source table
+    const updatedSource = await this.prisma.table.update({
+      where: { id: data.sourceTableId },
+      data: { alert: false },
+    });
+
+    const updatedTargetOrder = await this.prisma.order.findUnique({
+      where: { id: targetOrder.id },
+      include: { items: true },
+    });
+    const formattedTargetOrder = this.formatOrder(updatedTargetOrder);
+
+    this.server.emit("order:closed", { orderId: sourceOrder.id });
+    this.server.emit("order:updated", formattedTargetOrder);
+    this.server.emit("table:updated", updatedSource);
+    this.server.emit("table:updated", targetTable);
+    this.server.emit("tables:merged", {
+      sourceTableNumber: sourceTable.number,
+      targetTableNumber: targetTable.number,
+      server: data.staffName || targetOrder.server,
+    });
+
+    return { ok: true, order: formattedTargetOrder };
   }
 
   @SubscribeMessage("order:create_or_ensure")
@@ -347,8 +475,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody()
     data: {
       orderId: string;
-      product: { id: string; name: string; price: number; isMenu?: boolean };
+      product: { id: string; name: string; price: number; isMenu?: boolean; cat?: string; station?: string };
       composition?: any;
+      course?: string;
+      courseStatus?: string;
+      station?: string;
     }
   ) {
     let order = await this.prisma.order.findUnique({
@@ -370,9 +501,36 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
     }
 
+    let dbProduct: any = null;
+    if (data.product?.id) {
+      dbProduct = await this.prisma.product.findUnique({
+        where: { id: data.product.id },
+      });
+    }
+
+    const cat = data.product?.cat || dbProduct?.cat || "";
+    const isBar =
+      cat === "boissons" ||
+      data.product?.station === "bar" ||
+      dbProduct?.station === "bar" ||
+      data.station === "bar" ||
+      data.product?.id?.startsWith("p18") ||
+      data.product?.id?.startsWith("p19") ||
+      data.product?.id?.startsWith("p20") ||
+      data.product?.id?.startsWith("p21");
+    const station = isBar ? "bar" : (data.station || data.product?.station || dbProduct?.station || "kitchen");
+    let course = data.course;
+    if (!course) {
+      if (isBar) course = "boisson";
+      else if (cat === "entrees") course = "entree";
+      else if (cat === "desserts") course = "dessert";
+      else course = "plat";
+    }
+    const courseStatus = data.courseStatus || (course === "entree" || course === "boisson" || course === "direct" ? "direct" : "held");
+
     if (!data.product.isMenu) {
       const existing = order.items.find(
-        (i) => i.productId === data.product.id && i.status === "draft" && !i.notes
+        (i: any) => i.productId === data.product.id && i.status === "draft" && !i.notes && (i.course || "direct") === course
       );
       if (existing) {
         await this.prisma.orderItem.update({
@@ -391,6 +549,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
             notes: "",
             status: "draft",
             isMenu: false,
+            course,
+            courseStatus,
+            station,
           },
         });
       }
@@ -407,6 +568,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           status: "draft",
           isMenu: true,
           composition: data.composition ? JSON.stringify(data.composition) : null,
+          course: data.course || "plat",
+          courseStatus: data.courseStatus || "held",
+          station: "kitchen",
         },
       });
     }
@@ -663,12 +827,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage("order:start_prep")
-  async handleStartPrep(@MessageBody() data: { orderId: string }) {
+  async handleStartPrep(@MessageBody() data: { orderId: string; station?: string }) {
     const existing = await this.prisma.order.findUnique({ where: { id: data.orderId } });
     if (!existing) return { ok: false, error: "Commande introuvable" };
 
+    const whereClause: any = { orderId: data.orderId, status: "new", courseStatus: { not: "held" } };
+    if (data.station && data.station !== "all") {
+      whereClause.station = data.station;
+    }
+
     await this.prisma.orderItem.updateMany({
-      where: { orderId: data.orderId, status: "new" },
+      where: whereClause,
       data: { status: "preparing" },
     });
 
@@ -682,15 +851,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage("order:mark_ready")
-  async handleMarkReady(@MessageBody() data: { orderId: string }) {
+  async handleMarkReady(@MessageBody() data: { orderId: string; station?: string }) {
     const existing = await this.prisma.order.findUnique({
       where: { id: data.orderId },
       include: { items: true, table: true },
     });
     if (!existing) return { ok: false, error: "Commande introuvable" };
 
+    const whereClause: any = { orderId: data.orderId, status: "preparing", courseStatus: { not: "held" } };
+    if (data.station && data.station !== "all") {
+      whereClause.station = data.station;
+    }
+
     await this.prisma.orderItem.updateMany({
-      where: { orderId: data.orderId, status: "preparing" },
+      where: whereClause,
       data: { status: "ready" },
     });
 
@@ -704,17 +878,23 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.server.emit("server:order_ready", {
       orderId: updated.id,
       tableNumber: updated.table?.number,
+      station: data.station || "all",
     });
     return { ok: true, order: formatted };
   }
 
   @SubscribeMessage("order:serve")
-  async handleServe(@MessageBody() data: { orderId: string }) {
+  async handleServe(@MessageBody() data: { orderId: string; course?: string }) {
     const existing = await this.prisma.order.findUnique({ where: { id: data.orderId } });
     if (!existing) return { ok: false, error: "Commande introuvable" };
 
+    const whereClause: any = { orderId: data.orderId, status: "ready" };
+    if (data.course) {
+      whereClause.course = data.course;
+    }
+
     await this.prisma.orderItem.updateMany({
-      where: { orderId: data.orderId, status: "ready" },
+      where: whereClause,
       data: { status: "served" },
     });
 
@@ -725,6 +905,227 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     const formatted = this.formatOrder(updated);
     this.server.emit("order:updated", formatted);
     return { ok: true, order: formatted };
+  }
+
+  // ── Handlers Phase 4 : Suites & Réclame (Envoi Cadencé en Cuisine) ──
+
+  @SubscribeMessage("order:call_course")
+  async handleCallCourse(
+    @MessageBody() data: { orderId: string; course: string; serverName?: string }
+  ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: data.orderId },
+      include: { items: true, table: true },
+    });
+    if (!order) return { ok: false, error: "Commande introuvable" };
+
+    const heldItems = order.items.filter(
+      (i: any) =>
+        (data.course === "suite" || i.course === data.course) &&
+        i.courseStatus === "held"
+    );
+
+    if (heldItems.length > 0) {
+      await this.prisma.orderItem.updateMany({
+        where: {
+          id: { in: heldItems.map((i) => i.id) },
+        },
+        data: {
+          courseStatus: "called",
+          status: "new",
+        },
+      });
+    }
+
+    const updated = await this.prisma.order.findUnique({
+      where: { id: data.orderId },
+      include: { items: true, table: true },
+    });
+    const formatted = this.formatOrder(updated);
+    this.server.emit("order:updated", formatted);
+
+    const courseLabel = data.course === "plat" ? "Plats" : data.course === "dessert" ? "Desserts" : data.course === "suite" ? "Suite" : data.course;
+    this.server.emit("kitchen:call_course", {
+      orderId: order.id,
+      tableNumber: order.table?.number || "?",
+      course: data.course,
+      courseLabel,
+      server: data.serverName || order.server,
+      itemCount: heldItems.length,
+      timestamp: Date.now(),
+    });
+
+    return { ok: true, order: formatted, calledCount: heldItems.length };
+  }
+
+  @SubscribeMessage("order:change_item_course")
+  async handleChangeItemCourse(
+    @MessageBody() data: { itemId: string; course: string; courseStatus?: string }
+  ) {
+    const item = await this.prisma.orderItem.findUnique({ where: { id: data.itemId } });
+    if (!item) return { ok: false, error: "Article introuvable" };
+
+    await this.prisma.orderItem.update({
+      where: { id: data.itemId },
+      data: {
+        course: data.course,
+        courseStatus: data.courseStatus || (data.course === "entree" || data.course === "boisson" || data.course === "direct" ? "direct" : "held"),
+      },
+    });
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: item.orderId },
+      include: { items: true },
+    });
+    const formatted = this.formatOrder(order);
+    this.server.emit("order:updated", formatted);
+    return { ok: true, order: formatted };
+  }
+
+  // ── Handlers Phase 4 : Réservations & Créneaux ──────────────────
+
+  @SubscribeMessage("reservation:create")
+  async handleCreateReservation(@MessageBody() data: any) {
+    const res = await this.prisma.reservation.create({
+      data: {
+        id: data.id || `res_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        customerName: data.customerName,
+        phone: data.phone,
+        email: data.email || null,
+        date: data.date,
+        time: data.time,
+        guests: data.guests || 2,
+        status: data.status || "confirmed",
+        tableId: data.tableId || null,
+        notes: data.notes || null,
+      },
+      include: { table: true },
+    });
+
+    if (res.tableId) {
+      const updatedTable = await this.prisma.table.update({
+        where: { id: res.tableId },
+        data: {
+          reserved: true,
+          reservationName: res.customerName,
+          reservationPeople: res.guests,
+          reservationTime: res.time,
+          reservationNote: res.notes,
+        },
+      });
+      this.server.emit("table:updated", updatedTable);
+    }
+
+    this.server.emit("reservation:created", res);
+    return { ok: true, reservation: res };
+  }
+
+  @SubscribeMessage("reservation:update_status")
+  async handleUpdateReservationStatus(
+    @MessageBody() data: { id: string; status: string; tableId?: string }
+  ) {
+    const res = await this.prisma.reservation.findUnique({ where: { id: data.id } });
+    if (!res) return { ok: false, error: "Réservation introuvable" };
+
+    const updated = await this.prisma.reservation.update({
+      where: { id: data.id },
+      data: {
+        status: data.status,
+        tableId: data.tableId !== undefined ? data.tableId : res.tableId,
+      },
+      include: { table: true },
+    });
+
+    if (updated.tableId) {
+      if (data.status === "seated") {
+        const tbl = await this.prisma.table.findUnique({ where: { id: updated.tableId } });
+        if (tbl) this.server.emit("table:updated", tbl);
+      } else if (data.status === "cancelled" || data.status === "no_show") {
+        const updatedTable = await this.prisma.table.update({
+          where: { id: updated.tableId },
+          data: {
+            reserved: false,
+            reservationName: null,
+            reservationPeople: null,
+            reservationTime: null,
+            reservationNote: null,
+          },
+        });
+        this.server.emit("table:updated", updatedTable);
+      }
+    }
+
+    this.server.emit("reservation:updated", updated);
+    return { ok: true, reservation: updated };
+  }
+
+  @SubscribeMessage("reservation:assign_table")
+  async handleAssignReservationTable(
+    @MessageBody() data: { reservationId: string; tableId: string | null }
+  ) {
+    const res = await this.prisma.reservation.findUnique({ where: { id: data.reservationId } });
+    if (!res) return { ok: false, error: "Réservation introuvable" };
+
+    if (res.tableId && res.tableId !== data.tableId) {
+      const oldTable = await this.prisma.table.update({
+        where: { id: res.tableId },
+        data: {
+          reserved: false,
+          reservationName: null,
+          reservationPeople: null,
+          reservationTime: null,
+          reservationNote: null,
+        },
+      });
+      this.server.emit("table:updated", oldTable);
+    }
+
+    const updated = await this.prisma.reservation.update({
+      where: { id: data.reservationId },
+      data: { tableId: data.tableId },
+      include: { table: true },
+    });
+
+    if (data.tableId) {
+      const newTable = await this.prisma.table.update({
+        where: { id: data.tableId },
+        data: {
+          reserved: true,
+          reservationName: updated.customerName,
+          reservationPeople: updated.guests,
+          reservationTime: updated.time,
+          reservationNote: updated.notes,
+        },
+      });
+      this.server.emit("table:updated", newTable);
+    }
+
+    this.server.emit("reservation:updated", updated);
+    return { ok: true, reservation: updated };
+  }
+
+  @SubscribeMessage("reservation:delete")
+  async handleDeleteReservation(@MessageBody() data: { id: string }) {
+    const res = await this.prisma.reservation.findUnique({ where: { id: data.id } });
+    if (!res) return { ok: false, error: "Réservation introuvable" };
+
+    if (res.tableId) {
+      const updatedTable = await this.prisma.table.update({
+        where: { id: res.tableId },
+        data: {
+          reserved: false,
+          reservationName: null,
+          reservationPeople: null,
+          reservationTime: null,
+          reservationNote: null,
+        },
+      });
+      this.server.emit("table:updated", updatedTable);
+    }
+
+    await this.prisma.reservation.delete({ where: { id: data.id } });
+    this.server.emit("reservation:deleted", { id: data.id });
+    return { ok: true };
   }
 
   // ── Handlers Phase 3 : Remises & Réductions ────────────────────
@@ -1298,17 +1699,32 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       createdAt: order.createdAt instanceof Date ? order.createdAt.getTime() : order.createdAt,
       sentAt: order.sentAt ? (order.sentAt instanceof Date ? order.sentAt.getTime() : order.sentAt) : null,
       discount: order.discount ? (typeof order.discount === "string" ? JSON.parse(order.discount) : order.discount) : null,
-      items: (order.items || []).map((i: any) => ({
-        id: i.id,
-        productId: i.productId,
-        name: i.name,
-        price: i.price,
-        qty: i.qty,
-        notes: i.notes || "",
-        status: i.status,
-        isMenu: i.isMenu,
-        composition: i.composition ? (typeof i.composition === "string" ? JSON.parse(i.composition) : i.composition) : null,
-      })),
+      items: (order.items || []).map((i: any) => {
+        const isBar = i.station === "bar" || (i.productId?.startsWith("p18") || i.productId?.startsWith("p19") || i.productId?.startsWith("p20") || i.productId?.startsWith("p21"));
+        const course = i.course || (
+          isBar ? "boisson"
+          : (i.productId === "p1" || i.productId === "p2" || i.productId === "p3") ? "entree"
+          : (i.productId === "p15" || i.productId === "p16" || i.productId === "p17") ? "dessert"
+          : "plat"
+        );
+        const courseStatus = i.courseStatus || ((course === "entree" || course === "boisson" || course === "direct") ? "direct" : "held");
+        const station = i.station || (isBar ? "bar" : "kitchen");
+
+        return {
+          id: i.id,
+          productId: i.productId,
+          name: i.name,
+          price: i.price,
+          qty: i.qty,
+          notes: i.notes || "",
+          status: i.status,
+          isMenu: i.isMenu,
+          composition: i.composition ? (typeof i.composition === "string" ? JSON.parse(i.composition) : i.composition) : null,
+          course,
+          courseStatus,
+          station,
+        };
+      }),
     };
   }
 }

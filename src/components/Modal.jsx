@@ -9,7 +9,8 @@ import { X } from "lucide-react";
  *  - wide     : si true, max-width = 2xl (au lieu de md)
  *  - children : contenu du corps
  */
-export default function Modal({ title, onClose, children, wide }) {
+export default function Modal({ isOpen = true, title, onClose, children, wide }) {
+  if (!isOpen) return null;
   return (
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6"

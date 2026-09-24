@@ -1,4 +1,4 @@
-import { Users, Clock, Lock, CalendarClock } from "lucide-react";
+import { Users, Clock, Lock, CalendarClock, ArrowRightLeft } from "lucide-react";
 import { tableStatus, STATUS_META, orderTotal, elapsed } from "../../utils/index.js";
 
 /**
@@ -10,14 +10,39 @@ import { tableStatus, STATUS_META, orderTotal, elapsed } from "../../utils/index
  * Interactions :
  *  - Clic sur une table → ouvre sa commande (onOpen)
  *  - Clic droit / appui long → bascule l'alerte (onToggleAlert)
+ *  - Bouton réservations → ouvre la gestion des créneaux & widget
  */
-export default function FloorPlan({ tables, orders, now, onOpen, onToggleAlert, isMobile }) {
+export default function FloorPlan({
+  tables,
+  orders,
+  reservations = [],
+  now,
+  onOpen,
+  onToggleAlert,
+  onOpenReservations,
+  onOpenTableAction,
+  isMobile,
+}) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayReservations = reservations.filter((r) => r.date === todayStr && r.status !== "cancelled");
+
   if (isMobile) {
     return (
       <div className="p-3">
-        <div className="mb-3">
-          <h1 className="rf-display text-xl font-semibold text-[#2B2622]">Plan de salle</h1>
-          <p className="text-xs text-[#6B6355]">Touchez une table pour ouvrir sa commande</p>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h1 className="rf-display text-xl font-semibold text-[#2B2622]">Plan de salle</h1>
+            <p className="text-xs text-[#6B6355]">Touchez une table pour ouvrir sa commande</p>
+          </div>
+          {onOpenReservations && (
+            <button
+              onClick={onOpenReservations}
+              className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-black/15 bg-white text-xs font-bold text-[#5B5346] shadow-2xs"
+            >
+              <CalendarClock size={14} className="text-[#C1440E]" />
+              <span>Résas ({todayReservations.length})</span>
+            </button>
+          )}
         </div>
 
         {/* Légende défilable */}
@@ -80,7 +105,6 @@ export default function FloorPlan({ tables, orders, now, onOpen, onToggleAlert, 
     );
   }
 
-  // ── Mode desktop ──────────────────────────────────────────────────────────
   return (
     <div className="p-5">
       <div className="flex items-baseline justify-between mb-4">
@@ -88,7 +112,18 @@ export default function FloorPlan({ tables, orders, now, onOpen, onToggleAlert, 
           <h1 className="rf-display text-2xl font-semibold text-[#2B2622]">Plan de salle</h1>
           <p className="text-sm text-[#6B6355]">Sélectionnez une table pour prendre ou consulter une commande</p>
         </div>
-        <Legend />
+        <div className="flex items-center gap-3">
+          {onOpenReservations && (
+            <button
+              onClick={onOpenReservations}
+              className="rf-tap flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-black/15 bg-white hover:bg-black/5 text-xs font-bold text-[#5B5346] shadow-2xs"
+            >
+              <CalendarClock size={15} className="text-[#C1440E]" />
+              <span>Réservations ({todayReservations.length})</span>
+            </button>
+          )}
+          <Legend />
+        </div>
       </div>
 
       {/* Plateau */}
@@ -152,12 +187,27 @@ export default function FloorPlan({ tables, orders, now, onOpen, onToggleAlert, 
                   <Clock size={8} />{elapsed(order.createdAt, now)}
                 </span>
               ) : (
-                !order && t.reserved && (t.reservationName || t.reservationTime) && (
+                !order && t.reserved && (t.reservationName || t.reservationTime) ? (
                   <span className="absolute -bottom-[38px] text-[9px] text-[#5B5346] whitespace-nowrap flex items-center gap-0.5 font-semibold">
                     <CalendarClock size={8} />
                     {t.reservationName || "Réservée"}{t.reservationTime ? ` · ${t.reservationTime}` : ""}
                   </span>
-                )
+                ) : null
+              )}
+
+              {order && onOpenTableAction && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenTableAction(t);
+                  }}
+                  title="Transférer ou fusionner cette table"
+                  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-black/20 hover:border-[#C1440E] flex items-center justify-center text-[#5B5346] hover:text-[#C1440E] shadow-sm z-10"
+                >
+                  <ArrowRightLeft size={10} />
+                </span>
               )}
             </button>
           );

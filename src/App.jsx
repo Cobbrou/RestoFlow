@@ -9,8 +9,10 @@ import OrderTaking from "./views/salle/OrderTaking.jsx";
 import CuisineShell from "./views/cuisine/CuisineShell.jsx";
 import Dashboard from "./views/gestion/Dashboard.jsx";
 import Gestion from "./views/gestion/Gestion.jsx";
+import ReservationModal from "./components/ReservationModal.jsx";
+import TableActionModal from "./components/TableActionModal.jsx";
 
-import { seedTables, seedOrders, seedHistory, seedMenus, uid } from "./data/seed.js";
+import { seedTables, seedOrders, seedHistory, seedMenus, seedReservations, uid } from "./data/seed.js";
 import { PRODUCTS_SEED } from "./data/products.js";
 import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct } from "./utils/index.js";
@@ -48,12 +50,13 @@ const DEFAULT_CONFIG = {
 
 const fallbackTables = seedTables();
 const fallbackOrders = seedOrders(fallbackTables);
+const fallbackReservations = seedReservations();
 
 /**
  * App — Composant racine de RestoFlow.
  *
  * Gère l'état global de l'application synchronisé en temps réel via Socket.IO :
- *  - tables, orders, history, products, menus, staff, roles, config
+ *  - tables, orders, history, products, menus, staff, roles, config, reservations
  *  - synchronisation multi-postes (Salle, Cuisine KDS, Dashboard, Gestion)
  *  - buffer offline avec reconnexion automatique
  *  - authentification obligatoire par profil + code PIN individuel dès l'ouverture
@@ -64,17 +67,22 @@ export default function App() {
   const isMobile = containerWidth < 640;
 
   // ── État principal ─────────────────────────────────────────
-  const [tables,   setTables]   = useState(fallbackTables);
-  const [orders,   setOrders]   = useState(fallbackOrders);
-  const [history,  setHistory]  = useState(seedHistory);
-  const [products, setProducts] = useState(PRODUCTS_SEED);
-  const [menus,    setMenus]    = useState(seedMenus);
-  const [staff,    setStaff]    = useState(INITIAL_STAFF);
-  const [roles,    setRoles]    = useState(INITIAL_ROLES);
-  const [ingredients, setIngredients] = useState([]);
-  const [recipes, setRecipes] = useState([]);
+  const [tables,       setTables]       = useState(fallbackTables);
+  const [orders,       setOrders]       = useState(fallbackOrders);
+  const [reservations, setReservations] = useState(fallbackReservations);
+  const [history,      setHistory]      = useState(seedHistory);
+  const [products,     setProducts]     = useState(PRODUCTS_SEED);
+  const [menus,        setMenus]        = useState(seedMenus);
+  const [staff,        setStaff]        = useState(INITIAL_STAFF);
+  const [roles,        setRoles]        = useState(INITIAL_ROLES);
+  const [ingredients,  setIngredients]  = useState([]);
+  const [recipes,      setRecipes]      = useState([]);
   const [stockMovements, setStockMovements] = useState([]);
-  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [config,       setConfig]       = useState(DEFAULT_CONFIG);
+
+  // ── Modales Phase 4 (Réservations & Transfert / Fusion) ─────
+  const [isReservationModalOpen, setIsReservationModalOpen] = useState(false);
+  const [tableActionModal, setTableActionModal] = useState(null); // { mode: "transfer" | "merge", sourceTable } | null
 
   // ── Table active & Équipier authentifié ─────────────────────
   const [currentStaff, setCurrentStaff] = useState(() => {
@@ -140,6 +148,7 @@ export default function App() {
       if (!fullState) return;
       if (fullState.tables)         setTables(fullState.tables);
       if (fullState.orders)         setOrders(fullState.orders);
+      if (fullState.reservations)   setReservations(fullState.reservations);
       if (fullState.history)        setHistory(fullState.history);
       if (fullState.products)       setProducts(fullState.products);
       if (fullState.menus)          setMenus(fullState.menus);
@@ -183,6 +192,40 @@ export default function App() {
       if (soundOn) beep(980);
     };
 
+    const handleKitchenCallCourse = ({ tableNumber, courseLabel, course, server }) => {
+      pushToast(`🔔 Table ${tableNumber} — Réclame : ${courseLabel ? courseLabel.toUpperCase() : course} (${server})`, "kitchen");
+      if (soundOn) beep(840);
+    };
+
+    const handleReservationCreated = (reservation) => {
+      setReservations((prev) => [reservation, ...prev.filter((r) => r.id !== reservation.id)]);
+      pushToast(`📅 Réservation créée : ${reservation.customerName} (${reservation.guests}p à ${reservation.time})`, "server");
+    };
+
+    const handleReservationUpdated = (reservation) => {
+      setReservations((prev) => prev.map((r) => (r.id === reservation.id ? reservation : r)));
+    };
+
+    const handleReservationDeleted = ({ reservationId }) => {
+      setReservations((prev) => prev.filter((r) => r.id !== reservationId));
+    };
+
+    const handleTablesTransferred = (payload) => {
+      const from = payload?.sourceTableNumber ?? payload?.fromTableNumber;
+      const to = payload?.targetTableNumber ?? payload?.toTableNumber;
+      if (from && to) {
+        pushToast(`↔️ Table ${from} transférée vers Table ${to}`, "server");
+      }
+    };
+
+    const handleTablesMerged = (payload) => {
+      const from = payload?.sourceTableNumber ?? payload?.fromTableNumber;
+      const to = payload?.targetTableNumber ?? payload?.toTableNumber;
+      if (from && to) {
+        pushToast(`🔗 Table ${from} fusionnée dans Table ${to}`, "server");
+      }
+    };
+
     const handleStockUpdated = (updatedIngredients) => {
       setIngredients(updatedIngredients);
     };
@@ -222,6 +265,12 @@ export default function App() {
     socket.on("history:new_entry", handleHistoryNew);
     socket.on("kitchen:new_ticket", handleKitchenTicket);
     socket.on("server:order_ready", handleOrderReady);
+    socket.on("kitchen:call_course", handleKitchenCallCourse);
+    socket.on("reservation:created", handleReservationCreated);
+    socket.on("reservation:updated", handleReservationUpdated);
+    socket.on("reservation:deleted", handleReservationDeleted);
+    socket.on("tables:transferred", handleTablesTransferred);
+    socket.on("tables:merged", handleTablesMerged);
     socket.on("stock:updated", handleStockUpdated);
     socket.on("recipes:updated", handleRecipesUpdated);
     socket.on("stock:movements_updated", handleMovementsUpdated);
@@ -242,6 +291,12 @@ export default function App() {
       socket.off("history:new_entry", handleHistoryNew);
       socket.off("kitchen:new_ticket", handleKitchenTicket);
       socket.off("server:order_ready", handleOrderReady);
+      socket.off("kitchen:call_course", handleKitchenCallCourse);
+      socket.off("reservation:created", handleReservationCreated);
+      socket.off("reservation:updated", handleReservationUpdated);
+      socket.off("reservation:deleted", handleReservationDeleted);
+      socket.off("tables:transferred", handleTablesTransferred);
+      socket.off("tables:merged", handleTablesMerged);
       socket.off("stock:updated", handleStockUpdated);
       socket.off("recipes:updated", handleRecipesUpdated);
       socket.off("stock:movements_updated", handleMovementsUpdated);
@@ -360,13 +415,39 @@ export default function App() {
     setIsPinModalOpen(true);
   };
 
+  const getItemCourseAndStation = (product) => {
+    const cat = product?.cat || "";
+    const isBar =
+      cat === "boissons" ||
+      product?.station === "bar" ||
+      product?.id?.startsWith("p18") ||
+      product?.id?.startsWith("p19") ||
+      product?.id?.startsWith("p20") ||
+      product?.id?.startsWith("p21");
+    const station = isBar ? "bar" : (product?.station || "kitchen");
+    let course = "plat";
+    if (isBar) {
+      course = "boisson";
+    } else if (cat === "entrees") {
+      course = "entree";
+    } else if (cat === "desserts") {
+      course = "dessert";
+    } else {
+      course = "plat";
+    }
+    const courseStatus = (course === "entree" || course === "boisson" || course === "direct") ? "direct" : "held";
+    return { course, courseStatus, station, cat };
+  };
+
   const addProductToOrder = (tableId, product) => {
     const order = ensureOrderForTable(tableId);
+    const { course, courseStatus, station, cat } = getItemCourseAndStation(product);
+
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== order.id) return o;
         const existing = o.items.find(
-          (i) => i.productId === product.id && i.status === "draft" && !i.notes
+          (i) => i.productId === product.id && i.status === "draft" && !i.notes && (i.course || course) === course
         );
         if (existing) {
           return { ...o, items: o.items.map((i) => i.id === existing.id ? { ...i, qty: i.qty + 1 } : i) };
@@ -375,7 +456,18 @@ export default function App() {
           ...o,
           items: [
             ...o.items,
-            { id: uid("it"), productId: product.id, name: product.name, price: product.price, qty: 1, notes: "", status: "draft" },
+            {
+              id: uid("it"),
+              productId: product.id,
+              name: product.name,
+              price: product.price,
+              qty: 1,
+              notes: "",
+              status: "draft",
+              course,
+              courseStatus,
+              station,
+            },
           ],
         };
       })
@@ -383,12 +475,19 @@ export default function App() {
 
     emitOrQueue("order:add_item", {
       orderId: order.id,
-      product: { id: product.id, name: product.name, price: product.price, isMenu: false },
+      product: { id: product.id, name: product.name, price: product.price, cat, station, isMenu: false },
+      course,
+      courseStatus,
+      station,
     });
   };
 
   const addComposedMenuToOrder = (tableId, menuProduct, composition) => {
     const order = ensureOrderForTable(tableId);
+    const course = "plat";
+    const courseStatus = "held";
+    const station = "kitchen";
+
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== order.id) return o;
@@ -396,7 +495,20 @@ export default function App() {
           ...o,
           items: [
             ...o.items,
-            { id: uid("it"), productId: menuProduct.id, name: menuProduct.name, price: menuProduct.price, qty: 1, notes: "", status: "draft", isMenu: true, composition },
+            {
+              id: uid("it"),
+              productId: menuProduct.id,
+              name: menuProduct.name,
+              price: menuProduct.price,
+              qty: 1,
+              notes: "",
+              status: "draft",
+              isMenu: true,
+              composition,
+              course,
+              courseStatus,
+              station,
+            },
           ],
         };
       })
@@ -404,8 +516,11 @@ export default function App() {
 
     emitOrQueue("order:add_item", {
       orderId: order.id,
-      product: { id: menuProduct.id, name: menuProduct.name, price: menuProduct.price, isMenu: true },
+      product: { id: menuProduct.id, name: menuProduct.name, price: menuProduct.price, cat: "menus", station: "kitchen", isMenu: true },
       composition,
+      course,
+      courseStatus,
+      station,
     });
   };
 
@@ -447,12 +562,16 @@ export default function App() {
     emitOrQueue("order:send_kitchen", { orderId, serverName });
   };
 
-  const serveAndMaybeFree = (orderId) => {
+  const serveAndMaybeFree = (orderId, targetCourse = null) => {
     updateOrder(orderId, (o) => ({
       ...o,
-      items: o.items.map((i) => (i.status === "ready" ? { ...i, status: "served" } : i)),
+      items: o.items.map((i) => {
+        if (i.status !== "ready") return i;
+        if (targetCourse && i.course !== targetCourse) return i;
+        return { ...i, status: "served" };
+      }),
     }));
-    emitOrQueue("order:serve", { orderId });
+    emitOrQueue("order:serve", { orderId, course: targetCourse });
   };
 
   const handleApplyDiscount = (orderId, discount) => {
@@ -571,30 +690,183 @@ export default function App() {
     emitOrQueue("tables:toggle_alert", { tableId });
   };
 
-  // ── Actions Cuisine ────────────────────────────────────────
-  const startPrep = (orderId) => {
+  // ── Actions Cuisine (Phase 4 multi-postes) ──────────────────
+  const startPrep = (orderId, station = "all") => {
     updateOrder(orderId, (o) => ({
       ...o,
-      items: o.items.map((i) => (i.status === "new" ? { ...i, status: "preparing" } : i)),
+      items: o.items.map((i) => {
+        if (i.status !== "new") return i;
+        if (i.courseStatus === "held") return i; // Ne pas démarrer les articles en attente de réclame
+        if (station !== "all") {
+          const isBar = i.station === "bar";
+          if (station === "bar" && !isBar) return i;
+          if (station === "kitchen" && isBar) return i;
+        }
+        return { ...i, status: "preparing" };
+      }),
     }));
-    emitOrQueue("order:start_prep", { orderId });
+    emitOrQueue("order:start_prep", { orderId, station });
   };
 
-  const markReady = (orderId) => {
+  const markReady = (orderId, station = "all") => {
     let tableNum = null;
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== orderId) return o;
         const t = tables.find((tt) => tt.id === o.tableId);
         tableNum = t?.number;
-        return { ...o, items: o.items.map((i) => (i.status === "preparing" ? { ...i, status: "ready" } : i)) };
+        return {
+          ...o,
+          items: o.items.map((i) => {
+            if (i.status !== "preparing") return i;
+            if (i.courseStatus === "held") return i; // Les articles en attente ne peuvent pas être prêts
+            if (station !== "all") {
+              const isBar = i.station === "bar";
+              if (station === "bar" && !isBar) return i;
+              if (station === "kitchen" && isBar) return i;
+            }
+            return { ...i, status: "ready" };
+          }),
+        };
       })
     );
     if (tableNum) {
-      pushToast(`🔔 Commande de la Table ${tableNum} prête`, "server");
+      const stationSuffix = station === "bar" ? " (Bar)" : station === "kitchen" ? " (Cuisine)" : "";
+      pushToast(`🔔 Commande de la Table ${tableNum} prête${stationSuffix}`, "server");
       if (soundOn) beep(980);
     }
-    emitOrQueue("order:mark_ready", { orderId });
+    emitOrQueue("order:mark_ready", { orderId, station });
+  };
+
+  // ── Actions Phase 4 : Suites & Réclame ──────────────────────
+  const handleCallCourse = (orderId, course) => {
+    const order = orders.find((o) => o.id === orderId);
+    const table = tables.find((t) => t.id === order?.tableId);
+    const serverName = currentStaff ? currentStaff.name.split(" ")[0] : order?.server || "Service";
+
+    updateOrder(orderId, (o) => ({
+      ...o,
+      items: o.items.map((i) => {
+        if ((course === "suite" || i.course === course) && i.courseStatus === "held") {
+          return { ...i, courseStatus: "called", status: "new" };
+        }
+        return i;
+      }),
+    }));
+
+    emitOrQueue("order:call_course", { orderId, course, serverName, server: serverName });
+    const courseLabels = { entree: "Entrées", plat: "Plats", dessert: "Desserts", boisson: "Boissons", direct: "Direct", suite: "Suite" };
+    pushToast(`🔔 Réclame transmise en cuisine pour Table ${table?.number || ""} : ${courseLabels[course] || course}`, "server");
+    if (soundOn) beep(840);
+  };
+
+  const handleChangeItemCourse = (orderId, itemId, course) => {
+    const defaultHeld = course === "plat" || course === "dessert";
+    updateOrder(orderId, (o) => ({
+      ...o,
+      items: o.items.map((i) => (i.id === itemId ? { ...i, course, courseStatus: defaultHeld ? "held" : "direct" } : i)),
+    }));
+    emitOrQueue("order:change_item_course", { orderId, itemId, course });
+  };
+
+  // ── Actions Phase 4 : Transfert & Fusion de tables ─────────
+  const handleTransferTable = (sourceTableId, targetTableId) => {
+    const sourceT = tables.find((t) => t.id === sourceTableId);
+    const targetT = tables.find((t) => t.id === targetTableId);
+
+    setOrders((prev) =>
+      prev.map((o) => (o.tableId === sourceTableId ? { ...o, tableId: targetTableId } : o))
+    );
+    setReservations((prev) =>
+      prev.map((r) => (r.tableId === sourceTableId ? { ...r, tableId: targetTableId } : r))
+    );
+
+    const socket = getSocket();
+    if (!socket || !socket.connected) {
+      pushToast(`↔️ Table ${sourceT?.number} transférée vers Table ${targetT?.number}`, "server");
+    }
+
+    emitOrQueue("tables:transfer", { sourceTableId, targetTableId });
+    if (activeTableId === sourceTableId) {
+      setActiveTableId(targetTableId);
+    }
+  };
+
+  const handleMergeTable = (sourceTableId, targetTableId) => {
+    const sourceT = tables.find((t) => t.id === sourceTableId);
+    const targetT = tables.find((t) => t.id === targetTableId);
+    const sourceOrder = orders.find((o) => o.tableId === sourceTableId);
+    const targetOrder = orders.find((o) => o.tableId === targetTableId);
+
+    if (!sourceOrder || !targetOrder) return;
+
+    setOrders((prev) => {
+      const remaining = prev.filter((o) => o.id !== sourceOrder.id);
+      return remaining.map((o) => {
+        if (o.id !== targetOrder.id) return o;
+        return {
+          ...o,
+          items: [...o.items, ...sourceOrder.items],
+        };
+      });
+    });
+
+    const socket = getSocket();
+    if (!socket || !socket.connected) {
+      pushToast(`🔗 Table ${sourceT?.number} fusionnée dans Table ${targetT?.number}`, "server");
+    }
+
+    emitOrQueue("tables:merge", { sourceTableId, targetTableId });
+    if (activeTableId === sourceTableId) {
+      setActiveTableId(targetTableId);
+    }
+  };
+
+  // ── Actions Phase 4 : Réservations & Seating ────────────────
+  const handleCreateReservation = (data) => {
+    const newRes = {
+      id: uid("res"),
+      status: "confirmed",
+      ...data,
+    };
+    setReservations((prev) => [newRes, ...prev]);
+    emitOrQueue("reservation:create", newRes);
+    pushToast(`Réservation enregistrée pour ${data.customerName}`, "server");
+  };
+
+  const handleUpdateReservationStatus = (reservationId, status) => {
+    setReservations((prev) =>
+      prev.map((r) => (r.id === reservationId ? { ...r, status } : r))
+    );
+    emitOrQueue("reservation:update_status", { reservationId, status });
+  };
+
+  const handleAssignReservationTable = (reservationId, tableId) => {
+    setReservations((prev) =>
+      prev.map((r) => (r.id === reservationId ? { ...r, tableId } : r))
+    );
+    emitOrQueue("reservation:assign_table", { reservationId, tableId });
+  };
+
+  const handleDeleteReservation = (reservationId) => {
+    setReservations((prev) => prev.filter((r) => r.id !== reservationId));
+    emitOrQueue("reservation:delete", { reservationId });
+    pushToast("Réservation supprimée", "server");
+  };
+
+  const handleSeatReservationGuests = ({ reservation, table }) => {
+    setReservations((prev) =>
+      prev.map((r) => (r.id === reservation.id ? { ...r, status: "seated", tableId: table.id } : r))
+    );
+    emitOrQueue("reservation:assign_table", { reservationId: reservation.id, tableId: table.id });
+    emitOrQueue("reservation:update_status", { reservationId: reservation.id, status: "seated" });
+
+    setActiveTableId(table.id);
+    ensureOrderForTable(table.id);
+    setRole("serveur");
+    setServerView("commande");
+    setIsReservationModalOpen(false);
+    pushToast(`Table ${table.number} installée pour ${reservation.customerName} (${reservation.guests} pers.)`, "server");
   };
 
   // ── Actions Gestion : tables ───────────────────────────────
@@ -715,9 +987,12 @@ export default function App() {
         <FloorPlan
           tables={tables}
           orders={orders}
+          reservations={reservations}
           now={now}
           onOpen={openTable}
           onToggleAlert={toggleAlert}
+          onOpenReservations={() => setIsReservationModalOpen(true)}
+          onOpenTableAction={(mode, table) => setTableActionModal({ mode, sourceTable: table })}
           isMobile={isMobile}
         />
       )}
@@ -730,6 +1005,8 @@ export default function App() {
           recipes={recipes}
           ingredients={ingredients}
           config={config}
+          tables={tables}
+          orders={orders}
           isMobile={isMobile}
           onBack={() => setServerView("plan")}
           onAdd={(p) => addProductToOrder(activeTable.id, p)}
@@ -743,7 +1020,13 @@ export default function App() {
           onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
           onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
           onBackToPlan={() => setServerView("plan")}
-          onToast={pushToast}
+          onCallCourse={(courseOrOrderId, maybeCourse) => {
+            const course = maybeCourse || courseOrOrderId;
+            handleCallCourse(activeOrder.id, course);
+          }}
+          onChangeItemCourse={(itemId, course) => handleChangeItemCourse(activeOrder.id, itemId, course)}
+          onTransferTable={(fromId, toId) => handleTransferTable(fromId, toId)}
+          onMergeTable={(fromId, toId) => handleMergeTable(fromId, toId)}
         />
       )}
 
@@ -807,6 +1090,36 @@ export default function App() {
           onDeleteIngredient={handleDeleteIngredient}
           onSaveRecipe={handleSaveRecipe}
           onToggleProductAvailable={handleToggleProductAvailable}
+        />
+      )}
+
+      {/* ── Modale Gestion des Réservations & Widget (Phase 4) ── */}
+      {isReservationModalOpen && (
+        <ReservationModal
+          isOpen={isReservationModalOpen}
+          onClose={() => setIsReservationModalOpen(false)}
+          reservations={reservations}
+          tables={tables}
+          orders={orders}
+          onCreateReservation={handleCreateReservation}
+          onUpdateStatus={handleUpdateReservationStatus}
+          onAssignTable={handleAssignReservationTable}
+          onDeleteReservation={handleDeleteReservation}
+          onSeatGuests={handleSeatReservationGuests}
+        />
+      )}
+
+      {/* ── Modale Fusion & Transfert de tables (Phase 4) ── */}
+      {tableActionModal && (
+        <TableActionModal
+          isOpen={Boolean(tableActionModal)}
+          onClose={() => setTableActionModal(null)}
+          initialMode={tableActionModal.mode || "transfer"}
+          sourceTable={tableActionModal.sourceTable}
+          tables={tables}
+          orders={orders}
+          onTransfer={handleTransferTable}
+          onMerge={handleMergeTable}
         />
       )}
     </div>

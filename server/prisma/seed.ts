@@ -3,38 +3,38 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 const CATEGORIES = [
-  { id: "entrees", name: "Entrées", accent: "#B5451B", vatRate: 10 },
-  { id: "plats", name: "Plats", accent: "#8B5E34", vatRate: 10 },
-  { id: "burgers", name: "Burgers", accent: "#A6431A", vatRate: 10 },
-  { id: "pizzas", name: "Pizzas", accent: "#C1440E", vatRate: 10 },
-  { id: "salades", name: "Salades", accent: "#4A7856", vatRate: 10 },
-  { id: "desserts", name: "Desserts", accent: "#B5793A", vatRate: 10 },
-  { id: "boissons", name: "Boissons", accent: "#3E7CB1", vatRate: 10 },
-  { id: "menus", name: "Menus", accent: "#6B4226", vatRate: 10 },
+  { id: "entrees", name: "Entrées", accent: "#B5451B", vatRate: 10, station: "kitchen" },
+  { id: "plats", name: "Plats", accent: "#8B5E34", vatRate: 10, station: "kitchen" },
+  { id: "burgers", name: "Burgers", accent: "#A6431A", vatRate: 10, station: "kitchen" },
+  { id: "pizzas", name: "Pizzas", accent: "#C1440E", vatRate: 10, station: "kitchen" },
+  { id: "salades", name: "Salades", accent: "#4A7856", vatRate: 10, station: "kitchen" },
+  { id: "desserts", name: "Desserts", accent: "#B5793A", vatRate: 10, station: "kitchen" },
+  { id: "boissons", name: "Boissons", accent: "#3E7CB1", vatRate: 10, station: "bar" },
+  { id: "menus", name: "Menus", accent: "#6B4226", vatRate: 10, station: "kitchen" },
 ];
 
 const PRODUCTS_SEED = [
-  { id: "p1", cat: "entrees", name: "Burrata crémeuse", desc: "Tomates anciennes, basilic, huile d'olive", price: 9, emoji: "🍅", allergens: ["Lait"], vatRate: 10 },
-  { id: "p2", cat: "entrees", name: "Velouté du jour", desc: "Potiron rôti, crème, noisettes", price: 7.5, emoji: "🥣", allergens: ["Lait", "Fruits à coque"], vatRate: 10 },
-  { id: "p3", cat: "entrees", name: "Planche à partager", desc: "Charcuterie, fromages, pain grillé", price: 14, emoji: "🧀", allergens: ["Lait", "Gluten"], vatRate: 10 },
-  { id: "p4", cat: "plats", name: "Entrecôte grillée", desc: "Frites maison, sauce au poivre", price: 22, emoji: "🥩", allergens: [], vatRate: 10 },
-  { id: "p5", cat: "plats", name: "Saumon rôti", desc: "Purée de panais, beurre citronné", price: 19, emoji: "🐟", allergens: ["Poisson", "Lait"], vatRate: 10 },
-  { id: "p6", cat: "plats", name: "Risotto champignons", desc: "Parmesan, huile de truffe", price: 16, emoji: "🍚", allergens: ["Lait"], vatRate: 10 },
-  { id: "p7", cat: "burgers", name: "Burger Classic", desc: "Bœuf, cheddar, oignons confits", price: 12, emoji: "🍔", allergens: ["Gluten", "Lait"], vatRate: 10 },
-  { id: "p8", cat: "burgers", name: "Burger Veggie", desc: "Galette de légumes, avocat, roquette", price: 12.5, emoji: "🥑", allergens: ["Gluten"], vatRate: 10 },
-  { id: "p9", cat: "burgers", name: "Burger Bacon BBQ", desc: "Double bœuf, bacon, sauce barbecue", price: 14.5, emoji: "🥓", allergens: ["Gluten", "Lait"], vatRate: 10 },
-  { id: "p10", cat: "pizzas", name: "Pizza 4 Fromages", desc: "Mozzarella, gorgonzola, chèvre, parmesan", price: 14, emoji: "🍕", allergens: ["Gluten", "Lait"], vatRate: 10 },
-  { id: "p11", cat: "pizzas", name: "Pizza Regina", desc: "Jambon, champignons, mozzarella", price: 13, emoji: "🍕", allergens: ["Gluten", "Lait"], vatRate: 10 },
-  { id: "p12", cat: "pizzas", name: "Pizza Diavola", desc: "Salami piquant, piment, mozzarella", price: 13.5, emoji: "🌶️", allergens: ["Gluten", "Lait"], vatRate: 10 },
-  { id: "p13", cat: "salades", name: "César Poulet", desc: "Poulet grillé, parmesan, croûtons", price: 13, emoji: "🥗", allergens: ["Gluten", "Lait", "Œuf"], vatRate: 10 },
-  { id: "p14", cat: "salades", name: "Salade Chèvre Chaud", desc: "Chèvre, miel, noix, mesclun", price: 12, emoji: "🐐", allergens: ["Lait", "Fruits à coque"], vatRate: 10 },
-  { id: "p15", cat: "desserts", name: "Tiramisu maison", desc: "Mascarpone, café, cacao", price: 7, emoji: "🍰", allergens: ["Lait", "Œuf", "Gluten"], vatRate: 10 },
-  { id: "p16", cat: "desserts", name: "Fondant au chocolat", desc: "Cœur coulant, glace vanille", price: 8, emoji: "🍫", allergens: ["Lait", "Œuf", "Gluten"], vatRate: 10 },
-  { id: "p17", cat: "desserts", name: "Crème brûlée", desc: "Vanille de Madagascar", price: 6.5, emoji: "🍮", allergens: ["Lait", "Œuf"], vatRate: 10 },
-  { id: "p18", cat: "boissons", name: "Coca-Cola", desc: "33cl", price: 4, emoji: "🥤", allergens: [], vatRate: 10 },
-  { id: "p19", cat: "boissons", name: "Eau pétillante", desc: "50cl", price: 3.5, emoji: "💧", allergens: [], vatRate: 10 },
-  { id: "p20", cat: "boissons", name: "Verre de Côtes du Rhône", desc: "12cl (Alcool)", price: 6, emoji: "🍷", allergens: ["Sulfites"], vatRate: 20 },
-  { id: "p21", cat: "boissons", name: "Café", desc: "Expresso", price: 2.5, emoji: "☕", allergens: [], vatRate: 10 },
+  { id: "p1", cat: "entrees", name: "Burrata crémeuse", desc: "Tomates anciennes, basilic, huile d'olive", price: 9, emoji: "🍅", allergens: ["Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p2", cat: "entrees", name: "Velouté du jour", desc: "Potiron rôti, crème, noisettes", price: 7.5, emoji: "🥣", allergens: ["Lait", "Fruits à coque"], vatRate: 10, station: "kitchen" },
+  { id: "p3", cat: "entrees", name: "Planche à partager", desc: "Charcuterie, fromages, pain grillé", price: 14, emoji: "🧀", allergens: ["Lait", "Gluten"], vatRate: 10, station: "kitchen" },
+  { id: "p4", cat: "plats", name: "Entrecôte grillée", desc: "Frites maison, sauce au poivre", price: 22, emoji: "🥩", allergens: [], vatRate: 10, station: "kitchen" },
+  { id: "p5", cat: "plats", name: "Saumon rôti", desc: "Purée de panais, beurre citronné", price: 19, emoji: "🐟", allergens: ["Poisson", "Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p6", cat: "plats", name: "Risotto champignons", desc: "Parmesan, huile de truffe", price: 16, emoji: "🍚", allergens: ["Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p7", cat: "burgers", name: "Burger Classic", desc: "Bœuf, cheddar, oignons confits", price: 12, emoji: "🍔", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p8", cat: "burgers", name: "Burger Veggie", desc: "Galette de légumes, avocat, roquette", price: 12.5, emoji: "🥑", allergens: ["Gluten"], vatRate: 10, station: "kitchen" },
+  { id: "p9", cat: "burgers", name: "Burger Bacon BBQ", desc: "Double bœuf, bacon, sauce barbecue", price: 14.5, emoji: "🥓", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p10", cat: "pizzas", name: "Pizza 4 Fromages", desc: "Mozzarella, gorgonzola, chèvre, parmesan", price: 14, emoji: "🍕", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p11", cat: "pizzas", name: "Pizza Regina", desc: "Jambon, champignons, mozzarella", price: 13, emoji: "🍕", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p12", cat: "pizzas", name: "Pizza Diavola", desc: "Salami piquant, piment, mozzarella", price: 13.5, emoji: "🌶️", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p13", cat: "salades", name: "César Poulet", desc: "Poulet grillé, parmesan, croûtons", price: 13, emoji: "🥗", allergens: ["Gluten", "Lait", "Œuf"], vatRate: 10, station: "kitchen" },
+  { id: "p14", cat: "salades", name: "Salade Chèvre Chaud", desc: "Chèvre, miel, noix, mesclun", price: 12, emoji: "🐐", allergens: ["Lait", "Fruits à coque"], vatRate: 10, station: "kitchen" },
+  { id: "p15", cat: "desserts", name: "Tiramisu maison", desc: "Mascarpone, café, cacao", price: 7, emoji: "🍰", allergens: ["Lait", "Œuf", "Gluten"], vatRate: 10, station: "kitchen" },
+  { id: "p16", cat: "desserts", name: "Fondant au chocolat", desc: "Cœur coulant, glace vanille", price: 8, emoji: "🍫", allergens: ["Lait", "Œuf", "Gluten"], vatRate: 10, station: "kitchen" },
+  { id: "p17", cat: "desserts", name: "Crème brûlée", desc: "Vanille de Madagascar", price: 6.5, emoji: "🍮", allergens: ["Lait", "Œuf"], vatRate: 10, station: "kitchen" },
+  { id: "p18", cat: "boissons", name: "Coca-Cola", desc: "33cl", price: 4, emoji: "🥤", allergens: [], vatRate: 10, station: "bar" },
+  { id: "p19", cat: "boissons", name: "Eau pétillante", desc: "50cl", price: 3.5, emoji: "💧", allergens: [], vatRate: 10, station: "bar" },
+  { id: "p20", cat: "boissons", name: "Verre de Côtes du Rhône", desc: "12cl (Alcool)", price: 6, emoji: "🍷", allergens: ["Sulfites"], vatRate: 20, station: "bar" },
+  { id: "p21", cat: "boissons", name: "Café", desc: "Expresso", price: 2.5, emoji: "☕", allergens: [], vatRate: 10, station: "bar" },
 ];
 
 const MENUS_SEED = [
@@ -284,6 +284,7 @@ async function main() {
   await prisma.product.deleteMany({});
   await prisma.menu.deleteMany({});
   await prisma.category.deleteMany({});
+  await prisma.reservation.deleteMany({});
   await prisma.table.deleteMany({});
 
   // 0. Configuration Restaurant & Imprimantes (Phase 3)
@@ -336,6 +337,7 @@ async function main() {
         available: true,
         isMenu: false,
         vatRate: p.vatRate || 10,
+        station: p.station || "kitchen",
       },
     });
   }
@@ -459,9 +461,9 @@ async function main() {
   });
   await prisma.orderItem.createMany({
     data: [
-      { id: "it_demo_1", orderId: o3.id, productId: "p7", name: "Burger Classic", price: 12, qty: 1, notes: "sans oignons", status: "preparing" },
-      { id: "it_demo_2", orderId: o3.id, productId: "p18", name: "Coca-Cola", price: 4, qty: 2, notes: "", status: "preparing" },
-      { id: "it_demo_3", orderId: o3.id, productId: "p10", name: "Pizza 4 Fromages", price: 14, qty: 1, notes: "", status: "preparing" },
+      { id: "it_demo_1", orderId: o3.id, productId: "p7", name: "Burger Classic", price: 12, qty: 1, notes: "sans oignons", status: "preparing", course: "plat", courseStatus: "held", station: "kitchen" },
+      { id: "it_demo_2", orderId: o3.id, productId: "p18", name: "Coca-Cola", price: 4, qty: 2, notes: "", status: "preparing", course: "boisson", courseStatus: "direct", station: "bar" },
+      { id: "it_demo_3", orderId: o3.id, productId: "p10", name: "Pizza 4 Fromages", price: 14, qty: 1, notes: "", status: "preparing", course: "plat", courseStatus: "held", station: "kitchen" },
     ],
   });
 
@@ -479,9 +481,9 @@ async function main() {
   });
   await prisma.orderItem.createMany({
     data: [
-      { id: "it_demo_4", orderId: o5.id, productId: "p4", name: "Entrecôte grillée", price: 22, qty: 1, notes: "cuisson saignante", status: "new" },
-      { id: "it_demo_5", orderId: o5.id, productId: "p1", name: "Burrata crémeuse", price: 9, qty: 1, notes: "", status: "new" },
-      { id: "it_demo_6", orderId: o5.id, productId: "p20", name: "Verre de Côtes du Rhône", price: 6, qty: 2, notes: "", status: "new" },
+      { id: "it_demo_4", orderId: o5.id, productId: "p4", name: "Entrecôte grillée", price: 22, qty: 1, notes: "cuisson saignante", status: "new", course: "plat", courseStatus: "held", station: "kitchen" },
+      { id: "it_demo_5", orderId: o5.id, productId: "p1", name: "Burrata crémeuse", price: 9, qty: 1, notes: "", status: "new", course: "entree", courseStatus: "direct", station: "kitchen" },
+      { id: "it_demo_6", orderId: o5.id, productId: "p20", name: "Verre de Côtes du Rhône", price: 6, qty: 2, notes: "", status: "new", course: "boisson", courseStatus: "direct", station: "bar" },
     ],
   });
 
@@ -499,8 +501,8 @@ async function main() {
   });
   await prisma.orderItem.createMany({
     data: [
-      { id: "it_demo_7", orderId: o8.id, productId: "p5", name: "Saumon rôti", price: 19, qty: 1, notes: "", status: "ready" },
-      { id: "it_demo_8", orderId: o8.id, productId: "p13", name: "César Poulet", price: 13, qty: 1, notes: "", status: "ready" },
+      { id: "it_demo_7", orderId: o8.id, productId: "p5", name: "Saumon rôti", price: 19, qty: 1, notes: "", status: "ready", course: "plat", courseStatus: "called", station: "kitchen" },
+      { id: "it_demo_8", orderId: o8.id, productId: "p13", name: "César Poulet", price: 13, qty: 1, notes: "", status: "ready", course: "plat", courseStatus: "called", station: "kitchen" },
     ],
   });
 
@@ -518,9 +520,9 @@ async function main() {
   });
   await prisma.orderItem.createMany({
     data: [
-      { id: "it_demo_9", orderId: o10.id, productId: "p3", name: "Planche à partager", price: 14, qty: 1, notes: "", status: "served" },
-      { id: "it_demo_10", orderId: o10.id, productId: "p19", name: "Eau pétillante", price: 3.5, qty: 2, notes: "", status: "served" },
-      { id: "it_demo_11", orderId: o10.id, productId: "p14", name: "Salade Chèvre Chaud", price: 12, qty: 1, notes: "allergie fruits à coque", status: "preparing" },
+      { id: "it_demo_9", orderId: o10.id, productId: "p3", name: "Planche à partager", price: 14, qty: 1, notes: "", status: "served", course: "entree", courseStatus: "direct", station: "kitchen" },
+      { id: "it_demo_10", orderId: o10.id, productId: "p19", name: "Eau pétillante", price: 3.5, qty: 2, notes: "", status: "served", course: "boisson", courseStatus: "direct", station: "bar" },
+      { id: "it_demo_11", orderId: o10.id, productId: "p14", name: "Salade Chèvre Chaud", price: 12, qty: 1, notes: "allergie fruits à coque", status: "preparing", course: "plat", courseStatus: "called", station: "kitchen" },
     ],
   });
 
@@ -559,6 +561,61 @@ async function main() {
       });
     }
   }
+
+  // 9. Reservations (Phase 4)
+  const todayStr = new Date().toISOString().slice(0, 10);
+  await prisma.reservation.createMany({
+    data: [
+      {
+        id: "res_demo_1",
+        customerName: "Famille Dubois",
+        phone: "06 11 22 33 44",
+        email: "dubois@email.fr",
+        date: todayStr,
+        time: "20:30",
+        guests: 2,
+        status: "confirmed",
+        tableId: "tbl_2",
+        notes: "Près de la baie vitrée",
+      },
+      {
+        id: "res_demo_2",
+        customerName: "M. Bertrand",
+        phone: "06 99 88 77 66",
+        email: "bertrand@outlook.com",
+        date: todayStr,
+        time: "21:00",
+        guests: 4,
+        status: "confirmed",
+        tableId: "tbl_11",
+        notes: "Anniversaire - dessert avec bougie",
+      },
+      {
+        id: "res_demo_3",
+        customerName: "Sophie Morel",
+        phone: "07 44 55 66 77",
+        email: "sophie.m@gmail.com",
+        date: todayStr,
+        time: "19:45",
+        guests: 3,
+        status: "confirmed",
+        tableId: null,
+        notes: "1 poussette / chaise haute",
+      },
+      {
+        id: "res_demo_4",
+        customerName: "Cabinet Valois",
+        phone: "01 44 22 00 11",
+        email: "valois@avocats.fr",
+        date: todayStr,
+        time: "12:30",
+        guests: 6,
+        status: "seated",
+        tableId: "tbl_5",
+        notes: "Déjeuner d'affaires",
+      },
+    ],
+  });
 
   console.log("Database seeded successfully!");
 }

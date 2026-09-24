@@ -10,8 +10,11 @@ function randomProduct() {
 }
 
 /** Crée un article de commande factice pour le seed */
-function makeItem(status, notes) {
-  const pr = randomProduct();
+function makeItem(status, notes, prOverride) {
+  const pr = prOverride || randomProduct();
+  const cat = pr.cat || "";
+  const isBar = cat === "boissons" || pr.station === "bar";
+  let course = isBar ? "boisson" : cat === "entrees" ? "entree" : cat === "desserts" ? "dessert" : "plat";
   return {
     id: uid("it"),
     productId: pr.id,
@@ -20,6 +23,9 @@ function makeItem(status, notes) {
     qty: 1 + Math.floor(Math.random() * 2),
     notes: notes || "",
     status,
+    course,
+    courseStatus: course === "entree" || course === "boisson" ? "direct" : "held",
+    station: isBar ? "bar" : "kitchen",
   };
 }
 
@@ -62,7 +68,11 @@ export function seedOrders(tables) {
     server: "Marco",
     createdAt: now - 2 * 60000,
     sentAt: now - 2 * 60000,
-    items: [makeItem("new"), makeItem("new", "cuisson saignante"), makeItem("new")],
+    items: [
+      makeItem("new", "cuisson saignante", PRODUCTS_SEED[3]), // Entrecôte grillée (plat, held)
+      makeItem("new", "", PRODUCTS_SEED[0]), // Burrata crémeuse (entree, direct)
+      makeItem("new", "", PRODUCTS_SEED[19]), // Verre de Côtes du Rhône (boisson, direct)
+    ],
   });
 
   // Table 8 : prête à servir (14 min)
@@ -125,4 +135,59 @@ export function seedHistory() {
 /** Retourne les menus seed prêts à l'emploi */
 export function seedMenus() {
   return MENUS_SEED.map((m) => ({ ...m }));
+}
+
+/** Génère les réservations initiales de démonstration (Phase 4) */
+export function seedReservations() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  return [
+    {
+      id: "res_demo_1",
+      customerName: "Famille Dubois",
+      phone: "06 11 22 33 44",
+      email: "dubois@email.fr",
+      date: todayStr,
+      time: "20:30",
+      guests: 2,
+      status: "confirmed",
+      tableId: "tbl_2",
+      notes: "Près de la baie vitrée",
+    },
+    {
+      id: "res_demo_2",
+      customerName: "M. Bertrand",
+      phone: "06 99 88 77 66",
+      email: "bertrand@outlook.com",
+      date: todayStr,
+      time: "21:00",
+      guests: 4,
+      status: "confirmed",
+      tableId: "tbl_11",
+      notes: "Anniversaire - dessert avec bougie",
+    },
+    {
+      id: "res_demo_3",
+      customerName: "Sophie Morel",
+      phone: "07 44 55 66 77",
+      email: "sophie.m@gmail.com",
+      date: todayStr,
+      time: "19:45",
+      guests: 3,
+      status: "confirmed",
+      tableId: null,
+      notes: "1 poussette / chaise haute",
+    },
+    {
+      id: "res_demo_4",
+      customerName: "Cabinet Valois",
+      phone: "01 44 22 00 11",
+      email: "valois@avocats.fr",
+      date: todayStr,
+      time: "12:30",
+      guests: 6,
+      status: "seated",
+      tableId: "tbl_5",
+      notes: "Déjeuner d'affaires",
+    },
+  ];
 }

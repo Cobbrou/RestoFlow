@@ -81,14 +81,15 @@ export function noteIndicatesAllergy(notes) {
  * @returns {"new"|"preparing"|"ready"|"done"}
  */
 export function orderKitchenStatus(order) {
-  const statuses = order.items
-    .map((i) => i.status)
-    .filter((s) => s !== "draft" && s !== "served");
-  if (statuses.length === 0)              return "done";
-  if (statuses.includes("new"))           return "new";
-  if (statuses.includes("preparing"))     return "preparing";
-  if (statuses.every((s) => s === "ready")) return "ready";
-  return "done";
+  const unserved = (order?.items || []).filter((i) => i.status !== "draft" && i.status !== "served");
+  if (unserved.length === 0) return "done";
+  const active = unserved.filter((i) => i.courseStatus !== "held");
+  if (active.length > 0) {
+    if (active.every((i) => i.status === "ready")) return "ready";
+    if (active.some((i) => i.status === "preparing" || i.status === "ready")) return "preparing";
+    return "new";
+  }
+  return "new";
 }
 
 /**
