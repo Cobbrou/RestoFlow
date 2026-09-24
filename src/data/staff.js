@@ -32,7 +32,9 @@ export const PERMISSION_MODULES = [
     permissions: [
       { id: "caisse.checkout", label: "Encaisser les additions", desc: "Validation des paiements et impression des tickets" },
       { id: "caisse.split", label: "Paiements partagés", desc: "Gestion des règlements multiples et division d'addition" },
+      { id: "caisse.discount", label: "Appliquer des remises", desc: "Application de codes promotionnels ou remises manuelles" },
       { id: "caisse.history", label: "Historique des paiements", desc: "Consultation et réimpression des reçus encaissés" },
+      { id: "caisse.settings", label: "Paramètres de caisse & Imprimantes", desc: "Mentions légales, configuration des imprimantes et codes promo" },
     ],
   },
   {
@@ -84,7 +86,9 @@ export const INITIAL_ROLES = [
       "salle.alerts",
       "caisse.checkout",
       "caisse.split",
+      "caisse.discount",
       "caisse.history",
+      "caisse.settings",
       "gestion.tables",
       "gestion.stocks",
       "dashboard.view",
@@ -104,6 +108,7 @@ export const INITIAL_ROLES = [
       "salle.alerts",
       "caisse.checkout",
       "caisse.split",
+      "caisse.discount",
     ],
   },
   {

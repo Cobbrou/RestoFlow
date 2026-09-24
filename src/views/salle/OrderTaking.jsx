@@ -1,12 +1,14 @@
 import { useState } from "react";
 import {
   ArrowLeft, Search, Plus, Minus, X, StickyNote,
-  AlertTriangle, Check, LayoutList, Ban, Receipt
+  AlertTriangle, Check, LayoutList, Ban, Receipt, Tag, Sparkles, Printer
 } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { isAvailable, noteIndicatesAllergy, elapsed, money } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
+import DiscountModal from "./DiscountModal.jsx";
+import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    OrderTaking — Écran de prise de commande (côté serveur)
@@ -14,10 +16,11 @@ import PaymentModal from "./PaymentModal.jsx";
 
 export default function OrderTaking({
   table, order, now, products, isMobile,
-  recipes = [], ingredients = [],
+  recipes = [], ingredients = [], config = {},
   onBack, onAdd, onAddComposedMenu,
   onQty, onRemove, onNote,
   onSend, onServe, onCheckout, onBackToPlan, onToast,
+  onApplyDiscount, onRemoveDiscount,
 }) {
   const [activeCat, setActiveCat]     = useState(CATEGORIES[0].id);
   const [query, setQuery]             = useState("");
@@ -27,12 +30,25 @@ export default function OrderTaking({
   const [composerMenu, setComposerMenu] = useState(null);
   const [paying, setPaying]           = useState(false);
   const [receipt, setReceipt]         = useState(null);
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [kitchenPrintModal, setKitchenPrintModal] = useState(false);
 
   const items        = order?.items || [];
   const draftItems   = items.filter((i) => i.status === "draft");
   const sentItems    = items.filter((i) => i.status !== "draft");
-  const total        = items.reduce((s, i) => s + i.price * i.qty, 0);
-  const draftTotal   = draftItems.reduce((s, i) => s + i.price * i.qty, 0);
+  const subtotal     = items.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
+
+  const discount = order?.discount;
+  const discountAmount = discount
+    ? (discount.amount != null
+        ? discount.amount
+        : discount.type === "percent"
+        ? Math.round(subtotal * (discount.value / 100) * 100) / 100
+        : Math.min(subtotal, discount.value || 0))
+    : 0;
+
+  const total = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+  const draftTotal   = draftItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
   const hasReady     = items.some((i) => i.status === "ready");
   const allServedNoDraft = items.length > 0 && items.every((i) => i.status === "served");
 
@@ -161,8 +177,36 @@ export default function OrderTaking({
 
       {/* Pied du panier */}
       <div className="border-t border-black/10 p-3.5 space-y-2 bg-white">
-        <div className="flex justify-between text-sm text-[#5B5346]"><span>Sous-total</span><span>{money(total)}</span></div>
-        <div className="flex justify-between text-base font-bold text-[#2B2622]"><span>Total</span><span>{money(total)}</span></div>
+        <div className="flex justify-between text-xs text-[#5B5346]">
+          <span>Sous-total brut</span>
+          <span className="font-semibold">{money(subtotal)}</span>
+        </div>
+
+        {discount && (
+          <div className="flex justify-between text-xs text-[#2E9E5B] font-bold items-center">
+            <span className="flex items-center gap-1">
+              <Sparkles size={12} />
+              {discount.code ? `Remise [${discount.code}]` : "Remise"}
+            </span>
+            <span>-{money(discountAmount)}</span>
+          </div>
+        )}
+
+        <div className="flex justify-between text-base font-extrabold text-[#2B2622] pt-1 border-t border-black/5">
+          <span>Total TTC</span>
+          <span>{money(total)}</span>
+        </div>
+
+        {/* Bouton Remise & Codes Promo */}
+        {items.length > 0 && (
+          <button
+            onClick={() => setDiscountModalOpen(true)}
+            className="rf-tap w-full py-1.5 px-3 rounded-xl border border-black/15 bg-black/[.02] hover:bg-black/5 text-xs font-semibold text-[#5B5346] flex items-center justify-center gap-1.5"
+          >
+            <Tag size={13} className="text-[#C1440E]" />
+            <span>{discount ? "Modifier la remise" : "Code promo / Remise"}</span>
+          </button>
+        )}
 
         {hasReady && (
           <button onClick={onServe} className="rf-tap w-full py-2.5 rounded-xl font-semibold text-sm text-white" style={{ background: "#2E9E5B" }}>
@@ -181,7 +225,17 @@ export default function OrderTaking({
             <p className="text-xs font-semibold text-[#2B2622]">Confirmer l'envoi de {draftItems.length} article(s) en cuisine ?</p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmSend(false)} className="rf-tap flex-1 py-2 rounded-lg text-xs font-semibold bg-black/5">Annuler</button>
-              <button onClick={() => { onSend(); setConfirmSend(false); }} className="rf-tap flex-1 py-2 rounded-lg text-xs font-bold text-white" style={{ background: "#C1440E" }}>Confirmer</button>
+              <button
+                onClick={() => {
+                  onSend();
+                  setConfirmSend(false);
+                  onToast?.("success", "Commande envoyée en cuisine avec succès.");
+                }}
+                className="rf-tap flex-1 py-2 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1"
+                style={{ background: "#C1440E" }}
+              >
+                <span>Confirmer</span>
+              </button>
             </div>
           </div>
         )}
@@ -209,23 +263,59 @@ export default function OrderTaking({
     />
   );
 
-  // ── Flux paiement ──────────────────────────────────────────
+  // ── Flux paiement & Billetterie ────────────────────────────
   const paymentFlow = (
     <>
       {paying && order && (
         <PaymentModal
           order={order}
           table={table}
+          config={config}
           onCancel={() => setPaying(false)}
-          onConfirm={(method, payments) => {
-            const r = onCheckout(method, payments);
+          onConfirm={(method, payments, meta) => {
+            const r = onCheckout(method, payments, meta);
             setPaying(false);
             setReceipt(r);
           }}
         />
       )}
+
       {receipt && (
-        <ReceiptModal receipt={receipt} onClose={() => { setReceipt(null); onBackToPlan?.(); }} />
+        <ThermalReceiptPreview
+          receipt={receipt}
+          order={order}
+          table={table}
+          config={config}
+          tpeData={receipt.tpeData}
+          defaultTab="caisse"
+          onClose={() => { setReceipt(null); onBackToPlan?.(); }}
+        />
+      )}
+
+      {discountModalOpen && order && (
+        <DiscountModal
+          order={order}
+          config={config}
+          onApply={(disc) => {
+            onApplyDiscount?.(order.id, disc);
+            setDiscountModalOpen(false);
+          }}
+          onRemove={() => {
+            onRemoveDiscount?.(order.id);
+            setDiscountModalOpen(false);
+          }}
+          onClose={() => setDiscountModalOpen(false)}
+        />
+      )}
+
+      {kitchenPrintModal && order && (
+        <ThermalReceiptPreview
+          order={order}
+          table={table}
+          config={config}
+          defaultTab="cuisine"
+          onClose={() => setKitchenPrintModal(false)}
+        />
       )}
     </>
   );
@@ -513,160 +603,4 @@ function MenuComposer({ menu, products, onCancel, onConfirm }) {
   );
 }
 
-/* ── Encaissement & Reçus ──────────────────────────────────── */
 
-function ReceiptModal({ receipt, onClose }) {
-  const date = new Date(receipt.paidAt);
-  const isSplit = receipt.payments && receipt.payments.length > 1;
-  const [selectedPaymentIndex, setSelectedPaymentIndex] = useState(-1); // -1: Global, >=0: individual
-
-  const activePayment = selectedPaymentIndex >= 0 ? receipt.payments[selectedPaymentIndex] : null;
-
-  const methodLabelMap = {
-    carte: "Carte bancaire",
-    especes: "Espèces",
-    autre: "Autre",
-    partage: "Addition partagée",
-  };
-
-  const getMethodLabel = (m) => methodLabelMap[m] || m || "—";
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 sm:p-6" onClick={onClose}>
-      <div className="rf-anim-pop bg-white rounded-2xl w-full max-w-sm max-h-[88vh] flex flex-col overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
-        {/* Onglets de sélection de ticket si paiement partagé */}
-        {isSplit && (
-          <div className="p-2 border-b border-black/10 bg-[#FAF6EE] flex items-center gap-1 overflow-x-auto rf-scrollbar">
-            <button
-              onClick={() => setSelectedPaymentIndex(-1)}
-              className={`rf-tap px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
-                selectedPaymentIndex === -1
-                  ? "bg-[#2B2622] text-white"
-                  : "bg-black/5 text-[#5B5346] hover:bg-black/10"
-              }`}
-            >
-              Ticket Global
-            </button>
-            {receipt.payments.map((p, idx) => (
-              <button
-                key={p.id || idx}
-                onClick={() => setSelectedPaymentIndex(idx)}
-                className={`rf-tap px-2 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
-                  selectedPaymentIndex === idx
-                    ? "bg-[#2B2622] text-white"
-                    : "bg-black/5 text-[#5B5346] hover:bg-black/10"
-                }`}
-              >
-                {p.label || `Part ${idx + 1}`}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto rf-scrollbar p-5">
-          <div id="rf-print-receipt" className="rf-ticket">
-            <div className="text-center mb-3">
-              <p className="rf-black text-lg tracking-wide">RESTOFLOW</p>
-              <p className="text-[10px] opacity-70">
-                {activePayment ? `Reçu individuel — ${activePayment.label}` : "Ticket de caisse"}
-              </p>
-            </div>
-
-            <div className="rf-mono text-[11px] space-y-0.5 mb-2">
-              <div className="flex justify-between"><span>Table</span><span>{receipt.tableNumber ?? "—"}</span></div>
-              <div className="flex justify-between"><span>Commande</span><span>#{receipt.orderId.slice(-4).toUpperCase()}</span></div>
-              <div className="flex justify-between"><span>Date</span><span>{date.toLocaleDateString("fr-FR")}</span></div>
-              <div className="flex justify-between"><span>Heure</span><span>{date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
-              <div className="flex justify-between"><span>Serveur</span><span>{receipt.server}</span></div>
-              {activePayment && (
-                <div className="flex justify-between font-bold text-[#2B2622]">
-                  <span>Convive / Part</span><span>{activePayment.label}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-dashed border-black/30 my-2" />
-
-            {/* Articles */}
-            <div className="space-y-1">
-              {activePayment && activePayment.items && activePayment.items.length > 0 ? (
-                activePayment.items.map((it, idx) => (
-                  <div key={idx} className="rf-mono text-[12px]">
-                    <div className="flex justify-between gap-2">
-                      <span className="flex-1">{it.qty} × {it.name}</span>
-                      <span>{money(it.price * (typeof it.qty === 'number' ? it.qty : 1))}</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                receipt.items.map((it) => (
-                  <div key={it.id} className="rf-mono text-[12px]">
-                    <div className="flex justify-between gap-2">
-                      <span className="flex-1">{it.qty} × {it.name}</span>
-                      <span>{money(it.price * it.qty)}</span>
-                    </div>
-                    <div className="flex justify-between text-[10px] opacity-60"><span>{money(it.price)} / unité</span></div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="border-t border-dashed border-black/30 my-2" />
-
-            {/* Totaux */}
-            {activePayment ? (
-              <>
-                <div className="rf-mono text-[11px] flex justify-between opacity-80">
-                  <span>Total commande</span><span>{money(receipt.total)}</span>
-                </div>
-                <div className="rf-mono text-[14px] flex justify-between font-bold mt-1">
-                  <span>PART RÉGLÉE</span><span>{money(activePayment.amount)}</span>
-                </div>
-                <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
-                  <span>Moyen de règlement</span><span>{getMethodLabel(activePayment.method)}</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="rf-mono text-[11px] flex justify-between opacity-80">
-                  <span>Sous-total</span><span>{money(receipt.total)}</span>
-                </div>
-                <div className="rf-mono text-[14px] flex justify-between font-bold mt-1">
-                  <span>TOTAL TTC</span><span>{money(receipt.total)}</span>
-                </div>
-                <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
-                  <span>Paiement</span><span>{getMethodLabel(receipt.paymentMethod)}</span>
-                </div>
-
-                {isSplit && (
-                  <div className="mt-3 pt-2 border-t border-dashed border-black/20">
-                    <p className="rf-mono text-[10px] font-bold uppercase tracking-wider mb-1">
-                      Ventilation des règlements ({receipt.payments.length}) :
-                    </p>
-                    <div className="space-y-1">
-                      {receipt.payments.map((p, idx) => (
-                        <div key={p.id || idx} className="rf-mono text-[11px] flex justify-between">
-                          <span className="opacity-80">• {p.label} ({getMethodLabel(p.method)})</span>
-                          <span className="font-bold">{money(p.amount)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>
-          </div>
-        </div>
-
-        <div className="p-4 border-t border-black/10 flex gap-2 bg-white">
-          <button onClick={onClose} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Fermer</button>
-          <button onClick={() => window.print()} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5" style={{ background: "#C1440E" }}>
-            🖨️ Imprimer {activePayment ? "cette part" : "le ticket"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

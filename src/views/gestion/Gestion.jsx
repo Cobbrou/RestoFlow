@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet } from "lucide-react";
+import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { isAvailable, money } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
@@ -7,30 +7,34 @@ import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
 import StockManager from "./StockManager.jsx";
 import RecipeManager from "./RecipeManager.jsx";
+import CaisseSettingsManager from "./CaisseSettingsManager.jsx";
+import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
 
 /**
- * Gestion — Back-office avec 7 sous-vues :
- *  - tables     : gestion du plan de salle (CRUD + réservations)
- *  - produits   : catalogue produits (CRUD + disponibilité)
- *  - menus      : menus composés (CRUD)
- *  - stocks     : gestion des stocks, inventaire et alertes (Phase 2)
- *  - recettes   : fiches techniques et calcul du food cost (Phase 2)
- *  - historique : historique des paiements encaissés
- *  - equipe     : rôles, permissions et membres du personnel
+ * Gestion — Back-office avec 8 sous-vues :
+ *  - tables        : gestion du plan de salle (CRUD + réservations)
+ *  - produits      : catalogue produits (CRUD + disponibilité)
+ *  - menus         : menus composés (CRUD)
+ *  - stocks        : gestion des stocks, inventaire et alertes (Phase 2)
+ *  - recettes      : fiches techniques et calcul du food cost (Phase 2)
+ *  - historique    : historique des paiements encaissés
+ *  - caisse_params : mentions légales, imprimantes ESC/POS et codes promo (Phase 3)
+ *  - equipe        : rôles, permissions et membres du personnel
  */
 export default function Gestion(props) {
   const { view, setView, currentStaff, roles } = props;
 
   const tabs = [
-    { id: "tables",     label: "Tables",         icon: Table2 },
-    { id: "produits",   label: "Produits",       icon: Package },
-    { id: "menus",      label: "Menus",          icon: LayoutList },
-    { id: "stocks",     label: "Stocks",         icon: Boxes },
-    { id: "recettes",   label: "Fiches & Coûts", icon: FileSpreadsheet },
-    { id: "historique", label: "Historique",     icon: Receipt },
-    { id: "equipe",     label: "Équipe & Rôles", icon: ShieldCheck },
+    { id: "tables",        label: "Tables",               icon: Table2 },
+    { id: "produits",      label: "Produits",             icon: Package },
+    { id: "menus",         label: "Menus",                icon: LayoutList },
+    { id: "stocks",        label: "Stocks",               icon: Boxes },
+    { id: "recettes",      label: "Fiches & Coûts",       icon: FileSpreadsheet },
+    { id: "historique",    label: "Historique",           icon: Receipt },
+    { id: "caisse_params", label: "Caisse & Imprimantes", icon: Printer },
+    { id: "equipe",        label: "Équipe & Rôles",       icon: ShieldCheck },
   ];
 
   const currentRoleObj = roles?.find((r) => r.id === currentStaff?.roleId);
@@ -39,14 +43,15 @@ export default function Gestion(props) {
     if (!currentStaff) return false;
     if (currentStaff.roleId === "admin") return true;
     switch (tabId) {
-      case "tables":     return hasPermission(currentStaff, currentRoleObj, "gestion.tables");
-      case "produits":   return hasPermission(currentStaff, currentRoleObj, "gestion.products");
-      case "menus":      return hasPermission(currentStaff, currentRoleObj, "gestion.menus");
-      case "stocks":     return hasPermission(currentStaff, currentRoleObj, "gestion.stocks");
-      case "recettes":   return hasPermission(currentStaff, currentRoleObj, "gestion.recipes");
-      case "historique": return hasPermission(currentStaff, currentRoleObj, "caisse.history");
-      case "equipe":     return hasPermission(currentStaff, currentRoleObj, "gestion.staff");
-      default:           return false;
+      case "tables":        return hasPermission(currentStaff, currentRoleObj, "gestion.tables");
+      case "produits":      return hasPermission(currentStaff, currentRoleObj, "gestion.products");
+      case "menus":         return hasPermission(currentStaff, currentRoleObj, "gestion.menus");
+      case "stocks":        return hasPermission(currentStaff, currentRoleObj, "gestion.stocks");
+      case "recettes":      return hasPermission(currentStaff, currentRoleObj, "gestion.recipes");
+      case "historique":    return hasPermission(currentStaff, currentRoleObj, "caisse.history");
+      case "caisse_params": return hasPermission(currentStaff, currentRoleObj, "caisse.settings");
+      case "equipe":        return hasPermission(currentStaff, currentRoleObj, "gestion.staff");
+      default:              return false;
     }
   };
 
@@ -79,13 +84,14 @@ export default function Gestion(props) {
         </div>
       </div>
 
-      {view === "tables"     && <TableManager {...props} />}
-      {view === "produits"   && <ProductManager {...props} />}
-      {view === "menus"      && <MenuManager {...props} />}
-      {view === "stocks"     && <StockManager {...props} />}
-      {view === "recettes"   && <RecipeManager {...props} />}
-      {view === "historique" && <HistoryManager history={props.history || []} />}
-      {view === "equipe"     && <StaffRoleManager {...props} />}
+      {view === "tables"        && <TableManager {...props} />}
+      {view === "produits"      && <ProductManager {...props} />}
+      {view === "menus"         && <MenuManager {...props} />}
+      {view === "stocks"        && <StockManager {...props} />}
+      {view === "recettes"      && <RecipeManager {...props} />}
+      {view === "historique"    && <HistoryManager history={props.history || []} config={props.config} />}
+      {view === "caisse_params" && <CaisseSettingsManager config={props.config} onUpdateConfig={props.onUpdateConfig} pushToast={props.pushToast} />}
+      {view === "equipe"        && <StaffRoleManager {...props} />}
     </div>
   );
 }
@@ -587,16 +593,18 @@ function MenuForm({ menu, products, onCancel, onSave }) {
 const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, autre: Wallet, partage: Users };
 const METHOD_LABELS = { carte: "Carte",    especes: "Espèces", autre: "Autre",  partage: "Partagé" };
 
-function HistoryManager({ history }) {
-  const [search,       setSearch]       = useState("");
-  const [methodFilter, setMethodFilter] = useState(null);
-  const [detailId,     setDetailId]     = useState(null);
+function HistoryManager({ history, config }) {
+  const [search,               setSearch]               = useState("");
+  const [methodFilter,         setMethodFilter]         = useState(null);
+  const [detailId,             setDetailId]             = useState(null);
+  const [thermalPreviewDetail, setThermalPreviewDetail] = useState(null);
 
   const sorted   = [...history].sort((a, b) => b.createdAt - a.createdAt);
   const filtered = sorted.filter((h) => {
     const matchSearch  = !search || String(h.tableNumber ?? "").includes(search) ||
       (h.server || "").toLowerCase().includes(search.toLowerCase()) ||
-      (h.orderId || "").toLowerCase().includes(search.toLowerCase());
+      (h.orderId || "").toLowerCase().includes(search.toLowerCase()) ||
+      (h.ticketNumber || "").toLowerCase().includes(search.toLowerCase());
     const matchMethod = !methodFilter || h.paymentMethod === methodFilter;
     return matchSearch && matchMethod;
   });
@@ -688,10 +696,15 @@ function HistoryManager({ history }) {
             </div>
             <div className="p-5 rf-ticket">
               <div className="text-center mb-3">
-                <p className="rf-black text-lg tracking-wide">RESTOFLOW</p>
-                <p className="text-[10px] opacity-70">Ticket de caisse</p>
+                <p className="rf-black text-lg tracking-wide">{config?.name || "RESTOFLOW BISTROT"}</p>
+                {config?.siret && <p className="text-[9px] opacity-70">SIRET : {config.siret}</p>}
+                <p className="text-[10px] opacity-70">Ticket de caisse & Facture</p>
               </div>
               <div className="rf-mono text-[11px] space-y-0.5 mb-2">
+                <div className="flex justify-between font-bold text-[#2B2622]">
+                  <span>Facture N°</span>
+                  <span>{detail.ticketNumber || `FAC-${new Date(detail.createdAt).getFullYear()}-${(detail.orderId || detail.id).slice(-4).toUpperCase()}`}</span>
+                </div>
                 {detail.tableNumber && <div className="flex justify-between"><span>Table</span><span>{detail.tableNumber}</span></div>}
                 <div className="flex justify-between"><span>Commande</span><span>#{(detail.orderId || detail.id).slice(-4).toUpperCase()}</span></div>
                 <div className="flex justify-between"><span>Date</span><span>{new Date(detail.createdAt).toLocaleDateString("fr-FR")}</span></div>
@@ -711,8 +724,20 @@ function HistoryManager({ history }) {
                 ))}
               </div>
               <div className="border-t border-dashed border-black/30 my-2" />
-              <div className="rf-mono text-[11px] flex justify-between opacity-80"><span>Sous-total</span><span>{money(detail.total)}</span></div>
-              <div className="rf-mono text-[14px] flex justify-between font-bold mt-1"><span>TOTAL TTC</span><span>{money(detail.total)}</span></div>
+              <div className="rf-mono text-[11px] flex justify-between opacity-80">
+                <span>Sous-total brut</span>
+                <span>{money(detail.subtotal != null ? detail.subtotal : detail.total)}</span>
+              </div>
+              {detail.discount && (
+                <div className="rf-mono text-[11px] flex justify-between text-[#2E9E5B] font-bold">
+                  <span>Remise {detail.discount.code ? `[${detail.discount.code}]` : ""}</span>
+                  <span>-{money(detail.discount.amount)}</span>
+                </div>
+              )}
+              <div className="rf-mono text-[14px] flex justify-between font-bold mt-1">
+                <span>TOTAL TTC</span>
+                <span>{money(detail.total)}</span>
+              </div>
               {detail.paymentMethod && (
                 <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
                   <span>Paiement</span><span>{METHOD_LABELS[detail.paymentMethod] || detail.paymentMethod}</span>
@@ -737,12 +762,27 @@ function HistoryManager({ history }) {
             </div>
             <div className="px-5 pb-5 flex gap-2">
               <button onClick={() => setDetailId(null)} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Fermer</button>
-              <button onClick={() => window.print()} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5" style={{ background: "#C1440E" }}>
-                🖨️ Imprimer
+              <button
+                onClick={() => setThermalPreviewDetail(detail)}
+                className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5"
+                style={{ background: "#C1440E" }}
+              >
+                <Printer size={15} />
+                <span>Format Thermique ESC/POS</span>
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Prévisualisation thermique */}
+      {thermalPreviewDetail && (
+        <ThermalReceiptPreview
+          receipt={thermalPreviewDetail}
+          config={config}
+          defaultTab="caisse"
+          onClose={() => setThermalPreviewDetail(null)}
+        />
       )}
     </div>
   );

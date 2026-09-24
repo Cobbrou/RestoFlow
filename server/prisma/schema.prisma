@@ -48,9 +48,10 @@ model Table {
 }
 
 model Category {
-  id     String @id
-  name   String
-  accent String
+  id      String @id
+  name    String
+  accent  String
+  vatRate Float  @default(10)
 }
 
 model Product {
@@ -63,6 +64,7 @@ model Product {
   allergens   String       // JSON array string of allergen tags, e.g. '["Gluten", "Lactose"]'
   available   Boolean      @default(true)
   isMenu      Boolean      @default(false)
+  vatRate     Float        @default(10)
   recipeItems RecipeItem[]
 }
 
@@ -130,6 +132,7 @@ model Order {
   status    String      @default("open") // "open" | "closed"
   createdAt DateTime    @default(now())
   sentAt    DateTime?
+  discount  String?     // JSON string { type: "percent"|"fixed", value: number, reason?: string, code?: string, amount: number }
   items     OrderItem[]
 }
 
@@ -150,11 +153,34 @@ model OrderItem {
 model OrderHistory {
   id            String   @id
   orderId       String
+  ticketNumber  String?  // e.g. "FAC-2026-0001"
   tableNumber   Int?
   server        String
   items         String   // JSON snapshot of paid items
   total         Float
+  subtotal      Float?   // Total before discount
+  discount      String?  // JSON snapshot { type, value, reason, code, amount }
+  vatDetails    String?  // JSON snapshot of VAT breakdown [{ rate, ht, vat, ttc }]
   paymentMethod String
   payments      String   // JSON snapshot of payment breakdowns
   createdAt     DateTime @default(now())
+}
+
+model RestaurantConfig {
+  id           String   @id @default("default")
+  name         String   @default("RestoFlow Bistrot")
+  legalName    String   @default("RESTOFLOW SAS")
+  siret        String   @default("987 654 321 00012")
+  vatNumber    String   @default("FR 12 987654321")
+  address      String   @default("14 Rue de la Paix")
+  city         String   @default("75002 Paris")
+  phone        String   @default("01 42 68 55 00")
+  email        String   @default("contact@restoflow-bistrot.fr")
+  website      String   @default("www.restoflow.fr")
+  footerNote   String   @default("Merci de votre visite ! Service et taxes compris.")
+  currency     String   @default("EUR")
+  tpeAutoPrint Boolean  @default(true)
+  printers     String   @default("[]") // JSON string of printer configs
+  promoCodes   String   @default("[]") // JSON string of promo codes
+  updatedAt    DateTime @updatedAt
 }

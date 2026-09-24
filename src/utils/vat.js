@@ -1,0 +1,112 @@
+/**
+ * Utilitaire de calcul et de ventilation fiscale de la TVA (Norme Restauration France)
+ * 
+ * - TVA 10% : Restauration immédiate (plats, entrées, desserts, formules, softs, café).
+ * - TVA 20% : Boissons alcoolisées (vins, bières, spiritueux, cocktails).
+ * - TVA 5.5% : Produits alimentaires sous emballage scellé conservable (si applicable).
+ */
+
+/**
+ * Calcule la ventilation complète de la TVA pour une liste d'articles avec prise en compte
+ * de la remise globale au prorata des assiettes fiscales.
+ *
+ * @param {Array} items - Liste des articles [{ price, qty, vatRate, ... }]
+ * @param {Object|null} discount - Objet remise { type: "percent"|"fixed", value: number, amount?: number }
+ * @returns {Object} Résumé fiscal : { rates, totalHT, totalVAT, totalTTC, subtotal, discountAmount }
+ */
+export function calculateVatBreakdown(items = [], discount = null) {
+  const validItems = items.filter((i) => i.status !== "draft");
+  const subtotal = validItems.reduce((acc, it) => acc + (it.price || 0) * (it.qty || 1), 0);
+
+  // Calcul du montant de remise en euros
+  let discountAmount = 0;
+  if (discount) {
+    if (discount.amount != null) {
+      discountAmount = discount.amount;
+    } else if (discount.type === "percent") {
+      discountAmount = Math.round(subtotal * (discount.value / 100) * 100) / 100;
+    } else if (discount.type === "fixed") {
+      discountAmount = Math.min(subtotal, Math.round(discount.value * 100) / 100);
+    }
+  }
+  discountAmount = Math.min(subtotal, Math.max(0, discountAmount));
+  const finalTotalTTC = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+
+  // Regroupement par taux de TVA
+  const byRate = {};
+
+  for (const item of validItems) {
+    // Par défaut : 20% si vin/bière/alcool ou cat boissons avec indication alcool, sinon 10%
+    let rate = 10;
+    if (item.vatRate != null) {
+      rate = Number(item.vatRate);
+    } else if (
+      item.cat === "boissons" &&
+      (item.name?.toLowerCase().includes("vin") ||
+       item.name?.toLowerCase().includes("bière") ||
+       item.name?.toLowerCase().includes("rhône") ||
+       item.name?.toLowerCase().includes("alcool"))
+    ) {
+      rate = 20;
+    }
+
+    const itemTotal = (item.price || 0) * (item.qty || 1);
+    if (!byRate[rate]) {
+      byRate[rate] = { rawTtc: 0 };
+    }
+    byRate[rate].rawTtc += itemTotal;
+  }
+
+  // Si aucun article
+  const ratesList = Object.keys(byRate).map(Number).sort((a, b) => a - b);
+  if (ratesList.length === 0) {
+    return {
+      rates: [],
+      totalHT: 0,
+      totalVAT: 0,
+      totalTTC: 0,
+      subtotal: 0,
+      discountAmount: 0,
+    };
+  }
+
+  // Répartition de la remise au prorata de chaque taux pour respecter la fiscalité
+  let accumulatedTtc = 0;
+  const ratesResult = ratesList.map((rate, idx) => {
+    const raw = byRate[rate].rawTtc;
+    let netTtc;
+
+    if (idx === ratesList.length - 1) {
+      // Ajustement au centime sur le dernier taux
+      netTtc = Math.max(0, Math.round((finalTotalTTC - accumulatedTtc) * 100) / 100);
+    } else {
+      const ratio = subtotal > 0 ? raw / subtotal : 0;
+      netTtc = Math.round(finalTotalTTC * ratio * 100) / 100;
+      accumulatedTtc += netTtc;
+    }
+
+    const divisor = 1 + rate / 100;
+    const ht = Math.round((netTtc / divisor) * 100) / 100;
+    const vat = Math.round((netTtc - ht) * 100) / 100;
+
+    return {
+      rate,
+      rawTtc: Math.round(raw * 100) / 100,
+      ttc: netTtc,
+      ht,
+      vat,
+    };
+  });
+
+  const totalHT = Math.round(ratesResult.reduce((sum, r) => sum + r.ht, 0) * 100) / 100;
+  const totalVAT = Math.round(ratesResult.reduce((sum, r) => sum + r.vat, 0) * 100) / 100;
+
+  return {
+    rates: ratesResult,
+    totalHT,
+    totalVAT,
+    totalTTC: finalTotalTTC,
+    subtotal: Math.round(subtotal * 100) / 100,
+    discountAmount,
+  };
+}

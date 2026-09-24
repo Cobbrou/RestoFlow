@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { LayoutGrid, Table2, Clock, Users, CheckCircle2, Flame } from "lucide-react";
+import { LayoutGrid, Table2, Clock, Users, CheckCircle2, Flame, Printer, X } from "lucide-react";
 import { tableStatus, STATUS_META, orderKitchenStatus, kitchenStartTs, timerLevel, TIMER_LEVELS, formatTimer, noteIndicatesAllergy } from "../../utils/index.js";
 import { AllergyBadge } from "../salle/OrderTaking.jsx";
-import { X } from "lucide-react";
+import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 /**
  * CuisineShell — Enveloppe de la vue cuisine avec basculement Board / Par table.
  */
-export default function CuisineShell({ view, setView, tables, orders, now, products, onStart, onReady }) {
+export default function CuisineShell({ view, setView, tables, orders, now, products, config = {}, onStart, onReady }) {
+  const [printOrder, setPrintOrder] = useState(null); // { order, table } | null
+
   return (
     <div className="p-5">
       <div className="flex items-center justify-between mb-4">
@@ -34,9 +36,20 @@ export default function CuisineShell({ view, setView, tables, orders, now, produ
       </div>
 
       {view === "board"
-        ? <KitchenBoard tables={tables} orders={orders} now={now} products={products} onStart={onStart} onReady={onReady} />
-        : <KitchenByTable tables={tables} orders={orders} now={now} products={products} />
+        ? <KitchenBoard tables={tables} orders={orders} now={now} products={products} onStart={onStart} onReady={onReady} onPrintTicket={(order, table) => setPrintOrder({ order, table })} />
+        : <KitchenByTable tables={tables} orders={orders} now={now} products={products} onPrintTicket={(order, table) => setPrintOrder({ order, table })} />
       }
+
+      {/* Impression thermique du bon cuisine */}
+      {printOrder && (
+        <ThermalReceiptPreview
+          order={printOrder.order}
+          table={printOrder.table}
+          config={config}
+          defaultTab="cuisine"
+          onClose={() => setPrintOrder(null)}
+        />
+      )}
     </div>
   );
 }
@@ -49,7 +62,7 @@ const KDS_COLS = [
   { key: "ready",     title: "Prêtes",         color: "#2E9E5B", icon: "🟢" },
 ];
 
-function KitchenBoard({ tables, orders, now, products, onStart, onReady }) {
+function KitchenBoard({ tables, orders, now, products, onStart, onReady, onPrintTicket }) {
   const grouped = { new: [], preparing: [], ready: [] };
   orders.forEach((o) => {
     const st = orderKitchenStatus(o);
@@ -81,6 +94,7 @@ function KitchenBoard({ tables, orders, now, products, onStart, onReady }) {
                   products={products}
                   onStart={() => onStart(o.id)}
                   onReady={() => onReady(o.id)}
+                  onPrint={() => onPrintTicket?.(o, table)}
                 />
               );
             })}
@@ -109,7 +123,7 @@ function TicketTimer({ startTs, now, ready }) {
 
 /* ── Ticket cuisine ────────────────────────────────────────── */
 
-function KitchenTicket({ order, table, now, column, products, onStart, onReady }) {
+function KitchenTicket({ order, table, now, column, products, onStart, onReady, onPrint }) {
   const visibleItems = order.items.filter((i) => i.status !== "draft" && i.status !== "served");
   const startTs = kitchenStartTs(order);
   const elapsedMs = now - startTs;
@@ -120,7 +134,18 @@ function KitchenTicket({ order, table, now, column, products, onStart, onReady }
     <div className={`rf-ticket rf-anim-ticket rounded-sm shadow-lg p-3.5 ${level === "critical" && !ready ? "ring-2 ring-[#C1361B]" : ""}`}>
       <div className="rf-mono flex items-center justify-between mb-1">
         <span className="font-bold text-sm">TABLE {table?.number ?? "?"}</span>
-        <span className="text-[10px] opacity-60">#{order.id.slice(-4).toUpperCase()}</span>
+        <div className="flex items-center gap-2">
+          {onPrint && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onPrint(); }}
+              className="p-1 rounded hover:bg-black/10 transition-colors text-black/70 hover:text-black"
+              title="Imprimer bon cuisine"
+            >
+              <Printer size={13} />
+            </button>
+          )}
+          <span className="text-[10px] opacity-60">#{order.id.slice(-4).toUpperCase()}</span>
+        </div>
       </div>
       <div className="flex items-center gap-2 mb-2">
         <TicketTimer startTs={startTs} now={now} ready={ready} />
@@ -171,7 +196,7 @@ function KitchenTicket({ order, table, now, column, products, onStart, onReady }
 
 /* ── Vue par table ─────────────────────────────────────────── */
 
-function KitchenByTable({ tables, orders, now, products }) {
+function KitchenByTable({ tables, orders, now, products, onPrintTicket }) {
   const [openId, setOpenId] = useState(null);
   const open = tables.find((t) => t.id === openId);
   const openOrder = orders.find((o) => o.tableId === openId);
@@ -212,7 +237,19 @@ function KitchenByTable({ tables, orders, now, products }) {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6" onClick={() => setOpenId(null)}>
           <div className="rf-ticket rf-anim-pop rounded-sm p-5 w-full max-w-md max-h-[80vh] overflow-y-auto rf-scrollbar" onClick={(e) => e.stopPropagation()}>
             <div className="rf-mono flex items-center justify-between mb-2">
-              <span className="font-bold text-lg">TABLE {open.number}</span>
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-lg">TABLE {open.number}</span>
+                {openOrder && (
+                  <button
+                    onClick={() => onPrintTicket?.(openOrder, open)}
+                    className="p-1 rounded hover:bg-black/10 transition-colors text-black/70 hover:text-black flex items-center gap-1 text-xs"
+                    title="Imprimer bon cuisine"
+                  >
+                    <Printer size={15} />
+                    <span>Imprimer</span>
+                  </button>
+                )}
+              </div>
               <button onClick={() => setOpenId(null)}><X size={18} /></button>
             </div>
             {openOrder ? (

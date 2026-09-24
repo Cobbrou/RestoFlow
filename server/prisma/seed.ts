@@ -3,38 +3,38 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 const CATEGORIES = [
-  { id: "entrees", name: "Entrées", accent: "#B5451B" },
-  { id: "plats", name: "Plats", accent: "#8B5E34" },
-  { id: "burgers", name: "Burgers", accent: "#A6431A" },
-  { id: "pizzas", name: "Pizzas", accent: "#C1440E" },
-  { id: "salades", name: "Salades", accent: "#4A7856" },
-  { id: "desserts", name: "Desserts", accent: "#B5793A" },
-  { id: "boissons", name: "Boissons", accent: "#3E7CB1" },
-  { id: "menus", name: "Menus", accent: "#6B4226" },
+  { id: "entrees", name: "Entrées", accent: "#B5451B", vatRate: 10 },
+  { id: "plats", name: "Plats", accent: "#8B5E34", vatRate: 10 },
+  { id: "burgers", name: "Burgers", accent: "#A6431A", vatRate: 10 },
+  { id: "pizzas", name: "Pizzas", accent: "#C1440E", vatRate: 10 },
+  { id: "salades", name: "Salades", accent: "#4A7856", vatRate: 10 },
+  { id: "desserts", name: "Desserts", accent: "#B5793A", vatRate: 10 },
+  { id: "boissons", name: "Boissons", accent: "#3E7CB1", vatRate: 10 },
+  { id: "menus", name: "Menus", accent: "#6B4226", vatRate: 10 },
 ];
 
 const PRODUCTS_SEED = [
-  { id: "p1", cat: "entrees", name: "Burrata crémeuse", desc: "Tomates anciennes, basilic, huile d'olive", price: 9, emoji: "🍅", allergens: ["Lait"] },
-  { id: "p2", cat: "entrees", name: "Velouté du jour", desc: "Potiron rôti, crème, noisettes", price: 7.5, emoji: "🥣", allergens: ["Lait", "Fruits à coque"] },
-  { id: "p3", cat: "entrees", name: "Planche à partager", desc: "Charcuterie, fromages, pain grillé", price: 14, emoji: "🧀", allergens: ["Lait", "Gluten"] },
-  { id: "p4", cat: "plats", name: "Entrecôte grillée", desc: "Frites maison, sauce au poivre", price: 22, emoji: "🥩", allergens: [] },
-  { id: "p5", cat: "plats", name: "Saumon rôti", desc: "Purée de panais, beurre citronné", price: 19, emoji: "🐟", allergens: ["Poisson", "Lait"] },
-  { id: "p6", cat: "plats", name: "Risotto champignons", desc: "Parmesan, huile de truffe", price: 16, emoji: "🍚", allergens: ["Lait"] },
-  { id: "p7", cat: "burgers", name: "Burger Classic", desc: "Bœuf, cheddar, oignons confits", price: 12, emoji: "🍔", allergens: ["Gluten", "Lait"] },
-  { id: "p8", cat: "burgers", name: "Burger Veggie", desc: "Galette de légumes, avocat, roquette", price: 12.5, emoji: "🥑", allergens: ["Gluten"] },
-  { id: "p9", cat: "burgers", name: "Burger Bacon BBQ", desc: "Double bœuf, bacon, sauce barbecue", price: 14.5, emoji: "🥓", allergens: ["Gluten", "Lait"] },
-  { id: "p10", cat: "pizzas", name: "Pizza 4 Fromages", desc: "Mozzarella, gorgonzola, chèvre, parmesan", price: 14, emoji: "🍕", allergens: ["Gluten", "Lait"] },
-  { id: "p11", cat: "pizzas", name: "Pizza Regina", desc: "Jambon, champignons, mozzarella", price: 13, emoji: "🍕", allergens: ["Gluten", "Lait"] },
-  { id: "p12", cat: "pizzas", name: "Pizza Diavola", desc: "Salami piquant, piment, mozzarella", price: 13.5, emoji: "🌶️", allergens: ["Gluten", "Lait"] },
-  { id: "p13", cat: "salades", name: "César Poulet", desc: "Poulet grillé, parmesan, croûtons", price: 13, emoji: "🥗", allergens: ["Gluten", "Lait", "Œuf"] },
-  { id: "p14", cat: "salades", name: "Salade Chèvre Chaud", desc: "Chèvre, miel, noix, mesclun", price: 12, emoji: "🐐", allergens: ["Lait", "Fruits à coque"] },
-  { id: "p15", cat: "desserts", name: "Tiramisu maison", desc: "Mascarpone, café, cacao", price: 7, emoji: "🍰", allergens: ["Lait", "Œuf", "Gluten"] },
-  { id: "p16", cat: "desserts", name: "Fondant au chocolat", desc: "Cœur coulant, glace vanille", price: 8, emoji: "🍫", allergens: ["Lait", "Œuf", "Gluten"] },
-  { id: "p17", cat: "desserts", name: "Crème brûlée", desc: "Vanille de Madagascar", price: 6.5, emoji: "🍮", allergens: ["Lait", "Œuf"] },
-  { id: "p18", cat: "boissons", name: "Coca-Cola", desc: "33cl", price: 4, emoji: "🥤", allergens: [] },
-  { id: "p19", cat: "boissons", name: "Eau pétillante", desc: "50cl", price: 3.5, emoji: "💧", allergens: [] },
-  { id: "p20", cat: "boissons", name: "Verre de Côtes du Rhône", desc: "12cl", price: 6, emoji: "🍷", allergens: ["Sulfites"] },
-  { id: "p21", cat: "boissons", name: "Café", desc: "Expresso", price: 2.5, emoji: "☕", allergens: [] },
+  { id: "p1", cat: "entrees", name: "Burrata crémeuse", desc: "Tomates anciennes, basilic, huile d'olive", price: 9, emoji: "🍅", allergens: ["Lait"], vatRate: 10 },
+  { id: "p2", cat: "entrees", name: "Velouté du jour", desc: "Potiron rôti, crème, noisettes", price: 7.5, emoji: "🥣", allergens: ["Lait", "Fruits à coque"], vatRate: 10 },
+  { id: "p3", cat: "entrees", name: "Planche à partager", desc: "Charcuterie, fromages, pain grillé", price: 14, emoji: "🧀", allergens: ["Lait", "Gluten"], vatRate: 10 },
+  { id: "p4", cat: "plats", name: "Entrecôte grillée", desc: "Frites maison, sauce au poivre", price: 22, emoji: "🥩", allergens: [], vatRate: 10 },
+  { id: "p5", cat: "plats", name: "Saumon rôti", desc: "Purée de panais, beurre citronné", price: 19, emoji: "🐟", allergens: ["Poisson", "Lait"], vatRate: 10 },
+  { id: "p6", cat: "plats", name: "Risotto champignons", desc: "Parmesan, huile de truffe", price: 16, emoji: "🍚", allergens: ["Lait"], vatRate: 10 },
+  { id: "p7", cat: "burgers", name: "Burger Classic", desc: "Bœuf, cheddar, oignons confits", price: 12, emoji: "🍔", allergens: ["Gluten", "Lait"], vatRate: 10 },
+  { id: "p8", cat: "burgers", name: "Burger Veggie", desc: "Galette de légumes, avocat, roquette", price: 12.5, emoji: "🥑", allergens: ["Gluten"], vatRate: 10 },
+  { id: "p9", cat: "burgers", name: "Burger Bacon BBQ", desc: "Double bœuf, bacon, sauce barbecue", price: 14.5, emoji: "🥓", allergens: ["Gluten", "Lait"], vatRate: 10 },
+  { id: "p10", cat: "pizzas", name: "Pizza 4 Fromages", desc: "Mozzarella, gorgonzola, chèvre, parmesan", price: 14, emoji: "🍕", allergens: ["Gluten", "Lait"], vatRate: 10 },
+  { id: "p11", cat: "pizzas", name: "Pizza Regina", desc: "Jambon, champignons, mozzarella", price: 13, emoji: "🍕", allergens: ["Gluten", "Lait"], vatRate: 10 },
+  { id: "p12", cat: "pizzas", name: "Pizza Diavola", desc: "Salami piquant, piment, mozzarella", price: 13.5, emoji: "🌶️", allergens: ["Gluten", "Lait"], vatRate: 10 },
+  { id: "p13", cat: "salades", name: "César Poulet", desc: "Poulet grillé, parmesan, croûtons", price: 13, emoji: "🥗", allergens: ["Gluten", "Lait", "Œuf"], vatRate: 10 },
+  { id: "p14", cat: "salades", name: "Salade Chèvre Chaud", desc: "Chèvre, miel, noix, mesclun", price: 12, emoji: "🐐", allergens: ["Lait", "Fruits à coque"], vatRate: 10 },
+  { id: "p15", cat: "desserts", name: "Tiramisu maison", desc: "Mascarpone, café, cacao", price: 7, emoji: "🍰", allergens: ["Lait", "Œuf", "Gluten"], vatRate: 10 },
+  { id: "p16", cat: "desserts", name: "Fondant au chocolat", desc: "Cœur coulant, glace vanille", price: 8, emoji: "🍫", allergens: ["Lait", "Œuf", "Gluten"], vatRate: 10 },
+  { id: "p17", cat: "desserts", name: "Crème brûlée", desc: "Vanille de Madagascar", price: 6.5, emoji: "🍮", allergens: ["Lait", "Œuf"], vatRate: 10 },
+  { id: "p18", cat: "boissons", name: "Coca-Cola", desc: "33cl", price: 4, emoji: "🥤", allergens: [], vatRate: 10 },
+  { id: "p19", cat: "boissons", name: "Eau pétillante", desc: "50cl", price: 3.5, emoji: "💧", allergens: [], vatRate: 10 },
+  { id: "p20", cat: "boissons", name: "Verre de Côtes du Rhône", desc: "12cl (Alcool)", price: 6, emoji: "🍷", allergens: ["Sulfites"], vatRate: 20 },
+  { id: "p21", cat: "boissons", name: "Café", desc: "Expresso", price: 2.5, emoji: "☕", allergens: [], vatRate: 10 },
 ];
 
 const MENUS_SEED = [
@@ -89,7 +89,7 @@ const INITIAL_ROLES = [
     permissions: [
       "salle.view", "salle.order", "salle.send_kitchen", "salle.serve", "salle.reservations", "salle.alerts",
       "cuisine.view", "cuisine.status",
-      "caisse.checkout", "caisse.split", "caisse.history",
+      "caisse.checkout", "caisse.split", "caisse.history", "caisse.discount", "caisse.settings",
       "gestion.tables", "gestion.products", "gestion.menus", "gestion.staff", "gestion.stocks", "gestion.recipes",
       "dashboard.view",
     ],
@@ -102,7 +102,7 @@ const INITIAL_ROLES = [
     isSystem: false,
     permissions: [
       "salle.view", "salle.order", "salle.send_kitchen", "salle.serve", "salle.reservations", "salle.alerts",
-      "caisse.checkout", "caisse.split", "caisse.history", "gestion.tables", "gestion.stocks", "dashboard.view",
+      "caisse.checkout", "caisse.split", "caisse.history", "caisse.discount", "gestion.tables", "gestion.stocks", "dashboard.view",
     ],
   },
   {
@@ -113,7 +113,7 @@ const INITIAL_ROLES = [
     isSystem: false,
     permissions: [
       "salle.view", "salle.order", "salle.send_kitchen", "salle.serve", "salle.alerts",
-      "caisse.checkout", "caisse.split",
+      "caisse.checkout", "caisse.split", "caisse.discount",
     ],
   },
   {
@@ -272,6 +272,7 @@ async function main() {
   console.log("Seeding RestoFlow Database...");
 
   // Clear existing data in correct dependency order
+  await prisma.restaurantConfig.deleteMany({});
   await prisma.stockMovement.deleteMany({});
   await prisma.recipeItem.deleteMany({});
   await prisma.ingredient.deleteMany({});
@@ -284,6 +285,37 @@ async function main() {
   await prisma.menu.deleteMany({});
   await prisma.category.deleteMany({});
   await prisma.table.deleteMany({});
+
+  // 0. Configuration Restaurant & Imprimantes (Phase 3)
+  await prisma.restaurantConfig.create({
+    data: {
+      id: "default",
+      name: "RestoFlow Bistrot",
+      legalName: "RESTOFLOW BISTROT SAS",
+      siret: "987 654 321 00012",
+      vatNumber: "FR 12 987654321",
+      address: "14 Rue de la Paix",
+      city: "75002 Paris",
+      phone: "01 42 68 55 00",
+      email: "contact@restoflow-bistrot.fr",
+      website: "www.restoflow.fr",
+      footerNote: "Merci de votre visite ! Service & taxes compris.",
+      currency: "EUR",
+      tpeAutoPrint: true,
+      printers: JSON.stringify([
+        { id: "prn_caisse", name: "Imprimante Caisse", type: "caisse", width: "80mm", status: "online", autoCut: true, openDrawer: true },
+        { id: "prn_cuisine", name: "Imprimante Cuisine", type: "cuisine", width: "80mm", status: "online", autoCut: true, beep: true },
+        { id: "prn_bar", name: "Imprimante Bar", type: "bar", width: "58mm", status: "online", autoCut: true, beep: false },
+      ]),
+      promoCodes: JSON.stringify([
+        { code: "HAPPYHOUR", label: "Happy Hour (-15%)", type: "percent", value: 15, active: true },
+        { code: "STAFF", label: "Tarif Équipe (-20%)", type: "percent", value: 20, active: true },
+        { code: "BIENVENUE5", label: "Offre Bienvenue (-5€)", type: "fixed", value: 5, active: true },
+        { code: "FIDELITE10", label: "Remise Fidélité (-10%)", type: "percent", value: 10, active: true },
+        { code: "VIP25", label: "Client Privilège (-25%)", type: "percent", value: 25, active: true },
+      ]),
+    },
+  });
 
   // 1. Categories
   for (const cat of CATEGORIES) {
@@ -303,6 +335,7 @@ async function main() {
         allergens: JSON.stringify(p.allergens),
         available: true,
         isMenu: false,
+        vatRate: p.vatRate || 10,
       },
     });
   }

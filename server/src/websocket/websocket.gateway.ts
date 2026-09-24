@@ -41,7 +41,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   public async getFullState() {
-    const [tables, rawOrders, products, menus, roles, staff, rawHistory, rawIngredients, rawRecipes, rawMovements] = await Promise.all([
+    const [tables, rawOrders, products, menus, roles, staff, rawHistory, rawIngredients, rawRecipes, rawMovements, rawConfig] = await Promise.all([
       this.prisma.table.findMany({ orderBy: { number: "asc" } }),
       this.prisma.order.findMany({
         where: { status: "open" },
@@ -85,6 +85,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           },
         },
       }),
+      this.prisma.restaurantConfig.findUnique({ where: { id: "default" } }),
     ]);
 
     // Format fields with parsed JSON
@@ -94,6 +95,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       server: o.server,
       createdAt: o.createdAt.getTime(),
       sentAt: o.sentAt ? o.sentAt.getTime() : null,
+      discount: o.discount ? JSON.parse(o.discount) : null,
       items: o.items.map((i) => ({
         id: i.id,
         productId: i.productId,
@@ -117,6 +119,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       allergens: JSON.parse(p.allergens || "[]"),
       available: p.available,
       isMenu: p.isMenu,
+      vatRate: p.vatRate ?? 10,
     }));
 
     const parsedMenus = menus.map((m) => ({
@@ -141,10 +144,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     const parsedHistory = rawHistory.map((h) => ({
       id: h.id,
       orderId: h.orderId,
+      ticketNumber: h.ticketNumber || `FAC-2026-${String(h.id).slice(-4).toUpperCase()}`,
       tableNumber: h.tableNumber,
       server: h.server,
       items: JSON.parse(h.items || "[]"),
       total: h.total,
+      subtotal: h.subtotal ?? h.total,
+      discount: h.discount ? JSON.parse(h.discount) : null,
+      vatDetails: h.vatDetails ? JSON.parse(h.vatDetails) : null,
       paymentMethod: h.paymentMethod,
       payments: JSON.parse(h.payments || "[]"),
       createdAt: h.createdAt.getTime(),
@@ -188,6 +195,40 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       createdAt: m.createdAt.getTime(),
     }));
 
+    const parsedConfig = rawConfig
+      ? {
+          ...rawConfig,
+          printers: JSON.parse(rawConfig.printers || "[]"),
+          promoCodes: JSON.parse(rawConfig.promoCodes || "[]"),
+        }
+      : {
+          id: "default",
+          name: "RestoFlow Bistrot",
+          legalName: "RESTOFLOW BISTROT SAS",
+          siret: "987 654 321 00012",
+          vatNumber: "FR 12 987654321",
+          address: "14 Rue de la Paix",
+          city: "75002 Paris",
+          phone: "01 42 68 55 00",
+          email: "contact@restoflow-bistrot.fr",
+          website: "www.restoflow.fr",
+          footerNote: "Merci de votre visite ! Service & taxes compris.",
+          currency: "EUR",
+          tpeAutoPrint: true,
+          printers: [
+            { id: "prn_caisse", name: "Imprimante Caisse", type: "caisse", width: "80mm", status: "online", autoCut: true, openDrawer: true },
+            { id: "prn_cuisine", name: "Imprimante Cuisine", type: "cuisine", width: "80mm", status: "online", autoCut: true, beep: true },
+            { id: "prn_bar", name: "Imprimante Bar", type: "bar", width: "58mm", status: "online", autoCut: true, beep: false },
+          ],
+          promoCodes: [
+            { code: "HAPPYHOUR", label: "Happy Hour (-15%)", type: "percent", value: 15, active: true },
+            { code: "STAFF", label: "Tarif Équipe (-20%)", type: "percent", value: 20, active: true },
+            { code: "BIENVENUE5", label: "Offre Bienvenue (-5€)", type: "fixed", value: 5, active: true },
+            { code: "FIDELITE10", label: "Remise Fidélité (-10%)", type: "percent", value: 10, active: true },
+            { code: "VIP25", label: "Client Privilège (-25%)", type: "percent", value: 25, active: true },
+          ],
+        };
+
     return {
       tables,
       orders: parsedOrders,
@@ -199,6 +240,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       ingredients: parsedIngredients,
       recipes: parsedRecipes,
       stockMovements: parsedMovements,
+      config: parsedConfig,
     };
   }
 
@@ -685,6 +727,125 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     return { ok: true, order: formatted };
   }
 
+  // ── Handlers Phase 3 : Remises & Réductions ────────────────────
+
+  @SubscribeMessage("order:discount:apply")
+  async handleApplyDiscount(
+    @MessageBody()
+    data: {
+      orderId: string;
+      discount: {
+        type: "percent" | "fixed";
+        value: number;
+        reason?: string;
+        code?: string;
+        amount: number;
+      };
+    }
+  ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: data.orderId },
+      include: { items: true },
+    });
+    if (!order) return { ok: false, error: "Commande introuvable" };
+
+    const updated = await this.prisma.order.update({
+      where: { id: data.orderId },
+      data: {
+        discount: JSON.stringify(data.discount),
+      },
+      include: { items: true },
+    });
+
+    const formatted = this.formatOrder(updated);
+    this.server.emit("order:updated", formatted);
+    return { ok: true, order: formatted };
+  }
+
+  @SubscribeMessage("order:discount:remove")
+  async handleRemoveDiscount(@MessageBody() data: { orderId: string }) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: data.orderId },
+      include: { items: true },
+    });
+    if (!order) return { ok: false, error: "Commande introuvable" };
+
+    const updated = await this.prisma.order.update({
+      where: { id: data.orderId },
+      data: { discount: null },
+      include: { items: true },
+    });
+
+    const formatted = this.formatOrder(updated);
+    this.server.emit("order:updated", formatted);
+    return { ok: true, order: formatted };
+  }
+
+  // ── Handlers Phase 3 : Configuration Restaurant & Caisse ───────
+
+  @SubscribeMessage("config:get")
+  async handleGetConfig() {
+    const config = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" } });
+    if (!config) return { ok: false, error: "Configuration introuvable" };
+    return {
+      ok: true,
+      config: {
+        ...config,
+        printers: JSON.parse(config.printers || "[]"),
+        promoCodes: JSON.parse(config.promoCodes || "[]"),
+      },
+    };
+  }
+
+  @SubscribeMessage("config:update")
+  async handleUpdateConfig(@MessageBody() data: any) {
+    const updated = await this.prisma.restaurantConfig.upsert({
+      where: { id: "default" },
+      update: {
+        name: data.name,
+        legalName: data.legalName,
+        siret: data.siret,
+        vatNumber: data.vatNumber,
+        address: data.address,
+        city: data.city,
+        phone: data.phone,
+        email: data.email,
+        website: data.website,
+        footerNote: data.footerNote,
+        currency: data.currency || "EUR",
+        tpeAutoPrint: data.tpeAutoPrint ?? true,
+        printers: typeof data.printers === "string" ? data.printers : JSON.stringify(data.printers || []),
+        promoCodes: typeof data.promoCodes === "string" ? data.promoCodes : JSON.stringify(data.promoCodes || []),
+      },
+      create: {
+        id: "default",
+        name: data.name || "RestoFlow Bistrot",
+        legalName: data.legalName || "RESTOFLOW BISTROT SAS",
+        siret: data.siret || "987 654 321 00012",
+        vatNumber: data.vatNumber || "FR 12 987654321",
+        address: data.address || "14 Rue de la Paix",
+        city: data.city || "75002 Paris",
+        phone: data.phone || "01 42 68 55 00",
+        email: data.email || "contact@restoflow-bistrot.fr",
+        website: data.website || "www.restoflow.fr",
+        footerNote: data.footerNote || "Merci de votre visite !",
+        currency: data.currency || "EUR",
+        tpeAutoPrint: data.tpeAutoPrint ?? true,
+        printers: typeof data.printers === "string" ? data.printers : JSON.stringify(data.printers || []),
+        promoCodes: typeof data.promoCodes === "string" ? data.promoCodes : JSON.stringify(data.promoCodes || []),
+      },
+    });
+
+    const parsedConfig = {
+      ...updated,
+      printers: JSON.parse(updated.printers || "[]"),
+      promoCodes: JSON.parse(updated.promoCodes || "[]"),
+    };
+
+    this.server.emit("config:updated", parsedConfig);
+    return { ok: true, config: parsedConfig };
+  }
+
   @SubscribeMessage("order:checkout")
   async handleCheckout(
     @MessageBody()
@@ -693,6 +854,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       paymentMethod: string;
       payments?: any[];
       serverName?: string;
+      subtotal?: number;
+      total?: number;
+      discount?: any;
+      vatDetails?: any;
+      ticketNumber?: string;
     }
   ) {
     const order = await this.prisma.order.findUnique({
@@ -702,8 +868,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!order) return { ok: false, error: "Commande introuvable" };
 
     const paidItems = order.items.filter((i) => i.status !== "draft");
-    const total = paidItems.reduce((s, i) => s + i.price * i.qty, 0);
+    const rawSubtotal = paidItems.reduce((s, i) => s + i.price * i.qty, 0);
+    const subtotal = data.subtotal != null ? data.subtotal : rawSubtotal;
+    const orderDiscount = data.discount || (order.discount ? JSON.parse(order.discount) : null);
+    const discountAmount = orderDiscount ? orderDiscount.amount || 0 : 0;
+    const finalTotal = data.total != null ? data.total : Math.max(0, subtotal - discountAmount);
     const paidAt = new Date();
+
+    const historyCount = await this.prisma.orderHistory.count();
+    const currentYear = paidAt.getFullYear();
+    const ticketNumber =
+      data.ticketNumber || `FAC-${currentYear}-${String(historyCount + 1).padStart(4, "0")}`;
 
     const paymentList =
       data.payments && data.payments.length > 0
@@ -712,7 +887,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
             {
               id: `pay_${Date.now()}`,
               label: "Paiement unique",
-              amount: total,
+              amount: finalTotal,
               method: data.paymentMethod || "carte",
               paidAt: paidAt.getTime(),
             },
@@ -721,15 +896,19 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     const finalMethod =
       data.paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
-    // Create history snapshot
+    // Create history snapshot with Phase 3 fields
     const historyRecord = await this.prisma.orderHistory.create({
       data: {
         id: `hist_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         orderId: order.id,
+        ticketNumber,
         tableNumber: order.table?.number,
         server: data.serverName || order.server,
         items: JSON.stringify(paidItems),
-        total,
+        subtotal,
+        total: finalTotal,
+        discount: orderDiscount ? JSON.stringify(orderDiscount) : null,
+        vatDetails: data.vatDetails ? (typeof data.vatDetails === "string" ? data.vatDetails : JSON.stringify(data.vatDetails)) : null,
         paymentMethod: finalMethod,
         payments: JSON.stringify(paymentList),
         createdAt: paidAt,
@@ -758,10 +937,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     const parsedHistory = {
       id: historyRecord.id,
       orderId: historyRecord.orderId,
+      ticketNumber: historyRecord.ticketNumber,
       tableNumber: historyRecord.tableNumber,
       server: historyRecord.server,
       items: paidItems,
+      subtotal: historyRecord.subtotal ?? historyRecord.total,
       total: historyRecord.total,
+      discount: orderDiscount,
+      vatDetails: data.vatDetails || null,
       paymentMethod: historyRecord.paymentMethod,
       payments: paymentList,
       createdAt: paidAt.getTime(),
@@ -1114,7 +1297,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       server: order.server,
       createdAt: order.createdAt instanceof Date ? order.createdAt.getTime() : order.createdAt,
       sentAt: order.sentAt ? (order.sentAt instanceof Date ? order.sentAt.getTime() : order.sentAt) : null,
-      items: order.items.map((i: any) => ({
+      discount: order.discount ? (typeof order.discount === "string" ? JSON.parse(order.discount) : order.discount) : null,
+      items: (order.items || []).map((i: any) => ({
         id: i.id,
         productId: i.productId,
         name: i.name,

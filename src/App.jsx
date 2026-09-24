@@ -19,6 +19,33 @@ import { getSocket } from "./services/socket.js";
 import { enqueueAction, flushQueue } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
 
+const DEFAULT_CONFIG = {
+  name: "Bistrot Parisien",
+  legalName: "Bistrot Parisien SAS",
+  siret: "123 456 789 00012",
+  vatNumber: "FR 32 123456789",
+  address: "12 Rue de Rivoli",
+  city: "75001 Paris",
+  phone: "01 42 68 00 00",
+  email: "contact@bistrotparisien.fr",
+  website: "www.bistrotparisien.fr",
+  footerNote: "Merci de votre visite et à très bientôt !",
+  currency: "EUR",
+  tpeAutoPrint: true,
+  printers: [
+    { id: "p-caisse", name: "Imprimante Caisse", type: "caisse", interface: "network", ip: "192.168.1.200", port: 9100, width: 80, enabled: true },
+    { id: "p-cuisine", name: "Imprimante Cuisine", type: "cuisine", interface: "network", ip: "192.168.1.201", port: 9100, width: 80, enabled: true },
+    { id: "p-bar", name: "Imprimante Bar", type: "bar", interface: "usb", ip: "", port: 9100, width: 58, enabled: true },
+  ],
+  promoCodes: [
+    { code: "HAPPYHOUR", type: "percent", value: 20, description: "Happy Hour -20% sur les boissons", active: true },
+    { code: "STAFF", type: "percent", value: 30, description: "Remise Personnel -30%", active: true },
+    { code: "BIENVENUE5", type: "amount", value: 5, description: "Offre de bienvenue 5€", active: true },
+    { code: "FIDELITE10", type: "percent", value: 10, description: "Remise Fidélité 10%", active: true },
+    { code: "VIP25", type: "percent", value: 25, description: "Remise VIP 25%", active: true },
+  ],
+};
+
 const fallbackTables = seedTables();
 const fallbackOrders = seedOrders(fallbackTables);
 
@@ -26,7 +53,7 @@ const fallbackOrders = seedOrders(fallbackTables);
  * App — Composant racine de RestoFlow.
  *
  * Gère l'état global de l'application synchronisé en temps réel via Socket.IO :
- *  - tables, orders, history, products, menus, staff, roles
+ *  - tables, orders, history, products, menus, staff, roles, config
  *  - synchronisation multi-postes (Salle, Cuisine KDS, Dashboard, Gestion)
  *  - buffer offline avec reconnexion automatique
  *  - authentification obligatoire par profil + code PIN individuel dès l'ouverture
@@ -47,6 +74,7 @@ export default function App() {
   const [ingredients, setIngredients] = useState([]);
   const [recipes, setRecipes] = useState([]);
   const [stockMovements, setStockMovements] = useState([]);
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
 
   // ── Table active & Équipier authentifié ─────────────────────
   const [currentStaff, setCurrentStaff] = useState(() => {
@@ -120,6 +148,7 @@ export default function App() {
       if (fullState.ingredients)    setIngredients(fullState.ingredients);
       if (fullState.recipes)        setRecipes(fullState.recipes);
       if (fullState.stockMovements) setStockMovements(fullState.stockMovements);
+      if (fullState.config)         setConfig(fullState.config);
     };
 
     const handleTableUpdated = (updatedTable) => {
@@ -175,6 +204,10 @@ export default function App() {
       if (soundOn) beep(620);
     };
 
+    const handleConfigUpdated = (updatedConfig) => {
+      if (updatedConfig) setConfig(updatedConfig);
+    };
+
     const handleConnect = () => {
       flushQueue(socket);
       socket.emit("sync:request", {}, (res) => {
@@ -194,6 +227,7 @@ export default function App() {
     socket.on("stock:movements_updated", handleMovementsUpdated);
     socket.on("catalog:products_updated", handleCatalogProductsUpdated);
     socket.on("stock:alert", handleStockAlert);
+    socket.on("config:updated", handleConfigUpdated);
     socket.on("connect", handleConnect);
 
     if (socket.connected) {
@@ -213,6 +247,7 @@ export default function App() {
       socket.off("stock:movements_updated", handleMovementsUpdated);
       socket.off("catalog:products_updated", handleCatalogProductsUpdated);
       socket.off("stock:alert", handleStockAlert);
+      socket.off("config:updated", handleConfigUpdated);
       socket.off("connect", handleConnect);
     };
   }, [soundOn, beep, pushToast]);
@@ -420,30 +455,60 @@ export default function App() {
     emitOrQueue("order:serve", { orderId });
   };
 
+  const handleApplyDiscount = (orderId, discount) => {
+    updateOrder(orderId, (o) => ({ ...o, discount }));
+    emitOrQueue("order:discount:apply", { orderId, discount });
+  };
+
+  const handleRemoveDiscount = (orderId) => {
+    updateOrder(orderId, (o) => ({ ...o, discount: null }));
+    emitOrQueue("order:discount:remove", { orderId });
+  };
+
+  const handleUpdateConfig = (newConfig) => {
+    setConfig(newConfig);
+    emitOrQueue("config:update", newConfig);
+    pushToast("Configuration de la caisse mise à jour", "server");
+  };
+
   /**
    * Encaissement : archive dans l'historique, libère la table et synchronise.
    */
-  const checkoutOrder = (orderId, paymentMethod, payments = null) => {
+  const checkoutOrder = (orderId, paymentMethod, payments = null, meta = {}) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return null;
     const table    = tables.find((t) => t.id === order.tableId);
     const paidItems = order.items.filter((i) => i.status !== "draft");
-    const total    = paidItems.reduce((s, i) => s + i.price * i.qty, 0);
+    const subtotal = meta?.subtotal ?? paidItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
+    const discount = meta?.discount ?? order.discount ?? null;
+    const total = meta?.total ?? paidItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
+    const vatDetails = meta?.vatDetails ?? null;
+    const tpeData = meta?.tpeData ?? null;
     const paidAt   = Date.now();
     const serverName = currentStaff ? currentStaff.name.split(" ")[0] : order.server;
 
     const paymentList = payments && payments.length > 0 ? payments : [
-      { id: uid("pay"), label: "Paiement unique", amount: total, method: paymentMethod, paidAt },
+      { id: uid("pay"), label: "Paiement unique", amount: total, method: paymentMethod, paidAt, tpeData },
     ];
 
     const finalMethod = paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
+    // Numéro de facture séquentiel lisible
+    const nowYear = new Date().getFullYear();
+    const seqNum = String((history.length + 1)).padStart(4, "0");
+    const ticketNumber = meta?.ticketNumber || `FAC-${nowYear}-${seqNum}`;
+
     const receipt = {
       id: uid("rcpt"),
+      ticketNumber,
       orderId:       order.id,
       tableNumber:   table?.number,
       server:        serverName,
       items:         paidItems,
+      subtotal,
+      discount,
+      vatDetails,
+      tpeData,
       total,
       paymentMethod: finalMethod,
       payments:      paymentList,
@@ -453,9 +518,13 @@ export default function App() {
     setHistory((prev) => [
       {
         id: uid("hist"),
+        ticketNumber,
         createdAt: paidAt,
         server: serverName,
         items: paidItems,
+        subtotal,
+        discount,
+        vatDetails,
         total,
         tableNumber: table?.number,
         paymentMethod: finalMethod,
@@ -487,6 +556,11 @@ export default function App() {
       paymentMethod: finalMethod,
       payments: paymentList,
       serverName,
+      subtotal,
+      total,
+      discount,
+      vatDetails,
+      ticketNumber,
     });
 
     return receipt;
@@ -655,6 +729,7 @@ export default function App() {
           products={combinedProducts}
           recipes={recipes}
           ingredients={ingredients}
+          config={config}
           isMobile={isMobile}
           onBack={() => setServerView("plan")}
           onAdd={(p) => addProductToOrder(activeTable.id, p)}
@@ -664,7 +739,9 @@ export default function App() {
           onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
           onSend={() => sendToKitchen(activeOrder.id)}
           onServe={() => serveAndMaybeFree(activeOrder.id)}
-          onCheckout={(method, payments) => checkoutOrder(activeOrder.id, method, payments)}
+          onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}
+          onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
+          onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
           onBackToPlan={() => setServerView("plan")}
           onToast={pushToast}
         />
@@ -679,6 +756,7 @@ export default function App() {
           orders={orders}
           now={now}
           products={combinedProducts}
+          config={config}
           onStart={startPrep}
           onReady={markReady}
         />
@@ -705,6 +783,9 @@ export default function App() {
           history={history}
           staff={staff}
           roles={roles}
+          config={config}
+          onUpdateConfig={handleUpdateConfig}
+          pushToast={pushToast}
           onAddTable={addTable}
           onUpdateTable={updateTable}
           onDeleteTable={deleteTable}

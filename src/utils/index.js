@@ -1,10 +1,7 @@
-/**
- * Formate un montant en euros avec la locale française.
- * @param {number} n
- * @returns {string} Ex : "12,50 €"
- */
-export const money = (n) =>
-  n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+export const money = (n) => {
+  const val = typeof n === "number" && !isNaN(n) ? n : 0;
+  return val.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+};
 
 /**
  * Retourne une durée relative lisible depuis un timestamp.

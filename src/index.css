@@ -22,3 +22,48 @@ body {
   display: flex;
   align-items: stretch;
 }
+
+/* ── Impression thermique ESC/POS ─────────────────────────── */
+@media print {
+  body {
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #rf-printable-area,
+  #rf-printable-area * {
+    visibility: visible;
+  }
+
+  #rf-printable-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 3mm 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    display: flex !important;
+    justify-content: center !important;
+  }
+
+  #rf-printable-area pre {
+    margin: 0 auto !important;
+    font-size: 10.5pt !important;
+    line-height: 1.3 !important;
+    width: 42ch !important;
+    text-align: left !important;
+  }
+
+  @page {
+    size: 80mm auto;
+    margin: 0mm;
+  }
+}

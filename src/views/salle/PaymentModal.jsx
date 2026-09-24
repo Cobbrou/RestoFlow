@@ -15,8 +15,12 @@ import {
   Share2,
   ArrowRight,
   RotateCcw,
+  Sparkles,
+  Wifi,
 } from "lucide-react";
 import { money } from "../../utils/index.js";
+import TpeModal from "../../components/TpeModal.jsx";
+import { calculateVatBreakdown } from "../../utils/vat.js";
 
 export const PAYMENT_METHODS = [
   { id: "carte",   label: "Carte",   icon: CreditCard, emoji: "💳" },
@@ -26,17 +30,34 @@ export const PAYMENT_METHODS = [
 
 /**
  * PaymentModal — Interface complète et fluide d'encaissement et de partage de note.
- *
- * 4 modes :
- *  - "single"       : Paiement unique rapide (1 clic)
- *  - "equal"        : Division en parts égales (2 à 20 convives, calcul équitable des centimes)
- *  - "item"         : Division par article (attribution aux convives ou sélection rapide)
- *  - "proportional" : Division proportionnelle / montants libres (% ou montant direct)
+ * Supporte :
+ *  - Remises et codes promo
+ *  - Ventilation TVA
+ *  - Liaison TPE Bancaire
  */
-export default function PaymentModal({ order, table, onCancel, onConfirm }) {
+export default function PaymentModal({ order, table, config = {}, onCancel, onConfirm }) {
   // Articles facturables (hors brouillons)
-  const items = useMemo(() => order.items.filter((i) => i.status !== "draft"), [order]);
-  const total = useMemo(() => items.reduce((s, i) => s + i.price * i.qty, 0), [items]);
+  const items = useMemo(() => (order.items || []).filter((i) => i.status !== "draft"), [order]);
+  const subtotal = useMemo(() => items.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0), [items]);
+
+  // Remise appliquée à la commande
+  const discount = order.discount;
+  const discountAmount = useMemo(() => {
+    if (!discount) return 0;
+    if (discount.amount != null) return discount.amount;
+    if (discount.type === "percent") return Math.round(subtotal * (discount.value / 100) * 100) / 100;
+    return Math.min(subtotal, discount.value || 0);
+  }, [discount, subtotal]);
+
+  // Montant total net
+  const total = useMemo(() => Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100), [subtotal, discountAmount]);
+
+  // Ventilation TVA
+  const vatDetails = useMemo(() => calculateVatBreakdown(items, discount), [items, discount]);
+
+  // Session TPE active : { amount, label, callback }
+  const [tpeSession, setTpeSession] = useState(null);
+  const [latestTpeData, setLatestTpeData] = useState(null);
 
   // Mode de partage actif
   const [mode, setMode] = useState("single"); // "single" | "equal" | "item" | "proportional"
@@ -174,6 +195,14 @@ export default function PaymentModal({ order, table, onCancel, onConfirm }) {
 
   // Finalisation : envoi des données à App.jsx
   const handleFinalize = () => {
+    const meta = {
+      subtotal,
+      total,
+      discount,
+      vatDetails,
+      tpeData: latestTpeData,
+    };
+
     if (mode === "single") {
       if (!singleMethod) return;
       onConfirm(singleMethod, [
@@ -183,13 +212,14 @@ export default function PaymentModal({ order, table, onCancel, onConfirm }) {
           amount: total,
           method: singleMethod,
           paidAt: Date.now(),
+          tpeData: latestTpeData || null,
         },
-      ]);
+      ], meta);
     } else {
       if (payments.length === 0) return;
       const methods = Array.from(new Set(payments.map((p) => p.method)));
       const primaryMethod = methods.length === 1 ? methods[0] : "partage";
-      onConfirm(primaryMethod, payments);
+      onConfirm(primaryMethod, payments, meta);
     }
   };
 
@@ -473,10 +503,27 @@ export default function PaymentModal({ order, table, onCancel, onConfirm }) {
                 ))}
               </div>
 
-              {/* Total */}
-              <div className="flex justify-between items-center px-4 py-3 rounded-2xl bg-white border border-black/10">
-                <span className="text-base font-bold text-[#2B2622]">Montant total TTC</span>
-                <span className="text-xl font-extrabold text-[#2B2622]">{money(total)}</span>
+              {/* Total & Remise */}
+              <div className="rounded-2xl bg-white border border-black/10 p-3.5 space-y-2">
+                <div className="flex justify-between items-center text-xs text-[#5B5346]">
+                  <span>Sous-total brut</span>
+                  <span className="font-semibold">{money(subtotal)}</span>
+                </div>
+
+                {discount && (
+                  <div className="flex justify-between items-center text-xs text-[#2E9E5B] font-bold">
+                    <span className="flex items-center gap-1">
+                      <Sparkles size={12} />
+                      {discount.code ? `Remise (${discount.code})` : "Remise"}
+                    </span>
+                    <span>-{money(discountAmount)}</span>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-black/10 flex justify-between items-center">
+                  <span className="text-base font-bold text-[#2B2622]">Montant total TTC</span>
+                  <span className="text-xl font-extrabold text-[#2B2622]">{money(total)}</span>
+                </div>
               </div>
 
               {/* Moyen de paiement */}
@@ -503,6 +550,47 @@ export default function PaymentModal({ order, table, onCancel, onConfirm }) {
                     );
                   })}
                 </div>
+
+                {/* Déclencheur TPE instantané si Carte */}
+                {singleMethod === "carte" && (
+                  <div className="mt-3 p-3.5 rounded-2xl bg-[#2E9E5B]/10 border border-[#2E9E5B]/30 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-[#2B2622] flex items-center gap-1.5">
+                        <Wifi size={14} className="text-[#2E9E5B]" />
+                        Terminal TPE connecté
+                      </span>
+                      <p className="text-[11px] text-[#6B6355]">
+                        Déclencher le paiement carte directement sur le terminal
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setTpeSession({
+                          amount: total,
+                          label: "Paiement unique",
+                          callback: (tpeRes) => {
+                            setLatestTpeData(tpeRes);
+                            onConfirm("carte", [
+                              {
+                                id: `pay_single_${Date.now()}`,
+                                label: "Paiement unique (CB TPE)",
+                                amount: total,
+                                method: "carte",
+                                paidAt: Date.now(),
+                                tpeData: tpeRes,
+                              },
+                            ], { subtotal, total, discount, vatDetails, tpeData: tpeRes });
+                          },
+                        });
+                      }}
+                      className="rf-tap px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm flex items-center gap-1.5"
+                      style={{ background: "#2E9E5B" }}
+                    >
+                      <CreditCard size={14} />
+                      <span>Lancer TPE ({money(total)})</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1017,6 +1105,20 @@ export default function PaymentModal({ order, table, onCancel, onConfirm }) {
           </div>
         </div>
       </div>
+
+      {/* Modal TPE interactif */}
+      {tpeSession && (
+        <TpeModal
+          amount={tpeSession.amount}
+          restaurantName={config?.name || "RestoFlow"}
+          onCancel={() => setTpeSession(null)}
+          onSuccess={(tpeRes) => {
+            const cb = tpeSession.callback;
+            setTpeSession(null);
+            cb?.(tpeRes);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -29,6 +29,6 @@ export const PRODUCTS_SEED = [
   // Boissons
   { id: "p18", cat: "boissons", name: "Coca-Cola",                 desc: "33cl",                                              price: 4,    emoji: "🥤", allergens: [] },
   { id: "p19", cat: "boissons", name: "Eau pétillante",            desc: "50cl",                                              price: 3.5,  emoji: "💧", allergens: [] },
-  { id: "p20", cat: "boissons", name: "Verre de Côtes du Rhône",   desc: "12cl",                                              price: 6,    emoji: "🍷", allergens: ["Sulfites"] },
+  { id: "p20", cat: "boissons", name: "Verre de Côtes du Rhône",   desc: "12cl (Alcool)",                                     price: 6,    emoji: "🍷", allergens: ["Sulfites"], vatRate: 20 },
   { id: "p21", cat: "boissons", name: "Café",                      desc: "Expresso",                                          price: 2.5,  emoji: "☕", allergens: [] },
 ];
