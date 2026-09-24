@@ -14,6 +14,7 @@ import PaymentModal from "./PaymentModal.jsx";
 
 export default function OrderTaking({
   table, order, now, products, isMobile,
+  recipes = [], ingredients = [],
   onBack, onAdd, onAddComposedMenu,
   onQty, onRemove, onNote,
   onSend, onServe, onCheckout, onBackToPlan, onToast,
@@ -41,8 +42,30 @@ export default function OrderTaking({
       (query ? (p.name + p.desc).toLowerCase().includes(query.toLowerCase()) : true)
   );
 
+  const getPortionsAvailable = (product) => {
+    if (!product.available) return 0;
+    const prodRecipes = recipes.filter((r) => r.productId === product.id);
+    if (!prodRecipes || prodRecipes.length === 0) return null;
+    let minPossible = Infinity;
+    for (const rc of prodRecipes) {
+      if (rc.isCritical && rc.quantity > 0) {
+        const ing = ingredients.find((i) => i.id === rc.ingredientId);
+        const currentStock = ing ? ing.currentStock : rc.currentStock ?? 0;
+        const possible = Math.floor(currentStock / rc.quantity);
+        if (possible < minPossible) {
+          minPossible = Math.max(0, possible);
+        }
+      }
+    }
+    return minPossible === Infinity ? null : minPossible;
+  };
+
   const handleProductTap = (p) => {
-    if (!isAvailable(p)) { onToast?.(`⛔ ${p.name} est en rupture de stock`, "warn"); return; }
+    const portions = getPortionsAvailable(p);
+    if (!isAvailable(p) || portions === 0) {
+      onToast?.(`⛔ ${p.name} est en rupture de stock`, "warn");
+      return;
+    }
     if (p.isMenu) setComposerMenu(p);
     else onAdd(p);
   };
@@ -83,7 +106,13 @@ export default function OrderTaking({
       {/* Grille de produits */}
       <div className={`flex-1 overflow-y-auto rf-scrollbar p-3 grid gap-3 ${isMobile ? "grid-cols-1" : "grid-cols-2"}`}>
         {filtered.map((p) => (
-          <ProductCard key={p.id} p={p} isMobile={isMobile} onTap={() => handleProductTap(p)} />
+          <ProductCard
+            key={p.id}
+            p={p}
+            isMobile={isMobile}
+            portionsLeft={getPortionsAvailable(p)}
+            onTap={() => handleProductTap(p)}
+          />
         ))}
         {filtered.length === 0 && (
           <p className={`text-sm text-[#9A917E] text-center py-8 ${isMobile ? "" : "col-span-2"}`}>Aucun produit trouvé.</p>
@@ -266,22 +295,27 @@ export default function OrderTaking({
 
 /* ── Sous-composants ─────────────────────────────────────────── */
 
-function ProductCard({ p, isMobile, onTap }) {
+function ProductCard({ p, isMobile, onTap, portionsLeft }) {
   const cat = CATEGORIES.find((c) => c.id === p.cat);
-  const available = isAvailable(p);
+  const baseAvailable = isAvailable(p);
+  const isOutOfStock = !baseAvailable || portionsLeft === 0;
   return (
     <button
       onClick={onTap}
-      className={`rf-tap rf-anim-pop relative text-left rounded-xl border bg-white ${isMobile ? "p-3.5" : "p-3"} flex gap-3 items-start ${available ? "border-black/10 hover:border-black/25" : "border-[#C1361B]/30"}`}
-      style={{ opacity: available ? 1 : 0.6 }}
+      className={`rf-tap rf-anim-pop relative text-left rounded-xl border bg-white ${isMobile ? "p-3.5" : "p-3"} flex gap-3 items-start ${!isOutOfStock ? "border-black/10 hover:border-black/25" : "border-[#C1361B]/30"}`}
+      style={{ opacity: !isOutOfStock ? 1 : 0.6 }}
     >
-      {!available && (
+      {isOutOfStock ? (
         <span className="absolute top-1.5 right-1.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" style={{ background: "#C1361B", color: "#FFF7ED" }}>
           <Ban size={9} /> RUPTURE
         </span>
-      )}
+      ) : portionsLeft !== null && portionsLeft <= 4 ? (
+        <span className="absolute top-1.5 right-1.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs" style={{ background: "#D9A441", color: "#FFF7ED" }}>
+          Plus que {portionsLeft}
+        </span>
+      ) : null}
       <div className={`rounded-lg flex items-center justify-center shrink-0 ${isMobile ? "w-14 h-14 text-3xl" : "w-12 h-12 text-2xl"}`}
-        style={{ background: (cat?.accent || "#999") + "22", filter: available ? "none" : "grayscale(1)" }}>
+        style={{ background: (cat?.accent || "#999") + "22", filter: !isOutOfStock ? "none" : "grayscale(1)" }}>
         {p.emoji || "🍽️"}
       </div>
       <div className="flex-1 min-w-0">
@@ -290,7 +324,7 @@ function ProductCard({ p, isMobile, onTap }) {
             {p.name}
             {p.isMenu && <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#6B422622", color: "#6B4226" }}>MENU</span>}
           </span>
-          {available && (
+          {!isOutOfStock && (
             <span className={`rounded-full bg-[#2B2622] text-[#FAF6EE] flex items-center justify-center shrink-0 ${isMobile ? "w-8 h-8" : "w-6 h-6"}`}>
               {p.isMenu ? <LayoutList size={isMobile ? 14 : 12} /> : <Plus size={isMobile ? 14 : 12} />}
             </span>

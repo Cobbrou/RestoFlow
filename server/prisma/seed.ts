@@ -90,7 +90,7 @@ const INITIAL_ROLES = [
       "salle.view", "salle.order", "salle.send_kitchen", "salle.serve", "salle.reservations", "salle.alerts",
       "cuisine.view", "cuisine.status",
       "caisse.checkout", "caisse.split", "caisse.history",
-      "gestion.tables", "gestion.products", "gestion.menus", "gestion.staff",
+      "gestion.tables", "gestion.products", "gestion.menus", "gestion.staff", "gestion.stocks", "gestion.recipes",
       "dashboard.view",
     ],
   },
@@ -102,7 +102,7 @@ const INITIAL_ROLES = [
     isSystem: false,
     permissions: [
       "salle.view", "salle.order", "salle.send_kitchen", "salle.serve", "salle.reservations", "salle.alerts",
-      "caisse.checkout", "caisse.split", "caisse.history", "gestion.tables", "dashboard.view",
+      "caisse.checkout", "caisse.split", "caisse.history", "gestion.tables", "gestion.stocks", "dashboard.view",
     ],
   },
   {
@@ -122,7 +122,7 @@ const INITIAL_ROLES = [
     description: "Affichage des commandes en direct, gestion du KDS et signalement des ruptures de produits.",
     color: "#8B5A2B",
     isSystem: false,
-    permissions: ["cuisine.view", "cuisine.status", "gestion.products"],
+    permissions: ["cuisine.view", "cuisine.status", "gestion.products", "gestion.stocks", "gestion.recipes"],
   },
   {
     id: "accountant",
@@ -187,10 +187,94 @@ const INITIAL_STAFF = [
   },
 ];
 
+const INGREDIENTS_SEED = [
+  { id: "ing_1", name: "Steak haché pur bœuf 180g", category: "Boucherie", unit: "piece", currentStock: 45, minThreshold: 10, idealStock: 60, costPerUnit: 2.60, supplier: "Metro Viandes", supplierRef: "BOUF-180" },
+  { id: "ing_2", name: "Pain brioché burger artisanal", category: "Pains", unit: "piece", currentStock: 50, minThreshold: 12, idealStock: 80, costPerUnit: 0.55, supplier: "Boulangerie des Halles", supplierRef: "PAIN-BRIO" },
+  { id: "ing_3", name: "Cheddar affiné tranché", category: "Crémerie", unit: "g", currentStock: 2400, minThreshold: 500, idealStock: 3000, costPerUnit: 0.014, supplier: "Fromagerie Normande", supplierRef: "CHED-AFF" },
+  { id: "ing_4", name: "Bacon fumé supérieur", category: "Boucherie", unit: "g", currentStock: 1800, minThreshold: 400, idealStock: 2500, costPerUnit: 0.016, supplier: "Metro Viandes", supplierRef: "BAC-FUM" },
+  { id: "ing_5", name: "Sauce barbecue fumée", category: "Épicerie", unit: "ml", currentStock: 3000, minThreshold: 500, idealStock: 4000, costPerUnit: 0.005, supplier: "Sysco France", supplierRef: "SAUC-BBQ" },
+  { id: "ing_6", name: "Pommes de terre Bintje (Frites)", category: "Maraîchage", unit: "g", currentStock: 25000, minThreshold: 5000, idealStock: 35000, costPerUnit: 0.0018, supplier: "Primeurs d'Île-de-France", supplierRef: "PDT-BINT" },
+  { id: "ing_7", name: "Entrecôte bœuf Simmental 250g", category: "Boucherie", unit: "piece", currentStock: 20, minThreshold: 5, idealStock: 30, costPerUnit: 6.80, supplier: "Boucheries Nivernaises", supplierRef: "ENTR-250" },
+  { id: "ing_8", name: "Sauce au poivre vert maison", category: "Épicerie", unit: "ml", currentStock: 2500, minThreshold: 500, idealStock: 3500, costPerUnit: 0.008, supplier: "Préparation Maison", supplierRef: "SAUC-POV" },
+  { id: "ing_9", name: "Pavé de saumon Label Rouge 180g", category: "Poissonnerie", unit: "piece", currentStock: 18, minThreshold: 5, idealStock: 25, costPerUnit: 4.90, supplier: "Rungis Marée", supplierRef: "SAUM-180" },
+  { id: "ing_10", name: "Panais frais bio", category: "Maraîchage", unit: "g", currentStock: 4000, minThreshold: 800, idealStock: 6000, costPerUnit: 0.003, supplier: "Primeurs d'Île-de-France", supplierRef: "PAN-BIO" },
+  { id: "ing_11", name: "Burrata di Bufala 125g", category: "Crémerie", unit: "piece", currentStock: 22, minThreshold: 6, idealStock: 35, costPerUnit: 1.85, supplier: "Casa Italia Rungis", supplierRef: "BURR-125" },
+  { id: "ing_12", name: "Tomates anciennes de plein champ", category: "Maraîchage", unit: "g", currentStock: 6000, minThreshold: 1500, idealStock: 8000, costPerUnit: 0.0035, supplier: "Primeurs d'Île-de-France", supplierRef: "TOM-ANC" },
+  { id: "ing_13", name: "Pâton à pizza frais 280g", category: "Pains", unit: "piece", currentStock: 40, minThreshold: 10, idealStock: 60, costPerUnit: 0.70, supplier: "Moulins de Paris", supplierRef: "PAT-PIZ" },
+  { id: "ing_14", name: "Mozzarella Fior di Latte râpée", category: "Crémerie", unit: "g", currentStock: 5000, minThreshold: 1000, idealStock: 7000, costPerUnit: 0.009, supplier: "Casa Italia Rungis", supplierRef: "MOZZ-FIO" },
+  { id: "ing_15", name: "Jambon blanc supérieur cuit au torchon", category: "Boucherie", unit: "g", currentStock: 3200, minThreshold: 600, idealStock: 4000, costPerUnit: 0.015, supplier: "Metro Viandes", supplierRef: "JAMB-TOR" },
+  { id: "ing_16", name: "Champignons de Paris bruns", category: "Maraîchage", unit: "g", currentStock: 2800, minThreshold: 500, idealStock: 4000, costPerUnit: 0.0045, supplier: "Primeurs d'Île-de-France", supplierRef: "CHAM-PAR" },
+  { id: "ing_17", name: "Filet de poulet fermier", category: "Boucherie", unit: "g", currentStock: 4500, minThreshold: 1000, idealStock: 6000, costPerUnit: 0.012, supplier: "Metro Viandes", supplierRef: "POUL-FERM" },
+  { id: "ing_18", name: "Mesclun & jeunes pousses", category: "Maraîchage", unit: "g", currentStock: 2200, minThreshold: 500, idealStock: 3000, costPerUnit: 0.008, supplier: "Primeurs d'Île-de-France", supplierRef: "MESC-SAL" },
+  { id: "ing_19", name: "Parmigiano Reggiano 24 mois AOP", category: "Crémerie", unit: "g", currentStock: 1600, minThreshold: 300, idealStock: 2000, costPerUnit: 0.024, supplier: "Casa Italia Rungis", supplierRef: "PARM-24M" },
+  { id: "ing_20", name: "Sauce César crémeuse", category: "Épicerie", unit: "ml", currentStock: 1800, minThreshold: 400, idealStock: 2500, costPerUnit: 0.007, supplier: "Sysco France", supplierRef: "SAUC-CES" },
+  { id: "ing_21", name: "Mascarpone crémeux", category: "Crémerie", unit: "g", currentStock: 2000, minThreshold: 400, idealStock: 3000, costPerUnit: 0.0085, supplier: "Casa Italia Rungis", supplierRef: "MASC-GAL" },
+  { id: "ing_22", name: "Chocolat noir Guanaja 70%", category: "Épicerie", unit: "g", currentStock: 3500, minThreshold: 600, idealStock: 5000, costPerUnit: 0.019, supplier: "Valrhona Gastronomie", supplierRef: "CHOC-70" },
+  { id: "ing_23", name: "Canette Coca-Cola 33cl", category: "Boissons", unit: "piece", currentStock: 96, minThreshold: 24, idealStock: 144, costPerUnit: 0.65, supplier: "France Boissons / C10", supplierRef: "BOIS-COCA" },
+  { id: "ing_24", name: "Eau San Pellegrino 50cl verre", category: "Boissons", unit: "piece", currentStock: 72, minThreshold: 18, idealStock: 96, costPerUnit: 0.55, supplier: "France Boissons / C10", supplierRef: "BOIS-SPEL" },
+  { id: "ing_25", name: "Café grains 100% Arabica", category: "Épicerie", unit: "g", currentStock: 4000, minThreshold: 800, idealStock: 5000, costPerUnit: 0.022, supplier: "Torréfaction de Belleville", supplierRef: "EPIC-CAFE" },
+];
+
+const RECIPES_SEED = [
+  // Burger Classic (p7, PV=12€)
+  { productId: "p7", ingredientId: "ing_2", quantity: 1, unit: "piece", isCritical: true, notes: "Pain toasté" },
+  { productId: "p7", ingredientId: "ing_1", quantity: 1, unit: "piece", isCritical: true, notes: "Cuisson demandée" },
+  { productId: "p7", ingredientId: "ing_3", quantity: 30, unit: "g", isCritical: false, notes: "Fondu sur viande" },
+  { productId: "p7", ingredientId: "ing_6", quantity: 200, unit: "g", isCritical: false, notes: "Frites d'accompagnement" },
+
+  // Burger Bacon BBQ (p9, PV=14.5€)
+  { productId: "p9", ingredientId: "ing_2", quantity: 1, unit: "piece", isCritical: true, notes: "Pain burger" },
+  { productId: "p9", ingredientId: "ing_1", quantity: 2, unit: "piece", isCritical: true, notes: "Double steak" },
+  { productId: "p9", ingredientId: "ing_4", quantity: 40, unit: "g", isCritical: false, notes: "Bacon croustillant" },
+  { productId: "p9", ingredientId: "ing_3", quantity: 30, unit: "g", isCritical: false, notes: "Cheddar" },
+  { productId: "p9", ingredientId: "ing_5", quantity: 30, unit: "ml", isCritical: false, notes: "Sauce BBQ" },
+  { productId: "p9", ingredientId: "ing_6", quantity: 200, unit: "g", isCritical: false, notes: "Portion frites" },
+
+  // Entrecôte grillée (p4, PV=22€)
+  { productId: "p4", ingredientId: "ing_7", quantity: 1, unit: "piece", isCritical: true, notes: "Pièce noble de bœuf" },
+  { productId: "p4", ingredientId: "ing_6", quantity: 250, unit: "g", isCritical: false, notes: "Frites fraîches" },
+  { productId: "p4", ingredientId: "ing_8", quantity: 50, unit: "ml", isCritical: false, notes: "Sauce poivre" },
+
+  // Saumon rôti (p5, PV=19€)
+  { productId: "p5", ingredientId: "ing_9", quantity: 1, unit: "piece", isCritical: true, notes: "Cuit unilatéral" },
+  { productId: "p5", ingredientId: "ing_10", quantity: 200, unit: "g", isCritical: false, notes: "Purée de panais" },
+
+  // Burrata crémeuse (p1, PV=9€)
+  { productId: "p1", ingredientId: "ing_11", quantity: 1, unit: "piece", isCritical: true, notes: "Pièce entière" },
+  { productId: "p1", ingredientId: "ing_12", quantity: 120, unit: "g", isCritical: false, notes: "Tomates tranchées" },
+
+  // Pizza Regina (p11, PV=13€)
+  { productId: "p11", ingredientId: "ing_13", quantity: 1, unit: "piece", isCritical: true, notes: "Pâte étalée main" },
+  { productId: "p11", ingredientId: "ing_14", quantity: 120, unit: "g", isCritical: true, notes: "Mozzarella" },
+  { productId: "p11", ingredientId: "ing_15", quantity: 80, unit: "g", isCritical: false, notes: "Jambon blanc" },
+  { productId: "p11", ingredientId: "ing_16", quantity: 60, unit: "g", isCritical: false, notes: "Champignons émincés" },
+
+  // Salade César Poulet (p13, PV=13€)
+  { productId: "p13", ingredientId: "ing_17", quantity: 150, unit: "g", isCritical: true, notes: "Poulet émincé grillé" },
+  { productId: "p13", ingredientId: "ing_18", quantity: 80, unit: "g", isCritical: true, notes: "Mesclun frais" },
+  { productId: "p13", ingredientId: "ing_19", quantity: 25, unit: "g", isCritical: false, notes: "Copeaux parmesan" },
+  { productId: "p13", ingredientId: "ing_20", quantity: 40, unit: "ml", isCritical: false, notes: "Sauce César" },
+
+  // Tiramisu maison (p15, PV=7€)
+  { productId: "p15", ingredientId: "ing_21", quantity: 90, unit: "g", isCritical: true, notes: "Appareil mascarpone" },
+  { productId: "p15", ingredientId: "ing_25", quantity: 15, unit: "g", isCritical: false, notes: "Imbibage café" },
+
+  // Fondant au chocolat (p16, PV=8€)
+  { productId: "p16", ingredientId: "ing_22", quantity: 70, unit: "g", isCritical: true, notes: "Chocolat noir" },
+
+  // Boissons (p18, p19, p21)
+  { productId: "p18", ingredientId: "ing_23", quantity: 1, unit: "piece", isCritical: true, notes: "Canette 33cl servie fraîche" },
+  { productId: "p19", ingredientId: "ing_24", quantity: 1, unit: "piece", isCritical: true, notes: "Bouteille verre 50cl" },
+  { productId: "p21", ingredientId: "ing_25", quantity: 8, unit: "g", isCritical: true, notes: "Extraction expresso" },
+];
+
 async function main() {
   console.log("Seeding RestoFlow Database...");
 
-  // Clear existing data
+  // Clear existing data in correct dependency order
+  await prisma.stockMovement.deleteMany({});
+  await prisma.recipeItem.deleteMany({});
+  await prisma.ingredient.deleteMany({});
   await prisma.orderItem.deleteMany({});
   await prisma.order.deleteMany({});
   await prisma.orderHistory.deleteMany({});
@@ -234,6 +318,37 @@ async function main() {
         emoji: m.emoji || "📋",
         available: true,
         groups: JSON.stringify(m.groups),
+      },
+    });
+  }
+
+  // 3b. Ingrédients (Phase 2)
+  for (const ing of INGREDIENTS_SEED) {
+    await prisma.ingredient.create({
+      data: ing,
+    });
+
+    // Mouvement initial d'ouverture de stock
+    await prisma.stockMovement.create({
+      data: {
+        id: `mov_init_${ing.id}`,
+        ingredientId: ing.id,
+        type: "DELIVERY",
+        quantity: ing.currentStock,
+        unitCost: ing.costPerUnit,
+        reason: "Stock initial d'ouverture & inventaire de démarrage",
+        createdAt: new Date(Date.now() - 48 * 3600000),
+      },
+    });
+  }
+
+  // 3c. Fiches Techniques / RecipeItems (Phase 2)
+  for (let idx = 0; idx < RECIPES_SEED.length; idx++) {
+    const rc = RECIPES_SEED[idx];
+    await prisma.recipeItem.create({
+      data: {
+        id: `rc_${rc.productId}_${rc.ingredientId}`,
+        ...rc,
       },
     });
   }
