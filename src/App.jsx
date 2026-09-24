@@ -44,6 +44,9 @@ export default function App() {
   const [menus,    setMenus]    = useState(seedMenus);
   const [staff,    setStaff]    = useState(INITIAL_STAFF);
   const [roles,    setRoles]    = useState(INITIAL_ROLES);
+  const [ingredients, setIngredients] = useState([]);
+  const [recipes, setRecipes] = useState([]);
+  const [stockMovements, setStockMovements] = useState([]);
 
   // ── Table active & Équipier authentifié ─────────────────────
   const [currentStaff, setCurrentStaff] = useState(() => {
@@ -107,13 +110,16 @@ export default function App() {
 
     const handleSyncInit = (fullState) => {
       if (!fullState) return;
-      if (fullState.tables)   setTables(fullState.tables);
-      if (fullState.orders)   setOrders(fullState.orders);
-      if (fullState.history)  setHistory(fullState.history);
-      if (fullState.products) setProducts(fullState.products);
-      if (fullState.menus)    setMenus(fullState.menus);
-      if (fullState.staff)    setStaff(fullState.staff);
-      if (fullState.roles)    setRoles(fullState.roles);
+      if (fullState.tables)         setTables(fullState.tables);
+      if (fullState.orders)         setOrders(fullState.orders);
+      if (fullState.history)        setHistory(fullState.history);
+      if (fullState.products)       setProducts(fullState.products);
+      if (fullState.menus)          setMenus(fullState.menus);
+      if (fullState.staff)          setStaff(fullState.staff);
+      if (fullState.roles)          setRoles(fullState.roles);
+      if (fullState.ingredients)    setIngredients(fullState.ingredients);
+      if (fullState.recipes)        setRecipes(fullState.recipes);
+      if (fullState.stockMovements) setStockMovements(fullState.stockMovements);
     };
 
     const handleTableUpdated = (updatedTable) => {
@@ -148,6 +154,27 @@ export default function App() {
       if (soundOn) beep(980);
     };
 
+    const handleStockUpdated = (updatedIngredients) => {
+      setIngredients(updatedIngredients);
+    };
+
+    const handleRecipesUpdated = (updatedRecipes) => {
+      setRecipes(updatedRecipes);
+    };
+
+    const handleMovementsUpdated = (updatedMovements) => {
+      setStockMovements(updatedMovements);
+    };
+
+    const handleCatalogProductsUpdated = (updatedProducts) => {
+      setProducts(updatedProducts);
+    };
+
+    const handleStockAlert = ({ message }) => {
+      pushToast(message, "warn");
+      if (soundOn) beep(620);
+    };
+
     const handleConnect = () => {
       flushQueue(socket);
       socket.emit("sync:request", {}, (res) => {
@@ -162,6 +189,11 @@ export default function App() {
     socket.on("history:new_entry", handleHistoryNew);
     socket.on("kitchen:new_ticket", handleKitchenTicket);
     socket.on("server:order_ready", handleOrderReady);
+    socket.on("stock:updated", handleStockUpdated);
+    socket.on("recipes:updated", handleRecipesUpdated);
+    socket.on("stock:movements_updated", handleMovementsUpdated);
+    socket.on("catalog:products_updated", handleCatalogProductsUpdated);
+    socket.on("stock:alert", handleStockAlert);
     socket.on("connect", handleConnect);
 
     if (socket.connected) {
@@ -176,6 +208,11 @@ export default function App() {
       socket.off("history:new_entry", handleHistoryNew);
       socket.off("kitchen:new_ticket", handleKitchenTicket);
       socket.off("server:order_ready", handleOrderReady);
+      socket.off("stock:updated", handleStockUpdated);
+      socket.off("recipes:updated", handleRecipesUpdated);
+      socket.off("stock:movements_updated", handleMovementsUpdated);
+      socket.off("catalog:products_updated", handleCatalogProductsUpdated);
+      socket.off("stock:alert", handleStockAlert);
       socket.off("connect", handleConnect);
     };
   }, [soundOn, beep, pushToast]);
@@ -515,6 +552,36 @@ export default function App() {
   const updateRole = (id, data) => setRoles((prev) => prev.map((r) => (r.id === id ? { ...r, ...data } : r)));
   const deleteRole = (id) => setRoles((prev) => prev.filter((r) => r.id !== id));
 
+  // ── Actions Gestion : stocks & fiches techniques (Phase 2) ──
+  const handleAddStockMovement = (data) => {
+    emitOrQueue("stock:add_movement", { ...data, staffId: currentStaff?.id });
+    pushToast("Mouvement de stock enregistré", "server");
+  };
+
+  const handleAddIngredient = (data) => {
+    emitOrQueue("stock:create_ingredient", data);
+    pushToast(`Ingrédient créé : ${data.name}`, "server");
+  };
+
+  const handleUpdateIngredient = (id, data) => {
+    emitOrQueue("stock:update_ingredient", { id, ...data });
+    pushToast("Ingrédient mis à jour", "server");
+  };
+
+  const handleDeleteIngredient = (id) => {
+    emitOrQueue("stock:delete_ingredient", { id });
+    pushToast("Ingrédient supprimé", "server");
+  };
+
+  const handleSaveRecipe = (productId, items) => {
+    emitOrQueue("recipe:save", { productId, items });
+    pushToast("Fiche technique enregistrée avec succès", "server");
+  };
+
+  const handleToggleProductAvailable = (productId) => {
+    emitOrQueue("catalog:toggle_product_available", { productId });
+  };
+
   // ── Rendu ──────────────────────────────────────────────────
   const activeTable = tables.find((t) => t.id === activeTableId);
   const activeOrder = activeTable ? getActiveOrder(activeTable.id) : null;
@@ -586,6 +653,8 @@ export default function App() {
           order={activeOrder}
           now={now}
           products={combinedProducts}
+          recipes={recipes}
+          ingredients={ingredients}
           isMobile={isMobile}
           onBack={() => setServerView("plan")}
           onAdd={(p) => addProductToOrder(activeTable.id, p)}
@@ -630,6 +699,9 @@ export default function App() {
           orders={orders}
           products={products}
           menus={menus}
+          ingredients={ingredients}
+          recipes={recipes}
+          stockMovements={stockMovements}
           history={history}
           staff={staff}
           roles={roles}
@@ -648,6 +720,12 @@ export default function App() {
           onAddRole={addRole}
           onUpdateRole={updateRole}
           onDeleteRole={deleteRole}
+          onAddMovement={handleAddStockMovement}
+          onAddIngredient={handleAddIngredient}
+          onUpdateIngredient={handleUpdateIngredient}
+          onDeleteIngredient={handleDeleteIngredient}
+          onSaveRecipe={handleSaveRecipe}
+          onToggleProductAvailable={handleToggleProductAvailable}
         />
       )}
     </div>

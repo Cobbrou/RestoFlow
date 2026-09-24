@@ -1,18 +1,22 @@
 import { useState } from "react";
-import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck } from "lucide-react";
+import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { isAvailable, money } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
+import StockManager from "./StockManager.jsx";
+import RecipeManager from "./RecipeManager.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
 
 /**
- * Gestion — Back-office avec 5 sous-vues :
+ * Gestion — Back-office avec 7 sous-vues :
  *  - tables     : gestion du plan de salle (CRUD + réservations)
  *  - produits   : catalogue produits (CRUD + disponibilité)
  *  - menus      : menus composés (CRUD)
+ *  - stocks     : gestion des stocks, inventaire et alertes (Phase 2)
+ *  - recettes   : fiches techniques et calcul du food cost (Phase 2)
  *  - historique : historique des paiements encaissés
  *  - equipe     : rôles, permissions et membres du personnel
  */
@@ -23,6 +27,8 @@ export default function Gestion(props) {
     { id: "tables",     label: "Tables",         icon: Table2 },
     { id: "produits",   label: "Produits",       icon: Package },
     { id: "menus",      label: "Menus",          icon: LayoutList },
+    { id: "stocks",     label: "Stocks",         icon: Boxes },
+    { id: "recettes",   label: "Fiches & Coûts", icon: FileSpreadsheet },
     { id: "historique", label: "Historique",     icon: Receipt },
     { id: "equipe",     label: "Équipe & Rôles", icon: ShieldCheck },
   ];
@@ -36,6 +42,8 @@ export default function Gestion(props) {
       case "tables":     return hasPermission(currentStaff, currentRoleObj, "gestion.tables");
       case "produits":   return hasPermission(currentStaff, currentRoleObj, "gestion.products");
       case "menus":      return hasPermission(currentStaff, currentRoleObj, "gestion.menus");
+      case "stocks":     return hasPermission(currentStaff, currentRoleObj, "gestion.stocks");
+      case "recettes":   return hasPermission(currentStaff, currentRoleObj, "gestion.recipes");
       case "historique": return hasPermission(currentStaff, currentRoleObj, "caisse.history");
       case "equipe":     return hasPermission(currentStaff, currentRoleObj, "gestion.staff");
       default:           return false;
@@ -54,7 +62,7 @@ export default function Gestion(props) {
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="rf-display text-2xl font-semibold text-[#2B2622]">Gestion</h1>
-          <p className="text-sm text-[#6B6355]">Tables, catalogue produits, menus, historique des encaissements et gestion de l'équipe</p>
+          <p className="text-sm text-[#6B6355]">Tables, catalogue produits, stocks, fiches techniques, historique et équipe</p>
         </div>
         <div className="flex gap-1 p-1 rounded-full bg-black/5 flex-wrap">
           {visibleTabs.map((t) => {
@@ -74,6 +82,8 @@ export default function Gestion(props) {
       {view === "tables"     && <TableManager {...props} />}
       {view === "produits"   && <ProductManager {...props} />}
       {view === "menus"      && <MenuManager {...props} />}
+      {view === "stocks"     && <StockManager {...props} />}
+      {view === "recettes"   && <RecipeManager {...props} />}
       {view === "historique" && <HistoryManager history={props.history || []} />}
       {view === "equipe"     && <StaffRoleManager {...props} />}
     </div>
@@ -493,7 +503,7 @@ function MenuForm({ menu, products, onCancel, onSave }) {
 
   return (
     <Modal title={menu ? "Modifier le menu" : "Nouveau menu"} onClose={onCancel} wide>
-      <div className="grid grid-cols-[64px_1fr_120px] gap-3">
+      <div className="grid grid-cols-[64px_1fr_120px] gap-3 mb-2">
         <Field label="Icône">
           <input className={inputCls + " text-center text-xl"} value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={2} />
         </Field>
@@ -504,6 +514,9 @@ function MenuForm({ menu, products, onCancel, onSave }) {
           <input type="number" step="0.5" min={0} className={inputCls} value={price} onChange={(e) => setPrice(e.target.value)} />
         </Field>
       </div>
+      <Field label="Description (optionnelle)">
+        <input className={inputCls + " mb-2"} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Ex : Entrée + Plat + Boisson" />
+      </Field>
       <p className="text-[11px] text-[#8A8378] mb-3">
         Composez le menu en étapes de choix (ex. «&nbsp;Entrée&nbsp;» au choix parmi plusieurs plats). Le serveur devra sélectionner une option par étape avant d'ajouter le menu à la commande.
       </p>

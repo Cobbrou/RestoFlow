@@ -41,8 +41,10 @@ export const PERMISSION_MODULES = [
     color: "#6B5B95",
     permissions: [
       { id: "gestion.tables", label: "Configuration des tables", desc: "Ajout, suppression et coordonnées du mobilier" },
-      { id: "gestion.products", label: "Catalogue produits & stock", desc: "Gestion des plats, tarifs et rupture de stock" },
+      { id: "gestion.products", label: "Catalogue produits & carte", desc: "Gestion des plats, tarifs et disponibilité" },
       { id: "gestion.menus", label: "Création de formules / menus", desc: "Définition des étapes et formules au choix" },
+      { id: "gestion.stocks", label: "Stocks & Inventaire", desc: "Suivi des quantités, réapprovisionnement et pertes" },
+      { id: "gestion.recipes", label: "Fiches techniques & Food Cost", desc: "Recettes, composition et calcul des marges" },
       { id: "gestion.staff", label: "Équipe, rôles & permissions", desc: "Administration des comptes collaborateurs et droits" },
     ],
   },
@@ -84,6 +86,7 @@ export const INITIAL_ROLES = [
       "caisse.split",
       "caisse.history",
       "gestion.tables",
+      "gestion.stocks",
       "dashboard.view",
     ],
   },
@@ -113,6 +116,8 @@ export const INITIAL_ROLES = [
       "cuisine.view",
       "cuisine.status",
       "gestion.products",
+      "gestion.stocks",
+      "gestion.recipes",
     ],
   },
   {

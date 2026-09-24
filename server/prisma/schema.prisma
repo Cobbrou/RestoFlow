@@ -54,15 +54,60 @@ model Category {
 }
 
 model Product {
-  id        String   @id
-  name      String
-  cat       String
-  price     Float
-  desc      String
-  emoji     String?  @default("🍽️")
-  allergens String   // JSON array string of allergen tags, e.g. '["Gluten", "Lactose"]'
-  available Boolean  @default(true)
-  isMenu    Boolean  @default(false)
+  id          String       @id
+  name        String
+  cat         String
+  price       Float
+  desc        String
+  emoji       String?      @default("🍽️")
+  allergens   String       // JSON array string of allergen tags, e.g. '["Gluten", "Lactose"]'
+  available   Boolean      @default(true)
+  isMenu      Boolean      @default(false)
+  recipeItems RecipeItem[]
+}
+
+model Ingredient {
+  id           String          @id
+  name         String
+  category     String          // "Boucherie", "Maraîchage", "Épicerie", "Crémerie", "Boissons", "Pains"
+  unit         String          // "g", "kg", "ml", "cl", "l", "piece"
+  currentStock Float           @default(0)
+  minThreshold Float           @default(5)
+  idealStock   Float           @default(20)
+  costPerUnit  Float           @default(0)   // Prix unitaire d'achat HT
+  supplier     String?         // Nom fournisseur principal
+  supplierRef  String?         // Référence fournisseur
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  recipeItems  RecipeItem[]
+  movements    StockMovement[]
+}
+
+model RecipeItem {
+  id           String     @id
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  quantity     Float      // Dosage par portion
+  unit         String     // Unité de dosage
+  isCritical   Boolean    @default(true) // Si épuisé -> bloque le produit
+  notes        String?
+
+  @@unique([productId, ingredientId])
+}
+
+model StockMovement {
+  id           String      @id
+  ingredientId String
+  ingredient   Ingredient  @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  type         String      // "ORDER_CONSUMPTION" | "DELIVERY" | "WASTE" | "ADJUSTMENT" | "CANCEL_RETURN"
+  quantity     Float       // + pour entrée, - pour consommation / perte
+  unitCost     Float?      // Coût d'achat unitaire
+  orderId      String?     // Réf commande liée
+  staffId      String?     // Auteur
+  reason       String?     // Motif en cas de perte / ajustement
+  createdAt    DateTime    @default(now())
 }
 
 model Menu {
