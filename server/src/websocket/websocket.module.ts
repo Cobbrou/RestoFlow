@@ -1,7 +1,27 @@
 import { Module } from "@nestjs/common";
 import { WebsocketGateway } from "./websocket.gateway";
+import { PrismaModule } from "../prisma/prisma.module";
+import { AuthModule } from "../auth/auth.module";
+import { OrdersModule } from "../orders/orders.module";
+import { BillingModule } from "../billing/billing.module";
+import { ConfigModule } from "../config/config.module";
+import { StockModule } from "../stock/stock.module";
+import { TablesModule } from "../tables/tables.module";
+import { PrinterModule } from "../printer/printer.module";
+import { RecipesModule } from "../recipes/recipes.module";
 
 @Module({
+  imports: [
+    PrismaModule,
+    AuthModule,
+    OrdersModule,
+    BillingModule,
+    ConfigModule,
+    StockModule,
+    TablesModule,
+    PrinterModule,
+    RecipesModule,
+  ],
   providers: [WebsocketGateway],
   exports: [WebsocketGateway],
 })

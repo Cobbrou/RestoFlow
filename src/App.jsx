@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 import GlobalStyle from "./components/GlobalStyle.jsx";
 import TopNav from "./components/TopNav.jsx";
 import ToastStack from "./components/ToastStack.jsx";
@@ -7,10 +7,23 @@ import PinPadModal from "./components/PinPadModal.jsx";
 import FloorPlan from "./views/salle/FloorPlan.jsx";
 import OrderTaking from "./views/salle/OrderTaking.jsx";
 import CuisineShell from "./views/cuisine/CuisineShell.jsx";
-import Dashboard from "./views/gestion/Dashboard.jsx";
-import Gestion from "./views/gestion/Gestion.jsx";
-import ReservationModal from "./components/ReservationModal.jsx";
-import TableActionModal from "./components/TableActionModal.jsx";
+
+import { RestoFlowProvider } from "./context/RestoFlowContext.jsx";
+
+// ⚛️ Code Splitting (Axe 3) : Chargement à la demande des modules secondaires
+const Dashboard = lazy(() => import("./views/gestion/Dashboard.jsx"));
+const Gestion = lazy(() => import("./views/gestion/Gestion.jsx"));
+const ReservationModal = lazy(() => import("./components/ReservationModal.jsx"));
+const TableActionModal = lazy(() => import("./components/TableActionModal.jsx"));
+
+function ViewFallback() {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center p-12 text-[#6B6355]">
+      <div className="w-8 h-8 border-3 border-[#C1440E] border-t-transparent rounded-full animate-spin mb-3" />
+      <p className="text-xs font-semibold">Chargement du module...</p>
+    </div>
+  );
+}
 
 import { seedTables, seedOrders, seedHistory, seedMenus, seedReservations, uid } from "./data/seed.js";
 import { PRODUCTS_SEED } from "./data/products.js";
@@ -943,8 +956,92 @@ export default function App() {
     setCuisineView("board");
   };
 
+  const contextValue = useMemo(
+    () => ({
+      tables,
+      orders,
+      products,
+      menus,
+      ingredients,
+      recipes,
+      stockMovements,
+      history,
+      staff,
+      roles,
+      config,
+      reservations,
+      currentStaff,
+      role,
+      gestionView,
+      pushToast,
+      onUpdateConfig: handleUpdateConfig,
+      onAddTable: addTable,
+      onUpdateTable: updateTable,
+      onDeleteTable: deleteTable,
+      onAddProduct: addProduct,
+      onUpdateProduct: updateProduct,
+      onDeleteProduct: deleteProduct,
+      onAddMenu: addMenu,
+      onUpdateMenu: updateMenu,
+      onDeleteMenu: deleteMenu,
+      onAddStaff: addStaff,
+      onUpdateStaff: updateStaff,
+      onDeleteStaff: deleteStaff,
+      onAddRole: addRole,
+      onUpdateRole: updateRole,
+      onDeleteRole: deleteRole,
+      onAddMovement: handleAddStockMovement,
+      onAddIngredient: handleAddIngredient,
+      onUpdateIngredient: handleUpdateIngredient,
+      onDeleteIngredient: handleDeleteIngredient,
+      onSaveRecipe: handleSaveRecipe,
+      onToggleProductAvailable: handleToggleProductAvailable,
+    }),
+    [
+      tables,
+      orders,
+      products,
+      menus,
+      ingredients,
+      recipes,
+      stockMovements,
+      history,
+      staff,
+      roles,
+      config,
+      reservations,
+      currentStaff,
+      role,
+      gestionView,
+      pushToast,
+      handleUpdateConfig,
+      addTable,
+      updateTable,
+      deleteTable,
+      addProduct,
+      updateProduct,
+      deleteProduct,
+      addMenu,
+      updateMenu,
+      deleteMenu,
+      addStaff,
+      updateStaff,
+      deleteStaff,
+      addRole,
+      updateRole,
+      deleteRole,
+      handleAddStockMovement,
+      handleAddIngredient,
+      handleUpdateIngredient,
+      handleDeleteIngredient,
+      handleSaveRecipe,
+      handleToggleProductAvailable,
+    ]
+  );
+
   return (
-    <div
+    <RestoFlowProvider value={contextValue}>
+      <div
       ref={rootRef}
       className="rf-root w-full min-h-[720px] rounded-2xl overflow-hidden border border-black/10 shadow-xl"
       style={{ background: role === "cuisine" ? "#14110D" : "#FAF6EE" }}
@@ -1045,83 +1142,54 @@ export default function App() {
         />
       )}
 
-      {/* ── Dashboard ── */}
+      {/* ── Dashboard (Lazy Loaded) ── */}
       {role === "dashboard" && (
-        <Dashboard history={history} orders={orders} tables={tables} />
+        <Suspense fallback={<ViewFallback />}>
+          <Dashboard history={history} orders={orders} tables={tables} />
+        </Suspense>
       )}
 
-      {/* ── Gestion ── */}
+      {/* ── Gestion (Lazy Loaded & Sans Prop Drilling) ── */}
       {role === "gestion" && (
-        <Gestion
-          view={gestionView}
-          setView={setGestionView}
-          currentStaff={currentStaff}
-          tables={tables}
-          orders={orders}
-          products={products}
-          menus={menus}
-          ingredients={ingredients}
-          recipes={recipes}
-          stockMovements={stockMovements}
-          history={history}
-          staff={staff}
-          roles={roles}
-          config={config}
-          onUpdateConfig={handleUpdateConfig}
-          pushToast={pushToast}
-          onAddTable={addTable}
-          onUpdateTable={updateTable}
-          onDeleteTable={deleteTable}
-          onAddProduct={addProduct}
-          onUpdateProduct={updateProduct}
-          onDeleteProduct={deleteProduct}
-          onAddMenu={addMenu}
-          onUpdateMenu={updateMenu}
-          onDeleteMenu={deleteMenu}
-          onAddStaff={addStaff}
-          onUpdateStaff={updateStaff}
-          onDeleteStaff={deleteStaff}
-          onAddRole={addRole}
-          onUpdateRole={updateRole}
-          onDeleteRole={deleteRole}
-          onAddMovement={handleAddStockMovement}
-          onAddIngredient={handleAddIngredient}
-          onUpdateIngredient={handleUpdateIngredient}
-          onDeleteIngredient={handleDeleteIngredient}
-          onSaveRecipe={handleSaveRecipe}
-          onToggleProductAvailable={handleToggleProductAvailable}
-        />
+        <Suspense fallback={<ViewFallback />}>
+          <Gestion view={gestionView} setView={setGestionView} />
+        </Suspense>
       )}
 
       {/* ── Modale Gestion des Réservations & Widget (Phase 4) ── */}
       {isReservationModalOpen && (
-        <ReservationModal
-          isOpen={isReservationModalOpen}
-          onClose={() => setIsReservationModalOpen(false)}
-          reservations={reservations}
-          tables={tables}
-          orders={orders}
-          onCreateReservation={handleCreateReservation}
-          onUpdateStatus={handleUpdateReservationStatus}
-          onAssignTable={handleAssignReservationTable}
-          onDeleteReservation={handleDeleteReservation}
-          onSeatGuests={handleSeatReservationGuests}
-        />
+        <Suspense fallback={null}>
+          <ReservationModal
+            isOpen={isReservationModalOpen}
+            onClose={() => setIsReservationModalOpen(false)}
+            reservations={reservations}
+            tables={tables}
+            orders={orders}
+            onCreateReservation={handleCreateReservation}
+            onUpdateStatus={handleUpdateReservationStatus}
+            onAssignTable={handleAssignReservationTable}
+            onDeleteReservation={handleDeleteReservation}
+            onSeatGuests={handleSeatReservationGuests}
+          />
+        </Suspense>
       )}
 
       {/* ── Modale Fusion & Transfert de tables (Phase 4) ── */}
       {tableActionModal && (
-        <TableActionModal
-          isOpen={Boolean(tableActionModal)}
-          onClose={() => setTableActionModal(null)}
-          initialMode={tableActionModal.mode || "transfer"}
-          sourceTable={tableActionModal.sourceTable}
-          tables={tables}
-          orders={orders}
-          onTransfer={handleTransferTable}
-          onMerge={handleMergeTable}
-        />
+        <Suspense fallback={null}>
+          <TableActionModal
+            isOpen={Boolean(tableActionModal)}
+            onClose={() => setTableActionModal(null)}
+            initialMode={tableActionModal.mode || "transfer"}
+            sourceTable={tableActionModal.sourceTable}
+            tables={tables}
+            orders={orders}
+            onTransfer={handleTransferTable}
+            onMerge={handleMergeTable}
+          />
+        </Suspense>
       )}
-    </div>
+      </div>
+    </RestoFlowProvider>
   );
 }

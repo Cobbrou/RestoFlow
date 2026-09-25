@@ -11,6 +11,7 @@ import CaisseSettingsManager from "./CaisseSettingsManager.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
+import { useRestoFlow } from "../../context/RestoFlowContext.jsx";
 
 /**
  * Gestion — Back-office avec 8 sous-vues :
@@ -24,7 +25,14 @@ import { hasPermission } from "../../utils/permissions.js";
  *  - equipe        : rôles, permissions et membres du personnel
  */
 export default function Gestion(props) {
-  const { view, setView, currentStaff, roles } = props;
+  let ctx = {};
+  try {
+    ctx = useRestoFlow() || {};
+  } catch {
+    ctx = {};
+  }
+  const merged = { ...ctx, ...props };
+  const { view, setView, currentStaff, roles } = merged;
 
   const tabs = [
     { id: "tables",        label: "Tables",               icon: Table2 },
@@ -84,14 +92,14 @@ export default function Gestion(props) {
         </div>
       </div>
 
-      {view === "tables"        && <TableManager {...props} />}
-      {view === "produits"      && <ProductManager {...props} />}
-      {view === "menus"         && <MenuManager {...props} />}
-      {view === "stocks"        && <StockManager {...props} />}
-      {view === "recettes"      && <RecipeManager {...props} />}
-      {view === "historique"    && <HistoryManager history={props.history || []} config={props.config} />}
-      {view === "caisse_params" && <CaisseSettingsManager config={props.config} onUpdateConfig={props.onUpdateConfig} pushToast={props.pushToast} />}
-      {view === "equipe"        && <StaffRoleManager {...props} />}
+      {view === "tables"        && <TableManager {...merged} />}
+      {view === "produits"      && <ProductManager {...merged} />}
+      {view === "menus"         && <MenuManager {...merged} />}
+      {view === "stocks"        && <StockManager {...merged} />}
+      {view === "recettes"      && <RecipeManager {...merged} />}
+      {view === "historique"    && <HistoryManager history={merged.history || []} config={merged.config} />}
+      {view === "caisse_params" && <CaisseSettingsManager config={merged.config} onUpdateConfig={merged.onUpdateConfig} pushToast={merged.pushToast} />}
+      {view === "equipe"        && <StaffRoleManager {...merged} />}
     </div>
   );
 }

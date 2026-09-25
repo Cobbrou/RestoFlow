@@ -9,7 +9,8 @@ import {
   UtensilsCrossed,
   Coffee,
   CreditCard,
-  Maximize2,
+  Wifi,
+  Loader2,
 } from "lucide-react";
 import {
   generateCustomerReceiptText,
@@ -18,6 +19,7 @@ import {
   generateTpeReceiptText,
   buildEscPosBinary,
 } from "../utils/escpos.js";
+import { getSocket } from "../services/socket.js";
 
 /**
  * ThermalReceiptPreview — Simulateur d'impression thermique professionnel ESC/POS
@@ -37,6 +39,8 @@ export default function ThermalReceiptPreview({
   const [activeTab, setActiveTab] = useState(defaultTab); // "caisse" | "cuisine" | "bar" | "tpe"
   const [paperWidth, setPaperWidth] = useState("80mm"); // "80mm" (42 col) | "58mm" (32 col)
   const [copied, setCopied] = useState(false);
+  const [directPrinting, setDirectPrinting] = useState(false);
+  const [directPrintStatus, setDirectPrintStatus] = useState(null);
 
   const columnWidth = paperWidth === "80mm" ? 42 : 32;
 
@@ -133,6 +137,67 @@ export default function ThermalReceiptPreview({
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDirectNetworkPrint = async () => {
+    const printer =
+      config?.printers?.find(
+        (p) => p.type === activeTab && p.interface === "network" && p.enabled && p.ip
+      ) ||
+      config?.printers?.find((p) => p.interface === "network" && p.enabled && p.ip);
+
+    if (!printer) {
+      setDirectPrintStatus({
+        ok: false,
+        msg: "Aucune imprimante réseau IP configurée",
+      });
+      setTimeout(() => setDirectPrintStatus(null), 3500);
+      return;
+    }
+
+    setDirectPrinting(true);
+    setDirectPrintStatus(null);
+
+    try {
+      const blob = buildEscPosBinary(currentTicketText, {
+        autoCut: true,
+        beep: activeTab === "cuisine",
+        openDrawer: activeTab === "caisse",
+      });
+      const arrayBuffer = await blob.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(arrayBuffer));
+
+      const socket = getSocket();
+      if (socket && socket.connected) {
+        socket.emit(
+          "printer:send_raw",
+          { ip: printer.ip, port: printer.port || 9100, buffer: bytes },
+          (res) => {
+            setDirectPrinting(false);
+            if (res?.success) {
+              setDirectPrintStatus({
+                ok: true,
+                msg: `Envoyé à ${printer.name || printer.ip} (${res.bytesWritten || bytes.length} o) !`,
+              });
+            } else {
+              setDirectPrintStatus({
+                ok: false,
+                msg: res?.error || "Erreur de connexion imprimante TCP",
+              });
+            }
+            setTimeout(() => setDirectPrintStatus(null), 4000);
+          }
+        );
+      } else {
+        setDirectPrinting(false);
+        setDirectPrintStatus({ ok: false, msg: "Socket serveur non connecté" });
+        setTimeout(() => setDirectPrintStatus(null), 3500);
+      }
+    } catch (e) {
+      setDirectPrinting(false);
+      setDirectPrintStatus({ ok: false, msg: e?.message || "Erreur d'encodage" });
+      setTimeout(() => setDirectPrintStatus(null), 3500);
+    }
   };
 
   return (
@@ -288,7 +353,33 @@ export default function ThermalReceiptPreview({
               <Download size={13} />
               <span>ESC/POS (.bin)</span>
             </button>
+
+            <button
+              onClick={handleDirectNetworkPrint}
+              disabled={directPrinting}
+              className="rf-tap px-3 py-2 rounded-xl text-xs font-bold bg-[#3E7CB1]/20 hover:bg-[#3E7CB1]/30 text-[#60A5FA] flex items-center gap-1.5 border border-[#3E7CB1]/40"
+              title="Envoyer directement sur le port TCP 9100 de l'imprimante réseau (impression silencieuse)"
+            >
+              {directPrinting ? (
+                <Loader2 size={13} className="animate-spin text-[#60A5FA]" />
+              ) : (
+                <Wifi size={13} />
+              )}
+              <span>{directPrinting ? "Envoi..." : "Imprimer Réseau (TCP 9100)"}</span>
+            </button>
           </div>
+
+          {directPrintStatus && (
+            <div
+              className={`w-full sm:w-auto text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 ${
+                directPrintStatus.ok
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                  : "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+              }`}
+            >
+              {directPrintStatus.msg}
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <button

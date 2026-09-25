@@ -34,11 +34,13 @@
    - [Jalons de la Roadmap (v1.0)](#jalons-de-la-roadmap-v10)
    - [Perspectives & Idées futures (Post-v1.0)](#perspectives--idées-futures-post-v10)
 5. [Axes d'Amélioration & Correctifs Identifiés](#-axes-damélioration--correctifs-identifiés)
-   - [🔒 Sécurité & Gestion des PINs](#1-sécurité--gestion-des-codes-pin-prioritaire)
-   - [🏗️ Refactorisation Backend & Découpage Modulaire](#2-refactorisation-backend--découpage-modulaire)
-   - [⚛️ Architecture Frontend & Gestion d'État](#3-architecture-frontend--gestion-détat)
-   - [🖨️ Impression Réseau Hardware Directe](#4-impression-réseau-hardware-directe-tcp-raw)
-   - [🧪 Tests Automatisés & Fiabilité Financière](#5-tests-automatisés--fiabilité-financière)
+   - [🔒 Sécurité Backend & Guards RBAC](#1--sécurité--absence-de-guards-rbac-sur-le-backend-websocket--rest)
+   - [🛡️ Validation des Données & Schémas DTO](#2-️-validation-des-données--absence-de-validationpipe-et-schémas-dto)
+   - [⚡ Résilience UI & Rollback Optimiste](#3--résilience-ui--rollback-en-cas-déchec-serveur-désynchronisation-optimiste)
+   - [📦 Traçabilité & Audit des Stocks](#4--traçabilité--suppression-en-cascade-des-mouvements-de-stock-dans-prisma)
+   - [🔊 Fiabilité KDS & AudioContext](#5--fiabilité-kds--déblocage-de-laudiocontext-autoplay-policy-navigateurs)
+   - [🪟 Concurrence Multi-terminaux (OrderTaking)](#6--concurrence-multi-terminaux--écran-fantôme-lors-dun-checkout-concurrent)
+   - [🧪 Tests Automatisés & Fiabilité Financière](#7--tests-automatisés--fiabilité-financière)
 6. [Architecture du Projet](#-architecture-du-projet)
 7. [Démarrage Rapide](#-démarrage-rapide)
 8. [Règles Métier Clés](#-règles-métier-clés)
@@ -171,9 +173,10 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
 | **Phase 1 : Socle Fullstack & Temps Réel** | 🟢 **Terminée** | NestJS, Socket.IO Gateway, Prisma, authentification PIN, buffer offline avec synchronisation automatique. |
 | **Phase 2 : Stocks & Fiches Techniques** | 🟢 **Terminée** | Gestion des ingrédients, décompte automatique des stocks, fiches techniques, calcul du food cost et alertes de rupture. |
 | **Phase 3 : Impression, Caisse Pro & Réductions** | 🟢 **Terminée** | Générateur thermique binaire ESC/POS (80/58mm), simulateur TPE (NFC / puce), ventilation TVA (10%/20%), remises/codes promo et modale back-office "Caisse & Imprimantes". |
-| **Phase 4 : Réservations, Salle Dynamique & Service** | 🟡 **Prochaine étape** | Widget de réservation en ligne, **gestion des "Suites" & réclame** (envoi cadencé en cuisine), **fusion & transfert de tables**, et **dispatch multi-postes (KDS Bar vs KDS Cuisine)**. |
-| **Phase 5 : Mode PWA & Offline Complet** | 🔵 Planifiée | Service Workers (`vite-plugin-pwa`), persistance locale IndexedDB, fonctionnement 100% autonome garanti lors des coupures prolongées. |
-| **Phase 6 : Clôture de Caisse & Conformité Fiscale** | 🔴 Planifiée | Rapports Z et X journaliers certifiés, journal d'encaissement inaltérable chaîné (loi anti-fraude TVA / NF525), tarification Happy Hour programmée et export comptable (FEC). |
+| **Phase 4 : Réservations, Salle Dynamique & Service** | 🟢 **Terminée** | Widget de réservation en ligne, **gestion des "Suites" & réclame** (envoi cadencé en cuisine), **fusion & transfert de tables**, et **dispatch multi-postes (KDS Bar vs KDS Cuisine)**. |
+| **Phase 5 : Sécurité PIN, Modularité & Impression TCP Raw** | 🟢 **Terminée** | Hachage cryptographique des PINs (bcrypt) & sessions signées HMAC, exclusion des PINs de `sync:init`, découpage modulaire NestJS (`OrdersService`, `BillingService`, `ConfigService`, `TablesService`, `StockService`, `PrinterService`), suppression du prop drilling via `RestoFlowContext`, code-splitting Vite (bundle initial réduit à 157 ko), et impression directe hardware TCP raw port 9100. |
+| **Phase 6 : Mode PWA & Offline Complet** | 🟡 **Prochaine étape** | Service Workers (`vite-plugin-pwa`), persistance locale IndexedDB, fonctionnement 100% autonome garanti lors des coupures prolongées. |
+| **Phase 7 : Clôture de Caisse & Conformité Fiscale** | 🔴 Planifiée | Rapports Z et X journaliers certifiés, journal d'encaissement inaltérable chaîné (loi anti-fraude TVA / NF525), tarification Happy Hour programmée et export comptable (FEC). |
 
 ### 💡 Perspectives & Idées futures (Post-v1.0)
 
@@ -186,34 +189,42 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
 
 ## 🛠️ Axes d'Amélioration & Correctifs Identifiés
 
-L'analyse de l'architecture et du code source met en lumière plusieurs axes de consolidation prioritaires :
+L'analyse de l'architecture et du code source actuel a mis en lumière plusieurs axes de consolidation technique, de sécurité et d'ergonomie opérationnelle :
 
-### 1. 🔒 Sécurité & Gestion des codes PIN (Prioritaire)
-- **Suppression de l'exposition des PINs** : Dans [`server/src/websocket/websocket.gateway.ts`](file:///c:/Users/Utilisateur/Desktop/RestoFlow/server/src/websocket/websocket.gateway.ts), l'état initial diffusé par `sync:init` inclut actuellement le champ `pin: true` de tous les équipiers. Ce champ doit impérativement être exclu (`select: { pin: false }`) pour éviter toute divulgation via les DevTools du navigateur.
-- **Hachage cryptographique** : Remplacer le stockage des codes PIN en clair par un hachage sécurisé (ex. `bcrypt` ou `argon2`).
-- **Signature de session** : Implémenter des jetons de session (JWT éphémère ou handshake socket sécurisé) validant les droits de l'opérateur pour chaque transaction sensible.
+### 1. 🔒 Sécurité : Absence de Guards RBAC sur le Backend (WebSocket & REST)
+- **Constat** : Dans `server/src/auth/auth.service.ts`, un token de session est bien généré lors de la connexion par code PIN. Cependant, aucun contrôleur REST ni passerelle WebSocket n'utilise de Guard (`@UseGuards`). Le contrôle des rôles et permissions est actuellement effectué uniquement côté client React (`App.jsx`, via `canAccessTab` et `hasPermission`).
+- **Impact** : N'importe quel terminal connecté au réseau local (ou injectant du code dans la console du navigateur) peut émettre des événements WebSocket sensibles comme `config:update`, `stock:delete_ingredient`, ou encaisser des commandes (`order:checkout`) sans que le serveur ne valide l'identité ou les droits réels de l'expéditeur.
+- **Correctif recommandé** : Créer un `WsAuthGuard` et un `RolesGuard` NestJS. Vérifier le token lors du handshake WebSocket ou dans le payload des messages critiques, et valider les permissions (`canManageConfig`, `canManageStock`, etc.) côté serveur.
 
-### 2. 🏗️ Refactorisation Backend & Découpage Modulaire
-- **Désengorgement de la Gateway WebSocket** : `websocket.gateway.ts` regroupe plus de 1 300 lignes contenant toute la logique métier. Il convient de déléguer ces responsabilités aux services NestJS injectables :
-  - `OrdersService` : cycle de vie et modifications de commandes.
-  - `StockService` : décompte atomique, alertes et pertes.
-  - `BillingService` : calculs de TVA, remises, encaissement et clôtures.
-  - `ConfigService` : configuration de l'établissement et des périphériques.
+### 2. 🛡️ Validation des Données : Absence de `ValidationPipe` et Schémas DTO
+- **Constat** : Bien que `class-validator` et `class-transformer` soient installés dans les dépendances du serveur, `ValidationPipe` n'est pas activé globalement dans `server/src/main.ts`. De plus, les récepteurs WebSocket (dans `orders.gateway.ts`, `stock.gateway.ts`, etc.) typent leurs arguments en `any` ou sans validation stricte.
+- **Impact** : Risque d'injection de payloads invalides : quantités négatives d'ingrédients non gérées, prix de plats erronés envoyés manuellement, chaînes de caractères anormalement longues ou objets malformés pouvant faire planter les services NestJS.
+- **Correctif recommandé** : Activer `app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }))` dans `main.ts` et définir des classes DTO pour les mutations courantes (`CreateOrderDto`, `CheckoutDto`, `UpdateStockDto`).
 
-### 3. ⚛️ Architecture Frontend & Gestion d'État
-- **Suppression du Prop Drilling dans `App.jsx`** : Le composant racine passe actuellement jusqu'à 26 props à `Gestion.jsx`. L'adoption d'un store global réactif (**Zustand**) ou de Contexts ciblés (`OrderContext`, `AuthContext`, `StockContext`) rendra le code plus lisible et maintenable.
-- **Optimisation du Bundle & Code Splitting** : Le build Vite actuel produit un chunk JavaScript monolithique de ~920 ko. L'utilisation de `React.lazy` et `Suspense` pour les vues secondaires (Dashboard Recharts, Gestion, Paramètres) permettra de réduire drastiquement le temps de chargement initial sur tablettes tactiles.
+### 3. ⚡ Résilience UI : Rollback en cas d'échec serveur (Désynchronisation Optimiste)
+- **Constat** : Dans `App.jsx`, la majorité des interactions de salle (transfert de table, fusion de table, modification de quantité) mettent à jour le state React de manière optimiste avant d'appeler `emitOrQueue(...)`. Si le serveur renvoie une erreur (par exemple `{ ok: false, error: 'Table non disponible' }` ou rejet de transaction), l'interface ne fait aucun retour arrière (*rollback*) et ne demande pas de réconciliation.
+- **Impact** : En cas de refus du serveur, le serveur en salle voit sa table comme transférée ou fusionnée alors que la base de données est restée dans l'état antérieur. L'UI reste désynchronisée jusqu'au rechargement manuel de la page (`F5`).
+- **Correctif recommandé** : Conserver un instantané de l'état précédent avant mutation optimiste. Déclencher un rollback immédiat et une notification Toast d'erreur si l'ACK WebSocket renvoie `{ ok: false }`, ou forcer un `sync:request` pour rétablir la vérité du serveur.
 
-### 4. 🖨️ Impression Réseau Hardware Directe (TCP Raw)
-- **Passerelle d'impression directe** : Bien que le générateur de trames binaires ESC/POS soit complet (`escpos.js`), l'envoi physique vers les imprimantes réseau de caisse ou de cuisine passe actuellement par la fenêtre d'impression du navigateur.
-- **Évolution recommandée** : Ajouter un service backend NestJS utilisant des sockets TCP directes (`net.Socket`) sur le port 9100 des imprimantes réseau pour imprimer instantanément et de façon totalement silencieuse dès validation d'un bon.
+### 4. 📦 Traçabilité : Suppression en cascade des Mouvements de Stock dans Prisma
+- **Constat** : Dans `schema.prisma`, la relation entre `Ingredient` et `StockMovement` est définie avec `onDelete: Cascade` (`ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)`).
+- **Impact** : Si un gérant supprime un ingrédient de la carte ou des stocks, l'intégralité de son historique d'entrées, sorties et pertes est irrémédiablement effacée de la base de données. Cela détruit l'auditabilité et fausse les rapports de pertes passés.
+- **Correctif recommandé** : Remplacer la suppression physique par un archivage (*soft delete* : champ `archived: Boolean @default(false)`). Passer la relation Prisma en `onDelete: Restrict` pour empêcher la destruction accidentelle de l'historique comptable et d'inventaire.
 
-### 5. 🧪 Tests Automatisés & Fiabilité Financière
-- **Intégration de Vitest** : Mettre en place une suite de tests unitaires et d'intégration pour sécuriser les algorithmes financiers critiques :
-  - Calculs de ventilation de la TVA au centime près.
-  - Répartition proportionnelle des remises et avoirs.
-  - Lissage équitable des centimes lors des partages à parts égales.
-  - Décrémentation atomique des stocks sous forte concurrence.
+### 5. 🔊 Fiabilité KDS : Déblocage de l'AudioContext (Autoplay Policy Navigateurs)
+- **Constat** : Dans `src/hooks/useBeep.js`, l'instance `AudioContext` est créée lors du premier appel sonore sans mécanisme global de déverrouillage utilisateur (*resume on user interaction*). Les navigateurs modernes (Chrome, Safari iPadOS utilisés sur les tablettes tactiles en cuisine) initialisent `AudioContext` à l'état `"suspended"` tant qu'un clic physique n'a pas eu lieu.
+- **Impact** : Sur un écran KDS mural qui attend l'arrivée de commandes en temps réel, les bips sonores d'alerte échouent silencieusement lors de l'arrivée des premiers tickets si aucun cuisinier n'a touché l'écran au préalable.
+- **Correctif recommandé** : Ajouter un listener global au premier clic/touch (`pointerdown`) sur l'application pour appeler `audioCtx.resume()`. Afficher un bouton discret *"Activer les alertes sonores"* sur la vue KDS si l'AudioContext est suspendu.
+
+### 6. 🪟 Concurrence Multi-terminaux : Écran "Fantôme" lors d'un Checkout Concurrent
+- **Constat** : Si le Terminal A encaisse une table (qui émet `order:closed` et libère la table), pendant que le Terminal B est resté ouvert sur l'écran `OrderTaking.jsx` de cette même table : le Terminal B reçoit la mise à jour des commandes, la commande active devient introuvable ou vide, mais le serveur de salle reste bloqué sur un écran de prise de commande vide à 0,00 €, sans savoir que la table a été clôturée.
+- **Impact** : Confusion pour le serveur qui peut tenter de réenregistrer des articles sur une table qui vient d'être libérée ou payée.
+- **Correctif recommandé** : Dans `OrderTaking`, surveiller si la table courante passe à l'état `FREE` ou si la commande en cours a été fermée via WebSocket (`order:closed`). Afficher un message explicite : *"Cette table a été encaissée ou libérée"* et rediriger automatiquement vers le plan de salle.
+
+### 7. 🧪 Tests Automatisés & Fiabilité Financière
+- **Constat** : Les règles de calcul fiscal et de caisse (ventilation TVA multi-taux 10%/20%, répartition des remises, lissage des centimes résiduels, décrémentation atomique des stocks sous forte concurrence) reposent sur du code sans suite de tests automatisés.
+- **Impact** : Risque de régression silencieuse lors de refactorisations futures sur des briques critiques d'encaissement et de conformité financière.
+- **Correctif recommandé** : Mettre en place Vitest côté client et Jest côté serveur pour couvrir unitairement les algorithmes d'arrondis monétaires, la ventilation TVA et la concurrence de stock.
 
 ---
 
@@ -223,29 +234,33 @@ L'analyse de l'architecture et du code source met en lumière plusieurs axes de 
 RestoFlow/
 ├── index.html                  # Point d'entrée HTML
 ├── package.json                # Dépendances & scripts du frontend (React 19, Vite, Tailwind v4)
-├── vite.config.js              # Configuration Vite & Tailwind CSS v4
+├── vite.config.js              # Configuration Vite & Tailwind CSS v4 (code splitting optimisé)
 │
 ├── server/                     # Backend NestJS & Synchronisation Temps Réel
-│   ├── package.json            # Dépendances backend (@nestjs, @prisma/client, socket.io)
+│   ├── package.json            # Dépendances backend (@nestjs, @prisma/client, socket.io, bcryptjs)
 │   ├── prisma/
 │   │   ├── schema.prisma       # Schéma ORM (Tables, Staff, Orders, Stocks, Recettes, Config...)
 │   │   ├── dev.db              # Base SQLite de développement
 │   │   └── seed.ts             # Données de démonstration (carte, tables, équipiers, stocks, caisse)
 │   └── src/
-│       ├── main.ts             # Démarrage du serveur NestJS (port 3001)
+│       ├── main.ts             # Démarrage du serveur NestJS (port 3000)
 │       ├── app.module.ts       # Module racine
-│       ├── websocket/          # Passerelle Socket.IO centrale (diffusion multi-écrans)
-│       ├── auth/               # Authentification par code PIN
-│       ├── tables/             # API tables & réservations
-│       ├── orders/             # API commandes & cycle de vie
+│       ├── websocket/          # Passerelle Socket.IO centrale & broadcast
+│       ├── auth/               # Authentification par code PIN (hachage bcrypt & tokens de session signés)
+│       ├── tables/             # API tables, réservations, alertes, transferts et fusions
+│       ├── orders/             # API commandes, cycle de vie et suites/réclame
+│       ├── billing/            # Facturation, encaissement multi-modes et remises
+│       ├── config/             # Configuration de l'établissement et périphériques
+│       ├── printer/            # Impression hardware directe TCP Raw (port 9100)
 │       ├── catalog/            # API produits, catégories et menus
 │       ├── staff/              # API personnel & rôles RBAC
-│       ├── stock/              # Moteur de stocks, inventaire et alertes
+│       ├── stock/              # Moteur de stocks, inventaire, mouvements et alertes
 │       └── recipes/            # Fiches techniques et calcul du food cost
 │
 └── src/                        # Client Frontend React 19 SPA
     ├── main.jsx                # Montage de l'application
-    ├── App.jsx                 # État global, gestion des rôles et écoutes Socket.IO
+    ├── App.jsx                 # État global, gestion des rôles, lazy loading et écoutes Socket.IO
+    ├── context/                # Gestion d'état React Context (RestoFlowContext)
     ├── components/             # Composants partagés (TopNav, PinPadModal, TpeModal, ThermalReceiptPreview...)
     ├── services/               # Services réseau (socket.js, actionQueue.js pour le offline)
     ├── views/
@@ -272,8 +287,8 @@ Dans un premier terminal :
 cd server
 npm install
 npm run db:push     # Synchronise la base de données SQLite locale avec Prisma
-npm run db:seed     # Charge les données de démonstration complètes
-npm run start:dev   # Lance le serveur NestJS sur http://localhost:3001
+npm run db:seed     # Charge les données de démonstration complètes (avec PINs hachés)
+npm run start:dev   # Lance le serveur NestJS sur http://localhost:3000
 ```
 
 ### 2. Démarrer le Client Frontend (React / Vite)

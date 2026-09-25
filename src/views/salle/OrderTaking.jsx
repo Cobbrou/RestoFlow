@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import {
   ArrowLeft, Search, Plus, Minus, X, StickyNote,
   AlertTriangle, Check, LayoutList, Ban, Receipt, Tag, Sparkles,
@@ -10,7 +10,8 @@ import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
-import TableActionModal from "../../components/TableActionModal.jsx";
+
+const TableActionModal = lazy(() => import("../../components/TableActionModal.jsx"));
 
 export const COURSE_META = {
   direct:  { label: "Direct",  emoji: "⚡", color: "#2E9E5B" },
@@ -364,24 +365,26 @@ export default function OrderTaking({
       )}
 
       {tableActionModal && (
-        <TableActionModal
-          isOpen={!!tableActionModal}
-          initialMode={tableActionModal}
-          sourceTable={table}
-          tables={tables}
-          orders={orders}
-          onTransfer={(srcId, tgtId) => {
-            onTransferTable?.(srcId, tgtId);
-            setTableActionModal(null);
-            onBackToPlan?.();
-          }}
-          onMerge={(srcId, tgtId) => {
-            onMergeTable?.(srcId, tgtId);
-            setTableActionModal(null);
-            onBackToPlan?.();
-          }}
-          onClose={() => setTableActionModal(null)}
-        />
+        <Suspense fallback={null}>
+          <TableActionModal
+            isOpen={!!tableActionModal}
+            initialMode={tableActionModal}
+            sourceTable={table}
+            tables={tables}
+            orders={orders}
+            onTransfer={(srcId, tgtId) => {
+              onTransferTable?.(srcId, tgtId);
+              setTableActionModal(null);
+              onBackToPlan?.();
+            }}
+            onMerge={(srcId, tgtId) => {
+              onMergeTable?.(srcId, tgtId);
+              setTableActionModal(null);
+              onBackToPlan?.();
+            }}
+            onClose={() => setTableActionModal(null)}
+          />
+        </Suspense>
       )}
     </>
   );

@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import * as bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -404,12 +405,13 @@ async function main() {
 
   // 5. Staff
   for (const s of INITIAL_STAFF) {
+    const hashedPin = bcrypt.hashSync(s.pin, 10);
     await prisma.staff.create({
       data: {
         id: s.id,
         name: s.name,
         roleId: s.roleId,
-        pin: s.pin,
+        pin: hashedPin,
         email: s.email,
         phone: s.phone,
         active: s.active,

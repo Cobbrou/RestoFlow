@@ -6,7 +6,7 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post("pin")
-  async verifyPin(@Body() body: { pin: string }) {
-    return this.authService.verifyPin(body.pin);
+  async verifyPin(@Body() body: { pin: string; staffId?: string }) {
+    return this.authService.verifyPin(body.pin, body.staffId);
   }
 }

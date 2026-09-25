@@ -1,29 +1,114 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import * as bcrypt from "bcryptjs";
+import * as crypto from "crypto";
+
+export interface SessionPayload {
+  staffId: string;
+  name: string;
+  roleId: string;
+  permissions: string[];
+  exp: number;
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || "restoflow-secure-session-key-2026";
 
 @Injectable()
 export class AuthService {
   constructor(private prisma: PrismaService) {}
 
-  async verifyPin(pin: string) {
-    const staff = await this.prisma.staff.findFirst({
-      where: { pin, active: true },
-      include: { role: true },
-    });
+  generateToken(staff: { id: string; name: string; roleId: string; permissions: string[] }): string {
+    const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+    const exp = Date.now() + 12 * 3600 * 1000; // 12 heures
+    const payload: SessionPayload = {
+      staffId: staff.id,
+      name: staff.name,
+      roleId: staff.roleId,
+      permissions: staff.permissions,
+      exp,
+    };
+    const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const signature = crypto.createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64url");
+    return `${header}.${body}.${signature}`;
+  }
 
-    if (!staff) {
-      throw new UnauthorizedException("Code PIN invalide ou compte inactif");
+  verifyToken(token: string): SessionPayload | null {
+    try {
+      if (!token) return null;
+      const parts = token.split(".");
+      if (parts.length !== 3) return null;
+      const [header, body, signature] = parts;
+      const expected = crypto.createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64url");
+      if (signature !== expected) return null;
+      const payload: SessionPayload = JSON.parse(Buffer.from(body, "base64url").toString());
+      if (payload.exp && Date.now() > payload.exp) return null;
+      return payload;
+    } catch {
+      return null;
+    }
+  }
+
+  async verifyPin(pin: string, staffId?: string) {
+    if (!pin || pin.length < 4) {
+      throw new UnauthorizedException("Code PIN invalide (4 chiffres requis)");
     }
 
-    return {
+    let staff = null;
+    if (staffId) {
+      staff = await this.prisma.staff.findFirst({
+        where: { id: staffId, active: true },
+        include: { role: true },
+      });
+      if (!staff) {
+        throw new UnauthorizedException("Équipier introuvable ou compte inactif");
+      }
+      const matches = bcrypt.compareSync(pin, staff.pin) || staff.pin === pin;
+      if (!matches) {
+        throw new UnauthorizedException("Code PIN incorrect");
+      }
+    } else {
+      // Recherche globale sur tous les équipiers actifs
+      const activeStaffList = await this.prisma.staff.findMany({
+        where: { active: true },
+        include: { role: true },
+      });
+
+      for (const candidate of activeStaffList) {
+        if (bcrypt.compareSync(pin, candidate.pin) || candidate.pin === pin) {
+          staff = candidate;
+          break;
+        }
+      }
+
+      if (!staff) {
+        throw new UnauthorizedException("Code PIN non reconnu");
+      }
+    }
+
+    const permissions: string[] = JSON.parse(staff.role.permissions || "[]");
+    const safeStaff = {
       id: staff.id,
       name: staff.name,
       roleId: staff.roleId,
       avatarBg: staff.avatarBg,
+      permissions,
       role: {
         ...staff.role,
-        permissions: JSON.parse(staff.role.permissions || "[]"),
+        permissions,
       },
+    };
+
+    const token = this.generateToken({
+      id: safeStaff.id,
+      name: safeStaff.name,
+      roleId: safeStaff.roleId,
+      permissions,
+    });
+
+    return {
+      ok: true,
+      staff: safeStaff,
+      token,
     };
   }
 }

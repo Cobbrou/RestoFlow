@@ -256,4 +256,140 @@ export class StockService {
       createdAt: m.createdAt.getTime(),
     }));
   }
+
+  async deductForOrder(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, table: true },
+    });
+    if (!order) return null;
+
+    const draftItems = order.items.filter((i) => i.status === "draft");
+    if (draftItems.length === 0) return null;
+
+    const productQuantities: { productId: string; qty: number; itemName: string }[] = [];
+
+    for (const item of draftItems) {
+      if (item.isMenu && item.composition) {
+        try {
+          const comp = typeof item.composition === "string" ? JSON.parse(item.composition) : item.composition;
+          if (Array.isArray(comp)) {
+            for (const c of comp) {
+              const pId = typeof c === "string" ? c : c?.id || c?.productId;
+              if (pId) {
+                productQuantities.push({ productId: pId, qty: item.qty, itemName: `${item.name} (${c.name || pId})` });
+              }
+            }
+          }
+        } catch {
+          // ignore parsing error
+        }
+      } else {
+        productQuantities.push({ productId: item.productId, qty: item.qty, itemName: item.name });
+      }
+    }
+
+    if (productQuantities.length === 0) return null;
+
+    const productIds = productQuantities.map((p) => p.productId);
+    const recipeItems = await this.prisma.recipeItem.findMany({
+      where: { productId: { in: productIds } },
+      include: { ingredient: true, product: true },
+    });
+
+    const deductionMap = new Map<string, { qty: number; ingredient: any; reasons: string[] }>();
+    for (const pq of productQuantities) {
+      const recipes = recipeItems.filter((r) => r.productId === pq.productId);
+      for (const rc of recipes) {
+        const totalQtyToDeduct = rc.quantity * pq.qty;
+        const existing = deductionMap.get(rc.ingredientId) || {
+          qty: 0,
+          ingredient: rc.ingredient,
+          reasons: [],
+        };
+        existing.qty += totalQtyToDeduct;
+        existing.reasons.push(`${pq.itemName} x${pq.qty}`);
+        deductionMap.set(rc.ingredientId, existing);
+      }
+    }
+
+    if (deductionMap.size === 0) return null;
+
+    const stockAlerts: string[] = [];
+    const affectedProducts: string[] = [];
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const [ingredientId, deduction] of deductionMap.entries()) {
+        const current = await tx.ingredient.findUnique({ where: { id: ingredientId } });
+        if (!current) continue;
+
+        const newStock = Math.max(0, current.currentStock - deduction.qty);
+
+        await tx.ingredient.update({
+          where: { id: ingredientId },
+          data: { currentStock: newStock },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            id: `mov_ord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            ingredientId,
+            type: "ORDER_CONSUMPTION",
+            quantity: -deduction.qty,
+            unitCost: current.costPerUnit,
+            orderId: order.id,
+            staffId: order.serverId || null,
+            reason: `Commande Table ${order.table?.number || "?"} : ${deduction.reasons.join(", ")}`,
+          },
+        });
+
+        if (newStock <= 0) {
+          stockAlerts.push(`🔴 Rupture de stock : ${current.name} (épuisé)`);
+          const criticalRecipes = await tx.recipeItem.findMany({
+            where: { ingredientId, isCritical: true },
+          });
+          for (const cr of criticalRecipes) {
+            await tx.product.update({
+              where: { id: cr.productId },
+              data: { available: false },
+            });
+            affectedProducts.push(cr.productId);
+          }
+        } else if (newStock <= current.minThreshold) {
+          stockAlerts.push(`🟡 Seuil critique : ${current.name} (reste ${newStock} ${current.unit})`);
+        }
+      }
+    });
+
+    const refreshedIngredients = await this.prisma.ingredient.findMany({ orderBy: { name: "asc" } });
+    const recentMovements = await this.prisma.stockMovement.findMany({
+      take: 60,
+      orderBy: { createdAt: "desc" },
+      include: { ingredient: { select: { name: true, unit: true, category: true } } },
+    });
+
+    return {
+      stockAlerts,
+      affectedProducts,
+      refreshedIngredients: refreshedIngredients.map((ing) => ({
+        ...ing,
+        status: ing.currentStock <= 0 ? "out" : ing.currentStock <= ing.minThreshold ? "low" : "ok",
+        stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
+      })),
+      recentMovements: recentMovements.map((m) => ({
+        id: m.id,
+        ingredientId: m.ingredientId,
+        ingredientName: m.ingredient?.name || "Inconnu",
+        category: m.ingredient?.category || "Général",
+        unit: m.ingredient?.unit || "u",
+        type: m.type,
+        quantity: m.quantity,
+        unitCost: m.unitCost,
+        orderId: m.orderId,
+        staffId: m.staffId,
+        reason: m.reason,
+        createdAt: m.createdAt.getTime(),
+      })),
+    };
+  }
 }

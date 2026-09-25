@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { Delete, ShieldAlert, ArrowLeft } from "lucide-react";
+import { Delete, ShieldAlert, ArrowLeft, Loader2 } from "lucide-react";
 import Modal from "./Modal.jsx";
 import { getRoleName } from "../utils/permissions.js";
+import { getSocket } from "../services/socket.js";
 
 export default function PinPadModal({
   isOpen,
@@ -16,16 +17,19 @@ export default function PinPadModal({
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setPin("");
       setError("");
+      setIsVerifying(false);
       setSelectedStaff(null);
     }
   }, [isOpen]);
 
   const handleDigit = (digit) => {
+    if (isVerifying) return;
     if (pin.length < 4) {
       const nextPin = pin + digit;
       setPin(nextPin);
@@ -38,11 +42,13 @@ export default function PinPadModal({
   };
 
   const handleBackspace = () => {
+    if (isVerifying) return;
     setPin((prev) => prev.slice(0, -1));
     setError("");
   };
 
   const handleClear = () => {
+    if (isVerifying) return;
     setPin("");
     setError("");
   };
@@ -53,15 +59,48 @@ export default function PinPadModal({
       return;
     }
 
-    if (selectedStaff.pin === candidatePin) {
-      setError("");
-      onSuccess(selectedStaff);
-      onClose();
+    setIsVerifying(true);
+    setError("");
+
+    const socket = getSocket();
+    if (socket && socket.connected) {
+      socket.emit(
+        "auth:verify_pin",
+        { pin: candidatePin, staffId: selectedStaff.id },
+        (res) => {
+          setIsVerifying(false);
+          if (res?.ok && res?.staff) {
+            onSuccess(res.staff, res.token);
+            onClose();
+          } else {
+            setError(res?.error || "Code PIN incorrect");
+            setTimeout(() => setPin(""), 600);
+          }
+        }
+      );
     } else {
-      setError("Code PIN incorrect");
-      setTimeout(() => {
-        setPin("");
-      }, 600);
+      // Fallback via endpoint REST HTTP si le socket n'est pas encore connecté
+      fetch("/api/auth/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: candidatePin, staffId: selectedStaff.id }),
+      })
+        .then((r) => r.json())
+        .then((res) => {
+          setIsVerifying(false);
+          if (res?.ok && res?.staff) {
+            onSuccess(res.staff, res.token);
+            onClose();
+          } else {
+            setError(res?.message || "Code PIN incorrect");
+            setTimeout(() => setPin(""), 600);
+          }
+        })
+        .catch(() => {
+          setIsVerifying(false);
+          setError("Erreur de connexion au serveur");
+          setTimeout(() => setPin(""), 600);
+        });
     }
   };
 
@@ -162,6 +201,14 @@ export default function PinPadModal({
                 );
               })}
             </div>
+
+            {/* Indicateur de vérification en cours */}
+            {isVerifying && (
+              <div className="flex items-center gap-1.5 text-xs text-[#C1440E] font-semibold mb-2">
+                <Loader2 size={14} className="animate-spin" />
+                Vérification du code PIN...
+              </div>
+            )}
 
             {/* Message d'erreur */}
             {error && (
