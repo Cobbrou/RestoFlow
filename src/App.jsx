@@ -28,7 +28,7 @@ function ViewFallback() {
 import { seedTables, seedOrders, seedHistory, seedMenus, seedReservations, uid } from "./data/seed.js";
 import { PRODUCTS_SEED } from "./data/products.js";
 import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
-import { menuToProduct } from "./utils/index.js";
+import { menuToProduct, getProductEffectivePrice, deduplicateHistory } from "./utils/index.js";
 import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
 import { getSocket } from "./services/socket.js";
 import { enqueueAction, flushQueue } from "./services/actionQueue.js";
@@ -66,6 +66,30 @@ const DEFAULT_CONFIG = {
     { code: "FIDELITE10", type: "percent", value: 10, description: "Remise Fidélité 10%", active: true },
     { code: "VIP25", type: "percent", value: 25, description: "Remise VIP 25%", active: true },
   ],
+  grandTotal: 0,
+  lastClosingDate: null,
+  happyHourConfig: {
+    enabled: true,
+    startTime: "17:00",
+    endTime: "20:00",
+    days: [1, 2, 3, 4, 5],
+    defaultDiscountPercent: 20,
+    applicableCategories: ["boissons"],
+  },
+  fecExportConfig: {
+    journalCode: "VT",
+    journalLib: "Ventes Caisse",
+    compteClient: "411000",
+    compteVentesBoissons: "707100",
+    compteVentesNourriture: "707200",
+    compteVentesMenus: "707300",
+    compteTva10: "445711",
+    compteTva20: "445712",
+    compteTva55: "445713",
+    compteCaisse: "531000",
+    compteBanqueCB: "512100",
+    compteAutre: "580000",
+  },
 };
 
 const fallbackTables = seedTables();
@@ -98,6 +122,7 @@ export default function App() {
   const [ingredients,  setIngredients]  = useState([]);
   const [recipes,      setRecipes]      = useState([]);
   const [stockMovements, setStockMovements] = useState([]);
+  const [closings,     setClosings]     = useState([]);
   const [config,       setConfig]       = useState(DEFAULT_CONFIG);
 
   // ── Modales Phase 4 (Réservations & Transfert / Fusion) ─────
@@ -168,7 +193,7 @@ export default function App() {
       if (cached.tables?.length)         setTables(cached.tables);
       if (cached.orders)                 setOrders(cached.orders);
       if (cached.reservations)           setReservations(cached.reservations);
-      if (cached.history)                setHistory(cached.history);
+      if (cached.history)                setHistory(deduplicateHistory(cached.history));
       if (cached.products?.length)       setProducts(cached.products);
       if (cached.menus?.length)          setMenus(cached.menus);
       if (cached.staff?.length)          setStaff(cached.staff);
@@ -176,6 +201,7 @@ export default function App() {
       if (cached.ingredients?.length)    setIngredients(cached.ingredients);
       if (cached.recipes?.length)        setRecipes(cached.recipes);
       if (cached.stockMovements?.length) setStockMovements(cached.stockMovements);
+      if (cached.closings?.length)       setClosings(cached.closings);
       if (cached.config)                 setConfig(cached.config);
     });
     return () => {
@@ -188,6 +214,7 @@ export default function App() {
   useEffect(() => { saveCollection("orders", orders); }, [orders]);
   useEffect(() => { saveCollection("reservations", reservations); }, [reservations]);
   useEffect(() => { saveCollection("history", history); }, [history]);
+  useEffect(() => { saveCollection("closings", closings); }, [closings]);
 
   // ── Synchronisation Temps Réel Socket.IO ───────────────────
   useEffect(() => {
@@ -198,7 +225,7 @@ export default function App() {
       if (fullState.tables)         setTables(fullState.tables);
       if (fullState.orders)         setOrders(fullState.orders);
       if (fullState.reservations)   setReservations(fullState.reservations);
-      if (fullState.history)        setHistory(fullState.history);
+      if (fullState.history)        setHistory(deduplicateHistory(fullState.history));
       if (fullState.products)       setProducts(fullState.products);
       if (fullState.menus)          setMenus(fullState.menus);
       if (fullState.staff)          setStaff(fullState.staff);
@@ -206,6 +233,7 @@ export default function App() {
       if (fullState.ingredients)    setIngredients(fullState.ingredients);
       if (fullState.recipes)        setRecipes(fullState.recipes);
       if (fullState.stockMovements) setStockMovements(fullState.stockMovements);
+      if (fullState.closings)       setClosings(fullState.closings);
       if (fullState.config)         setConfig(fullState.config);
 
       // Persistance complète dans IndexedDB
@@ -231,7 +259,19 @@ export default function App() {
     };
 
     const handleHistoryNew = (entry) => {
-      setHistory((prev) => [entry, ...prev]);
+      if (!entry) return;
+      setHistory((prev) => {
+        const match = (h) =>
+          h.id === entry.id ||
+          (entry.orderId && h.orderId && h.orderId === entry.orderId) ||
+          (entry.ticketNumber && h.ticketNumber && h.ticketNumber === entry.ticketNumber);
+
+        const exists = prev.some(match);
+        if (exists) {
+          return prev.map((h) => (match(h) ? entry : h));
+        }
+        return [entry, ...prev];
+      });
     };
 
     const handleKitchenTicket = ({ tableNumber, server }) => {
@@ -303,6 +343,25 @@ export default function App() {
       if (updatedConfig) setConfig(updatedConfig);
     };
 
+    const handleClosingNewZ = (newClosing) => {
+      if (!newClosing) return;
+      setClosings((prev) => [newClosing, ...prev.filter((c) => c.id !== newClosing.id)]);
+      setHistory((prev) =>
+        prev.map((h) => {
+          if (!h.closedInZId && newClosing.periodStart && newClosing.periodEnd) {
+            const t = new Date(h.createdAt).getTime();
+            const start = new Date(newClosing.periodStart).getTime();
+            const end = new Date(newClosing.periodEnd).getTime();
+            if (t >= start && t <= end) {
+              return { ...h, closedInZId: newClosing.id };
+            }
+          }
+          return h;
+        })
+      );
+      pushToast(`Clôture Z n°${newClosing.zNumber || ""} enregistrée`, "server");
+    };
+
     const handleConnect = async () => {
       try {
         const syncResult = await flushQueue(socket);
@@ -336,6 +395,7 @@ export default function App() {
     socket.on("catalog:products_updated", handleCatalogProductsUpdated);
     socket.on("stock:alert", handleStockAlert);
     socket.on("config:updated", handleConfigUpdated);
+    socket.on("closing:new_z", handleClosingNewZ);
     socket.on("connect", handleConnect);
 
     if (socket.connected) {
@@ -362,6 +422,7 @@ export default function App() {
       socket.off("catalog:products_updated", handleCatalogProductsUpdated);
       socket.off("stock:alert", handleStockAlert);
       socket.off("config:updated", handleConfigUpdated);
+      socket.off("closing:new_z", handleClosingNewZ);
       socket.off("connect", handleConnect);
     };
   }, [soundOn, beep, pushToast]);
@@ -503,12 +564,13 @@ export default function App() {
   const addProductToOrder = (tableId, product) => {
     const order = ensureOrderForTable(tableId);
     const { course, courseStatus, station, cat } = getItemCourseAndStation(product);
+    const effectivePrice = getProductEffectivePrice(product, config);
 
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== order.id) return o;
         const existing = o.items.find(
-          (i) => i.productId === product.id && i.status === "draft" && !i.notes && (i.course || course) === course
+          (i) => i.productId === product.id && i.status === "draft" && !i.notes && (i.course || course) === course && i.price === effectivePrice
         );
         if (existing) {
           return { ...o, items: o.items.map((i) => i.id === existing.id ? { ...i, qty: i.qty + 1 } : i) };
@@ -521,7 +583,7 @@ export default function App() {
               id: uid("it"),
               productId: product.id,
               name: product.name,
-              price: product.price,
+              price: effectivePrice,
               qty: 1,
               notes: "",
               status: "draft",
@@ -536,7 +598,7 @@ export default function App() {
 
     emitOrQueue("order:add_item", {
       orderId: order.id,
-      product: { id: product.id, name: product.name, price: product.price, cat, station, isMenu: false },
+      product: { id: product.id, name: product.name, price: effectivePrice, cat, station, isMenu: false },
       course,
       courseStatus,
       station,
@@ -649,6 +711,27 @@ export default function App() {
     setConfig(newConfig);
     emitOrQueue("config:update", newConfig);
     pushToast("Configuration de la caisse mise à jour", "server");
+  };
+
+  const handleProcessZ = (payload) => {
+    return new Promise((resolve, reject) => {
+      const socket = getSocket();
+      if (socket && socket.connected) {
+        socket.emit("closing:process_z", payload, (res) => {
+          if (res && res.success) {
+            pushToast(`✅ Clôture Z n°${res.closing?.zNumber || ""} validée avec succès`, "server");
+            resolve(res);
+          } else {
+            pushToast(`❌ Erreur lors du Z : ${res?.error || "Inconnue"}`, "warn");
+            reject(new Error(res?.error || "Erreur Z"));
+          }
+        });
+      } else {
+        enqueueAction("closing:process_z", payload);
+        pushToast("Clôture Z enregistrée en file locale (hors-ligne)", "server");
+        resolve({ success: true, offline: true });
+      }
+    });
   };
 
   /**
@@ -1014,6 +1097,7 @@ export default function App() {
       recipes,
       stockMovements,
       history,
+      closings,
       staff,
       roles,
       config,
@@ -1023,6 +1107,7 @@ export default function App() {
       gestionView,
       pushToast,
       onUpdateConfig: handleUpdateConfig,
+      onProcessZ: handleProcessZ,
       onAddTable: addTable,
       onUpdateTable: updateTable,
       onDeleteTable: deleteTable,
@@ -1054,6 +1139,7 @@ export default function App() {
       recipes,
       stockMovements,
       history,
+      closings,
       staff,
       roles,
       config,
@@ -1063,6 +1149,7 @@ export default function App() {
       gestionView,
       pushToast,
       handleUpdateConfig,
+      handleProcessZ,
       addTable,
       updateTable,
       deleteTable,
@@ -1200,7 +1287,12 @@ export default function App() {
       {/* ── Gestion (Lazy Loaded & Sans Prop Drilling) ── */}
       {role === "gestion" && (
         <Suspense fallback={<ViewFallback />}>
-          <Gestion view={gestionView} setView={setGestionView} />
+          <Gestion
+            view={gestionView}
+            setView={setGestionView}
+            closings={closings}
+            onProcessZ={handleProcessZ}
+          />
         </Suspense>
       )}
 

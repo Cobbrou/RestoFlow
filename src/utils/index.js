@@ -149,6 +149,7 @@ export function menuToProduct(menu, allProducts) {
     name: menu.name,
     price: menu.price,
     emoji: menu.emoji || "📋",
+    available: menu.available !== false,
     allergens,
     desc:
       menu.desc ||
@@ -156,4 +157,78 @@ export function menuToProduct(menu, allProducts) {
         ? `${groups.map((g) => g.title).join(" + ")}, au choix`
         : "Menu à composer"),
   };
+}
+
+/**
+ * Détermine si le Happy Hour est actuellement actif selon la configuration
+ */
+export function isHappyHourActive(config, date = new Date()) {
+  if (!config?.happyHourConfig?.enabled) return false;
+  const hh = config.happyHourConfig;
+
+  // Jour de la semaine (0 = Dimanche, 1 = Lundi, etc.)
+  const currentDay = date.getDay();
+  if (Array.isArray(hh.days) && !hh.days.includes(currentDay)) {
+    return false;
+  }
+
+  // Plage horaire
+  const nowMinutes = date.getHours() * 60 + date.getMinutes();
+  const [startH, startM] = (hh.startTime || "17:00").split(":").map(Number);
+  const [endH, endM] = (hh.endTime || "20:00").split(":").map(Number);
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  return nowMinutes >= startMinutes && nowMinutes < endMinutes;
+}
+
+/**
+ * Calcule le prix effectif d'un produit (en tenant compte du Happy Hour s'il est actif)
+ */
+export function getProductEffectivePrice(product, config, date = new Date()) {
+  if (!product) return 0;
+  if (!isHappyHourActive(config, date)) {
+    return product.price || 0;
+  }
+
+  // Prix Happy Hour fixe spécifique
+  if (product.happyHourPrice != null && product.happyHourPrice > 0) {
+    return product.happyHourPrice;
+  }
+
+  // Remise Happy Hour sur la catégorie ciblée (par défaut "boissons")
+  const targetCats = config?.happyHourConfig?.categories || ["boissons"];
+  if (targetCats.includes(product.cat)) {
+    const discountRate = (config?.happyHourConfig?.discountPercent || 20) / 100;
+    return Math.max(0, Math.round(product.price * (1 - discountRate) * 100) / 100);
+  }
+
+  return product.price || 0;
+}
+
+/**
+ * Dédoublonne les entrées d'historique de commande (évite doublon optimiste + socket/serveur).
+ */
+export function deduplicateHistory(list) {
+  if (!Array.isArray(list)) return [];
+  const map = new Map();
+
+  for (const item of list) {
+    if (!item) continue;
+    // Clé de déduplication : orderId ou ticketNumber si présent, sinon id
+    const key = item.orderId ? `ord_${item.orderId}` : item.ticketNumber ? `tick_${item.ticketNumber}` : item.id;
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, item);
+    } else {
+      // Si on a déjà une entrée, conserver celle qui provient du serveur (avec signature ou sequenceNumber)
+      const existing = map.get(key);
+      if (!existing.signature && item.signature) {
+        map.set(key, item);
+      }
+    }
+  }
+
+  return Array.from(map.values());
 }

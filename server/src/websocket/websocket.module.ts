@@ -9,6 +9,7 @@ import { StockModule } from "../stock/stock.module";
 import { TablesModule } from "../tables/tables.module";
 import { PrinterModule } from "../printer/printer.module";
 import { RecipesModule } from "../recipes/recipes.module";
+import { ClosingModule } from "../closing/closing.module";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { RecipesModule } from "../recipes/recipes.module";
     TablesModule,
     PrinterModule,
     RecipesModule,
+    ClosingModule,
   ],
   providers: [WebsocketGateway],
   exports: [WebsocketGateway],

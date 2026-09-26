@@ -6,20 +6,19 @@ import {
   Save,
   Plus,
   Trash2,
-  CheckCircle2,
-  AlertCircle,
-  FileText,
   Volume2,
   Scissors,
   DollarSign,
   Play,
+  Clock,
+  BookOpen,
 } from "lucide-react";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 import { money } from "../../utils/index.js";
 
 /**
  * CaisseSettingsManager — Back-office de gestion des paramètres de caisse,
- * mentions légales, imprimantes ESC/POS et codes promotionnels.
+ * mentions légales, imprimantes ESC/POS, codes promotionnels, Happy Hour et comptes FEC.
  */
 export default function CaisseSettingsManager({
   config,
@@ -51,9 +50,27 @@ export default function CaisseSettingsManager({
       { code: "FIDELITE10", label: "Remise Fidélité (-10%)", type: "percent", value: 10, active: true },
       { code: "VIP25", label: "Client Privilège (-25%)", type: "percent", value: 25, active: true },
     ],
+    happyHourConfig: config?.happyHourConfig || {
+      enabled: false,
+      startTime: "17:00",
+      endTime: "20:00",
+      days: [1, 2, 3, 4, 5],
+      discountPercent: 20,
+      categories: ["boissons"],
+    },
+    fecExportConfig: config?.fecExportConfig || {
+      journalCode: "VT",
+      accountVente10: "706000",
+      accountVente20: "707000",
+      accountVat10: "445710",
+      accountVat20: "445720",
+      accountCard: "512000",
+      accountCash: "530000",
+      accountOther: "580000",
+    },
   });
 
-  const [activeSubtab, setActiveSubtab] = useState("etablissement"); // "etablissement" | "imprimantes" | "promos"
+  const [activeSubtab, setActiveSubtab] = useState("etablissement"); // "etablissement" | "imprimantes" | "promos" | "happyhour" | "compta_fec"
   const [testPrintModal, setTestPrintModal] = useState(null); // null | { type: "caisse" | "cuisine" | "bar" }
 
   // Nouveau code promo
@@ -164,6 +181,30 @@ export default function CaisseSettingsManager({
           >
             <Tag size={14} />
             <span>Codes Promo & Remises ({formData.promoCodes.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubtab("happyhour")}
+            className={`rf-tap flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeSubtab === "happyhour"
+                ? "bg-[#2B2622] text-white shadow-xs"
+                : "text-[#5B5346] hover:text-[#2B2622]"
+            }`}
+          >
+            <Clock size={14} />
+            <span>Happy Hour</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubtab("compta_fec")}
+            className={`rf-tap flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeSubtab === "compta_fec"
+                ? "bg-[#2B2622] text-white shadow-xs"
+                : "text-[#5B5346] hover:text-[#2B2622]"
+            }`}
+          >
+            <BookOpen size={14} />
+            <span>Comptes FEC</span>
           </button>
         </div>
 
@@ -510,6 +551,293 @@ export default function CaisseSettingsManager({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 4. HAPPY HOUR & TARIFICATION PROGRAMMÉE ─────────────── */}
+      {activeSubtab === "happyhour" && (
+        <div className="bg-white rounded-3xl p-6 border border-black/10 shadow-xs space-y-6">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="text-base font-bold text-[#2B2622]">
+                Tarification Happy Hour Programmée
+              </h3>
+              <p className="text-xs text-[#8A8378]">
+                Définissez les créneaux horaires et remises appliquées automatiquement en salle sur les boissons.
+              </p>
+            </div>
+
+            <button
+              onClick={() =>
+                setFormData((prev) => ({
+                  ...prev,
+                  happyHourConfig: {
+                    ...prev.happyHourConfig,
+                    enabled: !prev.happyHourConfig?.enabled,
+                  },
+                }))
+              }
+              className={`rf-tap px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                formData.happyHourConfig?.enabled
+                  ? "bg-[#2E9E5B] text-white border-[#2E9E5B]"
+                  : "bg-black/5 text-[#8A8378] border-black/10"
+              }`}
+            >
+              {formData.happyHourConfig?.enabled ? "Happy Hour Actif" : "Happy Hour Désactivé"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Heure de début
+              </label>
+              <input
+                type="time"
+                value={formData.happyHourConfig?.startTime || "17:00"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    happyHourConfig: { ...prev.happyHourConfig, startTime: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Heure de fin
+              </label>
+              <input
+                type="time"
+                value={formData.happyHourConfig?.endTime || "20:00"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    happyHourConfig: { ...prev.happyHourConfig, endTime: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-2">
+              Jours actifs de la semaine
+            </label>
+            <div className="flex gap-1.5 flex-wrap">
+              {[
+                { id: 1, label: "Lun" },
+                { id: 2, label: "Mar" },
+                { id: 3, label: "Mer" },
+                { id: 4, label: "Jeu" },
+                { id: 5, label: "Ven" },
+                { id: 6, label: "Sam" },
+                { id: 0, label: "Dim" },
+              ].map((day) => {
+                const currentDays = formData.happyHourConfig?.days || [1, 2, 3, 4, 5];
+                const active = currentDays.includes(day.id);
+                return (
+                  <button
+                    key={day.id}
+                    onClick={() => {
+                      const newDays = active
+                        ? currentDays.filter((d) => d !== day.id)
+                        : [...currentDays, day.id];
+                      setFormData((prev) => ({
+                        ...prev,
+                        happyHourConfig: { ...prev.happyHourConfig, days: newDays },
+                      }));
+                    }}
+                    className={`rf-tap w-11 h-11 rounded-xl text-xs font-bold transition-all ${
+                      active ? "bg-[#C1440E] text-white shadow-xs" : "bg-black/5 text-[#8A8378]"
+                    }`}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+              Pourcentage de réduction par défaut sur les boissons (%)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={formData.happyHourConfig?.discountPercent || 20}
+              onChange={(e) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  happyHourConfig: {
+                    ...prev.happyHourConfig,
+                    discountPercent: Number(e.target.value) || 20,
+                  },
+                }))
+              }
+              className="w-full max-w-xs px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+            />
+            <p className="text-[11px] text-[#8A8378] mt-1.5">
+              Astuce : vous pouvez également fixer un prix Happy Hour sur-mesure pour un produit précis depuis le catalogue Produits.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. COMPTES COMPTABLES DU FEC ────────────────────────── */}
+      {activeSubtab === "compta_fec" && (
+        <div className="bg-white rounded-3xl p-6 border border-black/10 shadow-xs space-y-6">
+          <div>
+            <h3 className="text-base font-bold text-[#2B2622]">
+              Comptes du Plan Comptable Général (Norme FEC)
+            </h3>
+            <p className="text-xs text-[#8A8378]">
+              Paramétrez les numéros de comptes comptables utilisés lors de la génération du fichier FEC conforme DGFiP.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Code Journal des Ventes
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.journalCode || "VT"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, journalCode: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte Ventes Restauration HT (10%)
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountVente10 || "706000"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountVente10: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte Ventes Alcools HT (20%)
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountVente20 || "707000"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountVente20: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte TVA Collectée 10%
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountVat10 || "445710"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountVat10: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte TVA Collectée 20%
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountVat20 || "445720"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountVat20: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte Banque Carte Bancaire
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountCard || "512000"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountCard: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte Caisse Espèces
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountCash || "530000"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountCash: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte Autres Règlements
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountOther || "580000"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountOther: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
             </div>
           </div>
         </div>

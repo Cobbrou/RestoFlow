@@ -62,7 +62,6 @@ export function formatSeparator(char = "-", width = 42) {
  */
 export function generateCustomerReceiptText(receipt = {}, config = {}, width = 42) {
   const lines = [];
-  const legal = config.legalName || "RESTOFLOW SAS";
   const brand = config.name || "RESTOFLOW BISTROT";
   const dateObj = new Date(receipt.paidAt || receipt.sentAt || receipt.createdAt || Date.now());
 
@@ -275,6 +274,169 @@ export function generateTpeReceiptText(tpeData = {}, config = {}, width = 42) {
 
   lines.push(formatCenter("TICKET CLIENT", width));
   lines.push(formatCenter("A CONSERVER", width));
+
+  return lines.join("\n");
+}
+
+/**
+ * 5. GÉNÉRATION DU RAPPORT X (Lecture intermédiaire de caisse)
+ */
+export function generateXReportText(xData = {}, config = {}, width = 42) {
+  const lines = [];
+  const brand = config.name || "RESTOFLOW BISTROT";
+  const now = new Date(xData.generatedAt || Date.now());
+  const opened = new Date(xData.openedAt || Date.now());
+
+  lines.push(formatCenter(brand.toUpperCase(), width));
+  if (config.siret) lines.push(formatCenter(`SIRET : ${config.siret}`, width));
+  lines.push(formatSeparator("=", width));
+  lines.push(formatCenter("--- RAPPORT X ---", width));
+  lines.push(formatCenter("LECTURE INTERMÉDIAIRE DE CAISSE", width));
+  lines.push(formatCenter("(SANS CLÔTURE DE SESSION)", width));
+  lines.push(formatSeparator("=", width));
+
+  lines.push(formatRow(`Émis le : ${now.toLocaleDateString("fr-FR")}`, `${now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`, width));
+  lines.push(formatRow(`Session depuis :`, `${opened.toLocaleDateString("fr-FR")} ${opened.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`, width));
+  if (xData.lastZReportNumber) {
+    lines.push(formatRow("Dernier Z :", xData.lastZReportNumber, width));
+  }
+  lines.push(formatSeparator("-", width));
+
+  // Totaux de session
+  lines.push(formatRow("TOTAL BRUT TTC", money(xData.totalGross || 0), width));
+  if (xData.totalDiscounts > 0) {
+    lines.push(formatRow("TOTAL REMISES ACCORDÉES", `-${money(xData.totalDiscounts)}`, width));
+  }
+  lines.push(formatSeparator("=", width));
+  lines.push(formatRow("TOTAL NET TTC", money(xData.totalNet || 0), width));
+  lines.push(formatRow("TOTAL NET HT", money(xData.totalHT || 0), width));
+  lines.push(formatRow("TOTAL TVA COLLECTÉE", money(xData.totalVAT || 0), width));
+  lines.push(formatSeparator("=", width));
+
+  lines.push(formatRow(`Nombre de tickets émis :`, `${xData.ticketsCount || 0}`, width));
+  lines.push(formatRow(`Nombre de couverts :`, `${xData.coversCount || 0}`, width));
+  if (xData.ticketsCount > 0) {
+    lines.push(formatRow(`Panier moyen / ticket :`, money(xData.averageTicket || 0), width));
+  }
+
+  // Règlements
+  lines.push(formatSeparator("-", width));
+  lines.push(formatCenter("MODES D'ENCAISSEMENT", width));
+  const pb = xData.paymentsBreakdown || {};
+  lines.push(formatRow("• Carte Bancaire :", money(pb.carte || 0), width));
+  lines.push(formatRow("• Espèces :", money(pb.especes || 0), width));
+  lines.push(formatRow("• Autre règlement :", money(pb.autre || 0), width));
+  if (pb.partage) lines.push(formatRow("• Paiements partagés :", money(pb.partage || 0), width));
+
+  // Ventilation TVA
+  lines.push(formatSeparator("-", width));
+  lines.push(formatCenter("VENTILATION FISCALE DE LA TVA", width));
+  lines.push(formatRow("TAUX", "BASE HT | TVA | TTC", width));
+  lines.push(formatSeparator(".", width));
+  for (const vr of xData.vatBreakdown || []) {
+    const rateLabel = `${Number(vr.rate).toFixed(1)}%`;
+    const details = `${money(vr.ht)} | ${money(vr.vat)} | ${money(vr.ttc)}`;
+    lines.push(formatRow(rateLabel, details, width));
+  }
+
+  // Grand Total
+  lines.push(formatSeparator("=", width));
+  lines.push(formatRow("GRAND TOTAL CUMULÉ (GT) :", money(xData.currentGrandTotal || 0), width));
+  lines.push(formatSeparator("=", width));
+  lines.push(formatCenter("FIN DE LECTURE DU RAPPORT X", width));
+
+  return lines.join("\n");
+}
+
+/**
+ * 6. GÉNÉRATION DU RAPPORT Z CERTIFIÉ (Clôture journalière inaltérable NF525)
+ */
+export function generateZReportText(zData = {}, config = {}, width = 42) {
+  const lines = [];
+  const brand = config.name || "RESTOFLOW BISTROT";
+  const closed = new Date(zData.closedAt || Date.now());
+  const opened = new Date(zData.openedAt || Date.now());
+
+  lines.push(formatSeparator("*", width));
+  lines.push(formatCenter(brand.toUpperCase(), width));
+  if (config.legalName) lines.push(formatCenter(config.legalName, width));
+  if (config.siret) lines.push(formatCenter(`SIRET : ${config.siret}`, width));
+  if (config.vatNumber) lines.push(formatCenter(`N° TVA : ${config.vatNumber}`, width));
+  lines.push(formatSeparator("=", width));
+  lines.push(formatCenter("*** RAPPORT DE CLÔTURE Z ***", width));
+  lines.push(formatCenter(`CLÔTURE N° : ${zData.reportNumber || "Z-0001"}`, width));
+  lines.push(formatCenter("DOCUMENT FISCAL CERTIFIÉ INALTÉRABLE", width));
+  lines.push(formatCenter("NORME NF525 / ART. 286 CGI", width));
+  lines.push(formatSeparator("=", width));
+
+  lines.push(formatRow(`Date clôture : ${closed.toLocaleDateString("fr-FR")}`, `${closed.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`, width));
+  lines.push(formatRow(`Début session :`, `${opened.toLocaleDateString("fr-FR")} ${opened.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`, width));
+  lines.push(formatRow(`Clôturé par :`, `${zData.closedBy || "Gérant"}`, width));
+  lines.push(formatRow(`Tickets inclus :`, `${zData.ticketsCount || 0}`, width));
+  lines.push(formatSeparator("-", width));
+
+  // Chiffre d'Affaires
+  lines.push(formatRow("CHIFFRE D'AFFAIRES BRUT TTC", money(zData.totalGross || 0), width));
+  if (zData.totalDiscounts > 0) {
+    lines.push(formatRow("TOTAL REMISES ACCORDÉES", `-${money(zData.totalDiscounts)}`, width));
+  }
+  lines.push(formatSeparator("=", width));
+  lines.push(formatRow("CHIFFRE D'AFFAIRES NET TTC", money(zData.totalNet || 0), width));
+  lines.push(formatRow("TOTAL NET HT", money(zData.totalHT || 0), width));
+  lines.push(formatRow("TOTAL TVA COLLECTÉE", money(zData.totalVAT || 0), width));
+  lines.push(formatSeparator("=", width));
+
+  // Grand Total Perpétuel Cumulé (GT)
+  lines.push(formatRow("ANCIEN GRAND TOTAL (GT) :", money(zData.grandTotalBefore || 0), width));
+  lines.push(formatRow("NOUVEAU GRAND TOTAL (GT) :", money(zData.grandTotal || 0), width));
+  lines.push(formatSeparator("-", width));
+
+  // Modes de paiement
+  lines.push(formatCenter("VENTILATION DES ENCAISSEMENTS", width));
+  const pb = zData.paymentsBreakdown || {};
+  lines.push(formatRow("• Carte Bancaire :", money(pb.carte || 0), width));
+  lines.push(formatRow("• Espèces en caisse :", money(pb.especes || 0), width));
+  lines.push(formatRow("• Autres règlements :", money(pb.autre || 0), width));
+
+  // Contrôle de caisse & écart
+  if (zData.countedCash != null) {
+    lines.push(formatSeparator("-", width));
+    lines.push(formatCenter("CONTRÔLE DE CAISSE PHYSIQUE", width));
+    lines.push(formatRow("Fond de caisse départ :", money(zData.openingCash || 0), width));
+    const theo = (zData.openingCash || 0) + (pb.especes || 0);
+    lines.push(formatRow("Espèces théoriques :", money(theo), width));
+    lines.push(formatRow("Espèces réelles comptées :", money(zData.countedCash), width));
+    const variance = zData.cashVariance || 0;
+    const varLabel = variance === 0 ? "ÉCART NUL (CONFORME)" : variance > 0 ? "EXCÉDENT DE CAISSE" : "DÉFICIT DE CAISSE";
+    lines.push(formatRow(`Écart (${varLabel}) :`, money(variance), width));
+  }
+
+  // Ventilation TVA
+  lines.push(formatSeparator("-", width));
+  lines.push(formatCenter("VENTILATION FISCALE DE LA TVA", width));
+  lines.push(formatRow("TAUX", "BASE HT | TVA | TTC", width));
+  lines.push(formatSeparator(".", width));
+  for (const vr of zData.vatBreakdown || []) {
+    const rateLabel = `${Number(vr.rate).toFixed(1)}%`;
+    const details = `${money(vr.ht)} | ${money(vr.vat)} | ${money(vr.ttc)}`;
+    lines.push(formatRow(rateLabel, details, width));
+  }
+
+  // Empreinte de scellement cryptographique
+  lines.push(formatSeparator("=", width));
+  lines.push(formatCenter("SCELLEMENT NUMÉRIQUE NF525", width));
+  if (zData.signature) {
+    lines.push(formatRow("SIGNATURE SHA-256 :", "", width));
+    lines.push(formatCenter(zData.signature.slice(0, 32), width));
+    if (zData.signature.length > 32) {
+      lines.push(formatCenter(zData.signature.slice(32), width));
+    }
+  }
+  if (zData.previousHash) {
+    lines.push(formatRow("HASH PRÉCÉDENT :", `${zData.previousHash.slice(0, 16)}...`, width));
+  }
+  lines.push(formatSeparator("*", width));
+  lines.push(formatCenter("*** FIN DE RAPPORT Z - ARCHIVÉ ***", width));
 
   return lines.join("\n");
 }

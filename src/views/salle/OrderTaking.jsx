@@ -5,7 +5,7 @@ import {
   ArrowRightLeft, Merge, BellRing
 } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
-import { isAvailable, noteIndicatesAllergy, elapsed, money } from "../../utils/index.js";
+import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
@@ -79,7 +79,21 @@ export default function OrderTaking({
   );
 
   const getPortionsAvailable = (product) => {
-    if (!product.available) return 0;
+    if (!isAvailable(product)) return 0;
+    if (product.isMenu) {
+      const groups = product.groups || [];
+      if (groups.length === 0) return null;
+      for (const g of groups) {
+        const availableOptions = (g.productIds || []).filter((id) => {
+          const item = products.find((prod) => prod.id === id);
+          return item && isAvailable(item) && getPortionsAvailable(item) !== 0;
+        });
+        if (availableOptions.length < (g.count || 1)) {
+          return 0;
+        }
+      }
+      return null;
+    }
     const prodRecipes = recipes.filter((r) => r.productId === product.id);
     if (!prodRecipes || prodRecipes.length === 0) return null;
     let minPossible = Infinity;
@@ -106,9 +120,24 @@ export default function OrderTaking({
     else onAdd(p);
   };
 
+  const isHH = isHappyHourActive(config, new Date(now || Date.now()));
+
   // ── Panneau gauche : catalogue ─────────────────────────────
   const menuPanel = (
     <div className="flex flex-col min-h-0 h-full">
+      {/* Bannière Happy Hour si actif */}
+      {isHH && (
+        <div className="bg-[#C1440E10] border-b border-[#C1440E25] px-3.5 py-2 flex items-center justify-between text-xs text-[#C1440E]">
+          <div className="flex items-center gap-1.5 font-bold">
+            <Sparkles size={14} className="animate-pulse" />
+            <span>Happy Hour en cours (jusqu'à {config?.happyHourConfig?.endTime || "20:00"})</span>
+          </div>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#C1440E15]">
+            -{config?.happyHourConfig?.discountPercent || 20}% sur les boissons
+          </span>
+        </div>
+      )}
+
       {/* Recherche */}
       <div className="p-3 border-b border-black/10 flex items-center gap-2">
         <div className="flex-1 flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2">
@@ -147,6 +176,8 @@ export default function OrderTaking({
             p={p}
             isMobile={isMobile}
             portionsLeft={getPortionsAvailable(p)}
+            config={config}
+            now={now}
             onTap={() => handleProductTap(p)}
           />
         ))}
@@ -304,6 +335,7 @@ export default function OrderTaking({
     <MenuComposer
       menu={composerMenu}
       products={products}
+      getPortionsAvailable={getPortionsAvailable}
       onCancel={() => setComposerMenu(null)}
       onConfirm={(composition) => { onAddComposedMenu(composerMenu, composition); setComposerMenu(null); }}
     />
@@ -496,10 +528,15 @@ export default function OrderTaking({
 
 /* ── Sous-composants ─────────────────────────────────────────── */
 
-function ProductCard({ p, isMobile, onTap, portionsLeft }) {
+function ProductCard({ p, isMobile, onTap, portionsLeft, config, now }) {
   const cat = CATEGORIES.find((c) => c.id === p.cat);
   const baseAvailable = isAvailable(p);
   const isOutOfStock = !baseAvailable || portionsLeft === 0;
+
+  const isHH = isHappyHourActive(config, new Date(now || Date.now()));
+  const effectivePrice = getProductEffectivePrice(p, config, new Date(now || Date.now()));
+  const hasHhDiscount = isHH && effectivePrice < p.price;
+
   return (
     <button
       onClick={onTap}
@@ -532,8 +569,20 @@ function ProductCard({ p, isMobile, onTap, portionsLeft }) {
           )}
         </div>
         <p className={`text-[#8A8378] mt-0.5 leading-snug ${isMobile ? "text-xs" : "text-[11px]"}`}>{p.desc}</p>
-        <div className="flex items-center justify-between mt-1.5">
-          <span className={`font-bold text-[#2B2622] ${isMobile ? "text-sm" : "text-xs"}`}>{money(p.price)}</span>
+        <div className="flex items-center justify-between mt-1.5 flex-wrap gap-1">
+          <div className="flex items-center gap-1.5">
+            {hasHhDiscount ? (
+              <>
+                <span className="line-through text-[#8A8378] text-[10px]">{money(p.price)}</span>
+                <span className={`font-bold text-[#C1440E] ${isMobile ? "text-sm" : "text-xs"}`}>{money(effectivePrice)}</span>
+                <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full bg-[#C1440E15] text-[#C1440E]">
+                  HAPPY HOUR
+                </span>
+              </>
+            ) : (
+              <span className={`font-bold text-[#2B2622] ${isMobile ? "text-sm" : "text-xs"}`}>{money(p.price)}</span>
+            )}
+          </div>
           {p.allergens?.length > 0 && <span className="text-[9px] text-[#B5451B]">{p.allergens.join(", ")}</span>}
         </div>
       </div>
@@ -680,15 +729,21 @@ export function AllergyBadge({ item, product, compact }) {
 
 /* ── Composeur de menu ─────────────────────────────────────── */
 
-function MenuComposer({ menu, products, onCancel, onConfirm }) {
+function MenuComposer({ menu, products, getPortionsAvailable, onCancel, onConfirm }) {
   const groups = menu.groups || [];
   const [selections, setSelections] = useState(() =>
     Object.fromEntries(groups.map((g) => [g.id, []]))
   );
 
+  const isProdAvailable = (p) => {
+    if (!p || !isAvailable(p)) return false;
+    if (getPortionsAvailable && getPortionsAvailable(p) === 0) return false;
+    return true;
+  };
+
   const toggle = (group, productId) => {
     const product = products.find((p) => p.id === productId);
-    if (!isAvailable(product)) return;
+    if (!isProdAvailable(product)) return;
     setSelections((prev) => {
       const cur = prev[group.id] || [];
       if (cur.includes(productId)) return { ...prev, [group.id]: cur.filter((id) => id !== productId) };
@@ -724,7 +779,8 @@ function MenuComposer({ menu, products, onCancel, onConfirm }) {
               <div className="grid grid-cols-2 gap-1.5">
                 {candidates.map((p) => {
                   const checked = chosen.includes(p.id);
-                  const available = isAvailable(p);
+                  const available = isProdAvailable(p);
+                  const portions = getPortionsAvailable ? getPortionsAvailable(p) : null;
                   return (
                     <button
                       key={p.id}
@@ -742,7 +798,11 @@ function MenuComposer({ menu, products, onCancel, onConfirm }) {
                         {checked && <Check size={11} color="white" />}
                       </span>
                       <span className="flex-1 truncate">{p.emoji} {p.name}</span>
-                      {!available && <span className="text-[8px] font-extrabold shrink-0" style={{ color: "#C1361B" }}>RUPTURE</span>}
+                      {!available ? (
+                        <span className="text-[8px] font-extrabold shrink-0" style={{ color: "#C1361B" }}>RUPTURE</span>
+                      ) : portions !== null && portions <= 4 ? (
+                        <span className="text-[8px] font-bold text-[#D9A441] shrink-0">Plus que {portions}</span>
+                      ) : null}
                     </button>
                   );
                 })}

@@ -11,6 +11,7 @@ import { RecipesModule } from "./recipes/recipes.module";
 import { BillingModule } from "./billing/billing.module";
 import { ConfigModule } from "./config/config.module";
 import { PrinterModule } from "./printer/printer.module";
+import { ClosingModule } from "./closing/closing.module";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { PrinterModule } from "./printer/printer.module";
     BillingModule,
     ConfigModule,
     PrinterModule,
+    ClosingModule,
   ],
 })
 export class AppModule {}

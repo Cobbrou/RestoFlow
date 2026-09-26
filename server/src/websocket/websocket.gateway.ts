@@ -18,6 +18,7 @@ import { StockService } from "../stock/stock.service";
 import { TablesService } from "../tables/tables.service";
 import { PrinterService } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
+import { ClosingService } from "../closing/closing.service";
 
 @WebSocketGateway({
   cors: {
@@ -40,7 +41,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     private stockService: StockService,
     private tablesService: TablesService,
     private printerService: PrinterService,
-    private recipesService: RecipesService
+    private recipesService: RecipesService,
+    private closingService: ClosingService
   ) {}
 
   async handleConnection(client: Socket) {
@@ -74,6 +76,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       rawMovements,
       rawConfig,
       rawReservations,
+      closings,
     ] = await Promise.all([
       this.prisma.table.findMany({ orderBy: { number: "asc" } }),
       this.prisma.order.findMany({
@@ -122,6 +125,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.prisma.reservation.findMany({
         orderBy: [{ date: "asc" }, { time: "asc" }],
       }),
+      this.closingService.getClosingsHistory(50),
     ]);
 
     const parsedOrders = rawOrders.map((o) => this.ordersService.formatOrder(o));
@@ -206,6 +210,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       stockMovements: parsedMovements,
       config: rawConfig,
       reservations: rawReservations,
+      closings,
     };
   }
 
@@ -813,6 +818,71 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         }))
       );
       return { ok: true, product: updated };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  // ── Clôture de Caisse & Conformité Fiscale (ClosingService - Phase 7) ──
+
+  @SubscribeMessage("closing:get_x")
+  async handleGetXReport() {
+    try {
+      const report = await this.closingService.getXReport();
+      return { ok: true, report };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("closing:process_z")
+  async handleProcessZClosing(@MessageBody() data: any) {
+    try {
+      const zReport = await this.closingService.processZClosing({
+        closedBy: data.closedBy,
+        openingCash: data.openingCash,
+        countedCash: data.countedCash,
+        notes: data.notes,
+      });
+
+      // Diffusion temps réel de la nouvelle clôture Z à tous les postes connectés
+      this.server.emit("closing:new_z", zReport);
+
+      // Recharger l'état de la config et de l'historique
+      const updatedConfig = await this.configService.getConfig();
+      this.server.emit("config:updated", updatedConfig);
+
+      return { ok: true, closing: zReport };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("closing:get_history")
+  async handleGetClosingHistory(@MessageBody() data?: { limit?: number }) {
+    try {
+      const list = await this.closingService.getClosingsHistory(data?.limit || 50);
+      return { ok: true, closings: list };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("closing:verify_chain")
+  async handleVerifyFiscalChain() {
+    try {
+      const audit = await this.closingService.verifyFiscalChainIntegrity();
+      return { ok: true, audit };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("closing:get_fec")
+  async handleGetFecExport(@MessageBody() data?: any) {
+    try {
+      const fec = await this.closingService.generateFecExport(data || {});
+      return { ok: true, fec };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

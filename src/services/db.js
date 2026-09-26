@@ -46,6 +46,7 @@ const STATE_KEYS = [
   "recipes",
   "stockMovements",
   "config",
+  "closings",
   "lastSync",
 ];
 

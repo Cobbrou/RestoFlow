@@ -25,8 +25,8 @@ export function canAccessTab(staff, roleObj, tabId) {
       // Accès au tableau de bord / KPIs
       return permissions.includes("dashboard.view");
     case "gestion":
-      // Accès au back-office (tables, produits, menus, équipe ou historique caisse)
-      return permissions.some((p) => p.startsWith("gestion.") || p === "caisse.history");
+      // Accès au back-office (tables, produits, menus, stocks, équipe, historique ou clôtures caisse)
+      return permissions.some((p) => p.startsWith("gestion.") || p.startsWith("caisse."));
     default:
       return false;
   }

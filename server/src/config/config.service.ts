@@ -36,6 +36,24 @@ export class ConfigService {
       ...cfg,
       printers: JSON.parse(cfg.printers || "[]"),
       promoCodes: JSON.parse(cfg.promoCodes || "[]"),
+      happyHourConfig: cfg.happyHourConfig ? JSON.parse(cfg.happyHourConfig) : {
+        enabled: false,
+        startTime: "17:00",
+        endTime: "20:00",
+        days: [1, 2, 3, 4, 5],
+        discountPercent: 20,
+        categories: ["boissons"],
+      },
+      fecExportConfig: cfg.fecExportConfig ? JSON.parse(cfg.fecExportConfig) : {
+        journalCode: "VT",
+        accountVente10: "706000",
+        accountVente20: "707000",
+        accountVat10: "445710",
+        accountVat20: "445720",
+        accountCard: "512000",
+        accountCash: "530000",
+        accountOther: "580000",
+      },
     };
   }
 
@@ -73,6 +91,20 @@ export class ConfigService {
         typeof data.promoCodes === "string" ? data.promoCodes : JSON.stringify(data.promoCodes);
     }
 
+    if (data.happyHourConfig !== undefined) {
+      updatePayload.happyHourConfig =
+        typeof data.happyHourConfig === "string"
+          ? data.happyHourConfig
+          : JSON.stringify(data.happyHourConfig);
+    }
+
+    if (data.fecExportConfig !== undefined) {
+      updatePayload.fecExportConfig =
+        typeof data.fecExportConfig === "string"
+          ? data.fecExportConfig
+          : JSON.stringify(data.fecExportConfig);
+    }
+
     const updated = await this.prisma.restaurantConfig.upsert({
       where: { id: "default" },
       create: {
@@ -86,6 +118,8 @@ export class ConfigService {
       ...updated,
       printers: JSON.parse(updated.printers || "[]"),
       promoCodes: JSON.parse(updated.promoCodes || "[]"),
+      happyHourConfig: updated.happyHourConfig ? JSON.parse(updated.happyHourConfig) : null,
+      fecExportConfig: updated.fecExportConfig ? JSON.parse(updated.fecExportConfig) : null,
     };
   }
 }

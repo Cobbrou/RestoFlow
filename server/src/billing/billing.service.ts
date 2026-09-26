@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import * as crypto from "crypto";
 
 export interface CheckoutInput {
   orderId: string;
@@ -103,6 +104,27 @@ export class BillingService {
     const finalMethod =
       data.paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
+    // Chaînage cryptographique NF525
+    const lastHistory = await this.prisma.orderHistory.findFirst({
+      orderBy: { createdAt: "desc" },
+    });
+    const nextSeq = (lastHistory?.sequenceNumber || historyCount || 0) + 1;
+    const previousHash = lastHistory?.signature || "GENESIS_TICKET_RESTOFLOW";
+
+    const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" } });
+    const secretKey = cfg?.nf525Key || "RESTOFLOW_NF525_SECRET_KEY";
+
+    const signaturePayload = [
+      nextSeq,
+      ticketNumber,
+      paidAt.toISOString(),
+      Number(finalTotal).toFixed(2),
+      Number(subtotal).toFixed(2),
+      finalMethod,
+      previousHash,
+    ].join("|");
+    const signature = crypto.createHmac("sha256", secretKey).update(signaturePayload).digest("hex");
+
     // Création de l'enregistrement historique immutable
     const historyRecord = await this.prisma.orderHistory.create({
       data: {
@@ -122,6 +144,9 @@ export class BillingService {
           : null,
         paymentMethod: finalMethod,
         payments: JSON.stringify(paymentList),
+        sequenceNumber: nextSeq,
+        previousHash,
+        signature,
         createdAt: paidAt,
       },
     });
@@ -158,6 +183,9 @@ export class BillingService {
       vatDetails: data.vatDetails || null,
       paymentMethod: historyRecord.paymentMethod,
       payments: paymentList,
+      sequenceNumber: historyRecord.sequenceNumber,
+      previousHash: historyRecord.previousHash,
+      signature: historyRecord.signature,
       createdAt: paidAt.getTime(),
     };
 

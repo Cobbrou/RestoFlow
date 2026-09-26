@@ -1,26 +1,28 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
-import { isAvailable, money } from "../../utils/index.js";
+import { isAvailable, money, deduplicateHistory } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
 import StockManager from "./StockManager.jsx";
 import RecipeManager from "./RecipeManager.jsx";
 import CaisseSettingsManager from "./CaisseSettingsManager.jsx";
+import ClosingManager from "./ClosingManager.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
 import { useRestoFlow } from "../../context/RestoFlowContext.jsx";
 
 /**
- * Gestion — Back-office avec 8 sous-vues :
+ * Gestion — Back-office avec 9 sous-vues :
  *  - tables        : gestion du plan de salle (CRUD + réservations)
  *  - produits      : catalogue produits (CRUD + disponibilité)
  *  - menus         : menus composés (CRUD)
  *  - stocks        : gestion des stocks, inventaire et alertes (Phase 2)
  *  - recettes      : fiches techniques et calcul du food cost (Phase 2)
  *  - historique    : historique des paiements encaissés
+ *  - clotures      : clôtures journalières Z, lecture X, audit NF525 et FEC (Phase 7)
  *  - caisse_params : mentions légales, imprimantes ESC/POS et codes promo (Phase 3)
  *  - equipe        : rôles, permissions et membres du personnel
  */
@@ -41,6 +43,7 @@ export default function Gestion(props) {
     { id: "stocks",        label: "Stocks",               icon: Boxes },
     { id: "recettes",      label: "Fiches & Coûts",       icon: FileSpreadsheet },
     { id: "historique",    label: "Historique",           icon: Receipt },
+    { id: "clotures",      label: "Clôtures & Fiscalité", icon: Lock },
     { id: "caisse_params", label: "Caisse & Imprimantes", icon: Printer },
     { id: "equipe",        label: "Équipe & Rôles",       icon: ShieldCheck },
   ];
@@ -57,6 +60,7 @@ export default function Gestion(props) {
       case "stocks":        return hasPermission(currentStaff, currentRoleObj, "gestion.stocks");
       case "recettes":      return hasPermission(currentStaff, currentRoleObj, "gestion.recipes");
       case "historique":    return hasPermission(currentStaff, currentRoleObj, "caisse.history");
+      case "clotures":      return hasPermission(currentStaff, currentRoleObj, "caisse.close") || hasPermission(currentStaff, currentRoleObj, "caisse.history");
       case "caisse_params": return hasPermission(currentStaff, currentRoleObj, "caisse.settings");
       case "equipe":        return hasPermission(currentStaff, currentRoleObj, "gestion.staff");
       default:              return false;
@@ -75,7 +79,7 @@ export default function Gestion(props) {
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="rf-display text-2xl font-semibold text-[#2B2622]">Gestion</h1>
-          <p className="text-sm text-[#6B6355]">Tables, catalogue produits, stocks, fiches techniques, historique et équipe</p>
+          <p className="text-sm text-[#6B6355]">Tables, catalogue produits, stocks, fiches techniques, historique, clôtures et équipe</p>
         </div>
         <div className="flex gap-1 p-1 rounded-full bg-black/5 flex-wrap">
           {visibleTabs.map((t) => {
@@ -98,6 +102,7 @@ export default function Gestion(props) {
       {view === "stocks"        && <StockManager {...merged} />}
       {view === "recettes"      && <RecipeManager {...merged} />}
       {view === "historique"    && <HistoryManager history={merged.history || []} config={merged.config} />}
+      {view === "clotures"      && <ClosingManager {...merged} />}
       {view === "caisse_params" && <CaisseSettingsManager config={merged.config} onUpdateConfig={merged.onUpdateConfig} pushToast={merged.pushToast} />}
       {view === "equipe"        && <StaffRoleManager {...merged} />}
     </div>
@@ -343,13 +348,14 @@ function ProductManager({ products, onAddProduct, onUpdateProduct, onDeleteProdu
 }
 
 function ProductForm({ product, categories, onCancel, onSave }) {
-  const [name,      setName]      = useState(product?.name  ?? "");
-  const [cat,       setCat]       = useState(product?.cat   ?? categories[0]?.id);
-  const [price,     setPrice]     = useState(product?.price ?? "");
-  const [desc,      setDesc]      = useState(product?.desc  ?? "");
-  const [emoji,     setEmoji]     = useState(product?.emoji ?? "🍽️");
-  const [allergens, setAllergens] = useState((product?.allergens ?? []).join(", "));
-  const [available, setAvailable] = useState(product ? isAvailable(product) : true);
+  const [name,           setName]           = useState(product?.name           ?? "");
+  const [cat,            setCat]            = useState(product?.cat            ?? categories[0]?.id);
+  const [price,          setPrice]          = useState(product?.price          ?? "");
+  const [happyHourPrice, setHappyHourPrice] = useState(product?.happyHourPrice ?? "");
+  const [desc,           setDesc]           = useState(product?.desc           ?? "");
+  const [emoji,          setEmoji]          = useState(product?.emoji          ?? "🍽️");
+  const [allergens,      setAllergens]      = useState((product?.allergens     ?? []).join(", "));
+  const [available,      setAvailable]      = useState(product ? isAvailable(product) : true);
   const valid = name.trim() && price !== "" && !isNaN(Number(price));
 
   return (
@@ -362,14 +368,17 @@ function ProductForm({ product, categories, onCancel, onSave }) {
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex : Burger Classic" />
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Field label="Catégorie">
           <select className={inputCls} value={cat} onChange={(e) => setCat(e.target.value)}>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
-        <Field label="Prix (€)">
+        <Field label="Prix standard (€)">
           <input type="number" step="0.5" min={0} className={inputCls} value={price} onChange={(e) => setPrice(e.target.value)} />
+        </Field>
+        <Field label="Prix Happy Hour (€, opt.)">
+          <input type="number" step="0.5" min={0} className={inputCls} value={happyHourPrice} onChange={(e) => setHappyHourPrice(e.target.value)} placeholder="Optionnel" />
         </Field>
       </div>
       <Field label="Description courte">
@@ -396,7 +405,9 @@ function ProductForm({ product, categories, onCancel, onSave }) {
         <button onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
         <button disabled={!valid}
           onClick={() => onSave({
-            name: name.trim(), cat, price: Number(price), desc: desc.trim(),
+            name: name.trim(), cat, price: Number(price),
+            happyHourPrice: happyHourPrice !== "" && !isNaN(Number(happyHourPrice)) ? Number(happyHourPrice) : null,
+            desc: desc.trim(),
             emoji: emoji || "🍽️",
             allergens: allergens.split(",").map((s) => s.trim()).filter(Boolean),
             available,
@@ -607,7 +618,8 @@ function HistoryManager({ history, config }) {
   const [detailId,             setDetailId]             = useState(null);
   const [thermalPreviewDetail, setThermalPreviewDetail] = useState(null);
 
-  const sorted   = [...history].sort((a, b) => b.createdAt - a.createdAt);
+  const deduped  = useMemo(() => deduplicateHistory(history), [history]);
+  const sorted   = [...deduped].sort((a, b) => b.createdAt - a.createdAt);
   const filtered = sorted.filter((h) => {
     const matchSearch  = !search || String(h.tableNumber ?? "").includes(search) ||
       (h.server || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -618,7 +630,7 @@ function HistoryManager({ history, config }) {
   });
 
   const totalCA = filtered.reduce((s, h) => s + h.total, 0);
-  const detail  = detailId ? history.find((h) => h.id === detailId) : null;
+  const detail  = detailId ? deduped.find((h) => h.id === detailId) : null;
 
   return (
     <div>
