@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Boxes,
   AlertTriangle,
@@ -326,6 +326,20 @@ export default function StockManager({
                         <td className="py-3 px-3 text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button
+                              onClick={() => setDeliveryModalOpen(ing.id)}
+                              className="rf-tap p-1.5 rounded-lg text-[#2E9E5B] hover:bg-[#2E9E5B]/10"
+                              title={`Réceptionner une livraison de ${ing.name}`}
+                            >
+                              <PackagePlus size={14} />
+                            </button>
+                            <button
+                              onClick={() => setWasteModalOpen(ing.id)}
+                              className="rf-tap p-1.5 rounded-lg text-[#C1361B] hover:bg-[#C1361B]/10"
+                              title={`Déclarer une perte pour ${ing.name}`}
+                            >
+                              <TrendingDown size={14} />
+                            </button>
+                            <button
                               onClick={() => setIngredientModal(ing)}
                               className="rf-tap p-1.5 rounded-lg text-[#5B5346] hover:bg-black/5"
                               title="Modifier l'ingrédient"
@@ -464,10 +478,14 @@ export default function StockManager({
       {deliveryModalOpen && (
         <DeliveryModal
           ingredients={ingredients}
+          initialIngredientId={typeof deliveryModalOpen === "string" ? deliveryModalOpen : undefined}
           onClose={() => setDeliveryModalOpen(false)}
           onSave={(data) => {
             onAddMovement?.(data);
             setDeliveryModalOpen(false);
+          }}
+          onSaveAndContinue={(data) => {
+            onAddMovement?.(data);
           }}
         />
       )}
@@ -476,6 +494,7 @@ export default function StockManager({
       {wasteModalOpen && (
         <WasteModal
           ingredients={ingredients}
+          initialIngredientId={typeof wasteModalOpen === "string" ? wasteModalOpen : undefined}
           onClose={() => setWasteModalOpen(false)}
           onSave={(data) => {
             onAddMovement?.(data);
@@ -504,89 +523,271 @@ export default function StockManager({
 }
 
 /* ══════════════════════════════════════════════════════════════
+   SÉLECTEUR D'INGRÉDIENT INTELLIGENT (RECHERCHE + RAYONS)
+══════════════════════════════════════════════════════════════ */
+
+function IngredientPicker({ ingredients, selectedId, onSelect }) {
+  const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("all");
+
+  const categories = useMemo(() => {
+    const set = new Set(ingredients.map((i) => i.category).filter(Boolean));
+    return Array.from(set);
+  }, [ingredients]);
+
+  const filtered = useMemo(() => {
+    return ingredients.filter((i) => {
+      const matchCat = selectedCategory === "all" || i.category === selectedCategory;
+      const matchSearch =
+        !search.trim() ||
+        i.name.toLowerCase().includes(search.toLowerCase()) ||
+        (i.supplier && i.supplier.toLowerCase().includes(search.toLowerCase()));
+      return matchCat && matchSearch;
+    });
+  }, [ingredients, selectedCategory, search]);
+
+  const selected = ingredients.find((i) => i.id === selectedId);
+
+  return (
+    <div className="space-y-2">
+      {/* Barre de recherche */}
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8A8378]" />
+        <input
+          type="text"
+          placeholder="Rechercher un ingrédient ou fournisseur…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-9 pr-8 py-2 text-xs rounded-xl bg-black/5 border border-black/10 focus:outline-none focus:border-[#C1440E] focus:bg-white transition-all font-medium"
+          autoFocus
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[#8A8378] hover:text-[#2B2622]"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Filtres par catégorie / rayon */}
+      <div className="flex gap-1 overflow-x-auto rf-scrollbar pb-1">
+        <button
+          type="button"
+          onClick={() => setSelectedCategory("all")}
+          className="rf-tap px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap"
+          style={{
+            background: selectedCategory === "all" ? "#2B2622" : "rgba(0,0,0,0.05)",
+            color: selectedCategory === "all" ? "#FAF6EE" : "#5B5346",
+          }}
+        >
+          Tous ({ingredients.length})
+        </button>
+        {categories.map((cat) => {
+          const count = ingredients.filter((i) => i.category === cat).length;
+          const active = selectedCategory === cat;
+          return (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setSelectedCategory(cat)}
+              className="rf-tap px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap"
+              style={{
+                background: active ? "#C1440E" : "rgba(0,0,0,0.05)",
+                color: active ? "#FAF6EE" : "#5B5346",
+              }}
+            >
+              {cat} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Liste déroulante interactive des ingrédients */}
+      <div className="max-h-[170px] overflow-y-auto rf-scrollbar space-y-1 border border-black/10 rounded-xl p-1.5 bg-black/[.01]">
+        {filtered.map((i) => {
+          const isSelected = i.id === selectedId;
+          const isOut = i.currentStock <= 0;
+          const isLow = !isOut && i.currentStock <= i.minThreshold;
+
+          return (
+            <button
+              key={i.id}
+              type="button"
+              onClick={() => onSelect(i)}
+              className={`rf-tap w-full p-2 rounded-lg text-left flex items-center justify-between gap-2 transition-all ${
+                isSelected
+                  ? "bg-[#C1440E] text-white shadow-xs font-bold"
+                  : "bg-white hover:bg-black/5 text-[#2B2622] border border-black/5"
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 truncate">
+                  <span className="text-xs truncate">{i.name}</span>
+                  <span
+                    className={`text-[9px] px-1.5 py-0.2 rounded-full font-medium ${
+                      isSelected ? "bg-white/20 text-white" : "bg-black/5 text-[#6B6355]"
+                    }`}
+                  >
+                    {i.category}
+                  </span>
+                </div>
+                {i.supplier && (
+                  <p className={`text-[10px] truncate ${isSelected ? "text-white/80" : "text-[#8A8378]"}`}>
+                    Fournisseur : {i.supplier}
+                  </p>
+                )}
+              </div>
+
+              <div className="shrink-0 text-right">
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold inline-block ${
+                    isSelected
+                      ? "bg-white/20 text-white"
+                      : isOut
+                      ? "bg-[#C1361B]/15 text-[#C1361B]"
+                      : isLow
+                      ? "bg-[#D9A441]/15 text-[#B5793A]"
+                      : "bg-[#2E9E5B]/15 text-[#2E9E5B]"
+                  }`}
+                >
+                  {i.currentStock} {i.unit}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+        {filtered.length === 0 && (
+          <p className="text-center text-xs text-[#8A8378] py-4">
+            Aucun ingrédient ne correspond à « {search} »
+          </p>
+        )}
+      </div>
+
+      {/* Résumé de l'ingrédient actif */}
+      {selected && (
+        <div className="flex items-center justify-between p-2 rounded-xl bg-[#2E9E5B]/10 border border-[#2E9E5B]/20 text-xs">
+          <div className="flex items-center gap-2 truncate">
+            <span className="font-bold text-[#2B2622]">Sélectionné :</span>
+            <span className="font-semibold text-[#2E9E5B] truncate">{selected.name}</span>
+            <span className="text-[10px] text-[#6B6355]">({selected.unit})</span>
+          </div>
+          <span className="text-[10px] font-bold text-[#6B6355] shrink-0">
+            Stock actuel : {selected.currentStock} {selected.unit}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MODALES SPÉCIALISÉES
 ══════════════════════════════════════════════════════════════ */
 
-function DeliveryModal({ ingredients, onClose, onSave }) {
-  const [ingredientId, setIngredientId] = useState(ingredients[0]?.id || "");
+function DeliveryModal({ ingredients, initialIngredientId, onClose, onSave, onSaveAndContinue }) {
+  const [ingredientId, setIngredientId] = useState(
+    initialIngredientId || ingredients[0]?.id || ""
+  );
   const [quantity, setQuantity] = useState("");
   const [unitCost, setUnitCost] = useState("");
   const [reason, setReason] = useState("");
 
   const selected = ingredients.find((i) => i.id === ingredientId);
 
-  return (
-    <Modal title="📦 Réception d'une livraison fournisseur" onClose={onClose}>
-      <Field label="Ingrédient réceptionné">
-        <select
-          className={inputCls}
-          value={ingredientId}
-          onChange={(e) => {
-            setIngredientId(e.target.value);
-            const found = ingredients.find((i) => i.id === e.target.value);
-            if (found && !unitCost) setUnitCost(found.costPerUnit || "");
-          }}
-        >
-          {ingredients.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.name} ({i.unit}) — Fournisseur: {i.supplier || "Standard"}
-            </option>
-          ))}
-        </select>
-      </Field>
+  // Synchroniser le prix d'achat si l'ingrédient en a un
+  useEffect(() => {
+    if (selected && selected.costPerUnit && !unitCost) {
+      setUnitCost(selected.costPerUnit);
+    }
+  }, [selected?.id]);
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={`Quantité reçue (${selected?.unit || "unités"})`}>
-          <input
-            type="number"
-            min="0.1"
-            step="any"
-            className={inputCls}
-            placeholder="Ex : 50"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
+  const handlePick = (ing) => {
+    setIngredientId(ing.id);
+    if (ing.costPerUnit) setUnitCost(ing.costPerUnit);
+  };
+
+  const submit = (keepOpen = false) => {
+    const q = parseFloat(quantity);
+    if (!q || q <= 0) return alert("Veuillez saisir une quantité positive.");
+    const payload = {
+      ingredientId,
+      type: "DELIVERY",
+      quantity: q,
+      unitCost: unitCost !== "" && !isNaN(Number(unitCost)) ? parseFloat(unitCost) : selected?.costPerUnit,
+      reason: reason.trim() || `Livraison ${selected?.supplier || "fournisseur"}`,
+    };
+
+    if (keepOpen) {
+      onSaveAndContinue?.(payload);
+      setQuantity("");
+    } else {
+      onSave(payload);
+    }
+  };
+
+  return (
+    <Modal title="📦 Réception d'une livraison fournisseur" onClose={onClose} wide>
+      <div className="space-y-3">
+        <Field label="Rechercher et sélectionner l'ingrédient">
+          <IngredientPicker
+            ingredients={ingredients}
+            selectedId={ingredientId}
+            onSelect={handlePick}
           />
         </Field>
-        <Field label="Prix d'achat unitaire HT (€)">
+
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <Field label={`Quantité reçue (${selected?.unit || "unités"})`}>
+            <input
+              type="number"
+              min="0.01"
+              step="any"
+              className={inputCls}
+              placeholder="Ex : 50"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+            />
+          </Field>
+          <Field label="Prix d'achat unitaire HT (€)">
+            <input
+              type="number"
+              min="0"
+              step="0.001"
+              className={inputCls}
+              placeholder={selected?.costPerUnit ? `${selected.costPerUnit} €` : "0.00"}
+              value={unitCost}
+              onChange={(e) => setUnitCost(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <Field label="Numéro de bon de livraison / Facture">
           <input
-            type="number"
-            min="0"
-            step="0.001"
+            type="text"
             className={inputCls}
-            placeholder={selected?.costPerUnit ? `${selected.costPerUnit} €` : "0.00"}
-            value={unitCost}
-            onChange={(e) => setUnitCost(e.target.value)}
+            placeholder="Ex : BL-2026-9481 Sysco / Metro"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
           />
         </Field>
       </div>
 
-      <Field label="Numéro de bon de livraison / Facture">
-        <input
-          type="text"
-          className={inputCls}
-          placeholder="Ex : BL-2026-9481 Sysco"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
-      </Field>
-
-      <div className="flex gap-2 mt-4">
-        <button onClick={onClose} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">
+      <div className="flex gap-2 mt-4 pt-2 border-t border-black/5">
+        <button onClick={onClose} className="rf-tap px-4 py-2.5 rounded-xl text-sm font-semibold bg-black/5">
           Annuler
         </button>
         <button
-          onClick={() => {
-            const q = parseFloat(quantity);
-            if (!q || q <= 0) return alert("Veuillez saisir une quantité positive.");
-            onSave({
-              ingredientId,
-              type: "DELIVERY",
-              quantity: q,
-              unitCost: unitCost ? parseFloat(unitCost) : selected?.costPerUnit,
-              reason: reason.trim() || `Livraison ${selected?.supplier || "fournisseur"}`,
-            });
-          }}
-          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#2E9E5B]"
+          onClick={() => submit(true)}
+          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold border border-[#2E9E5B] text-[#2E9E5B] bg-[#2E9E5B]/5 hover:bg-[#2E9E5B]/10"
+        >
+          Valider & ajouter un autre
+        </button>
+        <button
+          onClick={() => submit(false)}
+          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#2E9E5B] shadow-xs"
         >
           Valider la réception
         </button>
@@ -595,67 +796,71 @@ function DeliveryModal({ ingredients, onClose, onSave }) {
   );
 }
 
-function WasteModal({ ingredients, onClose, onSave }) {
-  const [ingredientId, setIngredientId] = useState(ingredients[0]?.id || "");
+function WasteModal({ ingredients, initialIngredientId, onClose, onSave }) {
+  const [ingredientId, setIngredientId] = useState(
+    initialIngredientId || ingredients[0]?.id || ""
+  );
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("Casse ou gâchis en préparation");
 
   const selected = ingredients.find((i) => i.id === ingredientId);
 
+  const handlePick = (ing) => {
+    setIngredientId(ing.id);
+  };
+
+  const submit = () => {
+    const q = parseFloat(quantity);
+    if (!q || q <= 0) return alert("Veuillez saisir une quantité positive.");
+    onSave({
+      ingredientId,
+      type: "WASTE",
+      quantity: -q, // Négatif pour décompter
+      reason,
+    });
+  };
+
   return (
-    <Modal title="⚠️ Déclaration de perte ou démarque" onClose={onClose}>
-      <Field label="Ingrédient concerné">
-        <select
-          className={inputCls}
-          value={ingredientId}
-          onChange={(e) => setIngredientId(e.target.value)}
-        >
-          {ingredients.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.name} (Stock actuel : {i.currentStock} {i.unit})
-            </option>
-          ))}
-        </select>
-      </Field>
+    <Modal title="⚠️ Déclaration de perte ou démarque" onClose={onClose} wide>
+      <div className="space-y-3">
+        <Field label="Rechercher et sélectionner l'ingrédient concerné">
+          <IngredientPicker
+            ingredients={ingredients}
+            selectedId={ingredientId}
+            onSelect={handlePick}
+          />
+        </Field>
 
-      <Field label={`Quantité perdue (${selected?.unit || "unités"})`}>
-        <input
-          type="number"
-          min="0.1"
-          step="any"
-          className={inputCls}
-          placeholder="Ex : 2"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-        />
-      </Field>
+        <Field label={`Quantité perdue (${selected?.unit || "unités"})`}>
+          <input
+            type="number"
+            min="0.01"
+            step="any"
+            className={inputCls}
+            placeholder="Ex : 2"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+          />
+        </Field>
 
-      <Field label="Motif de la perte (obligatoire pour conformité)">
-        <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
-          <option value="Casse ou accident en service">Casse ou accident en service</option>
-          <option value="Dépassement de DLC / Périmé">Dépassement de DLC / Périmé</option>
-          <option value="Erreur de dosage ou cuisson brûlée">Erreur de dosage ou cuisson brûlée</option>
-          <option value="Défaut qualité fournisseur">Défaut qualité fournisseur</option>
-          <option value="Régularisation d'écart d'inventaire">Régularisation d'écart d'inventaire</option>
-        </select>
-      </Field>
+        <Field label="Motif de la perte (obligatoire pour conformité)">
+          <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
+            <option value="Casse ou accident en service">Casse ou accident en service</option>
+            <option value="Dépassement de DLC / Périmé">Dépassement de DLC / Périmé</option>
+            <option value="Erreur de dosage ou cuisson brûlée">Erreur de dosage ou cuisson brûlée</option>
+            <option value="Défaut qualité fournisseur">Défaut qualité fournisseur</option>
+            <option value="Régularisation d'écart d'inventaire">Régularisation d'écart d'inventaire</option>
+          </select>
+        </Field>
+      </div>
 
-      <div className="flex gap-2 mt-4">
+      <div className="flex gap-2 mt-4 pt-2 border-t border-black/5">
         <button onClick={onClose} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">
           Annuler
         </button>
         <button
-          onClick={() => {
-            const q = parseFloat(quantity);
-            if (!q || q <= 0) return alert("Veuillez saisir une quantité positive.");
-            onSave({
-              ingredientId,
-              type: "WASTE",
-              quantity: -q, // Négatif pour décompter
-              reason,
-            });
-          }}
-          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#C1361B]"
+          onClick={submit}
+          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#C1361B] shadow-xs"
         >
           Enregistrer la perte
         </button>
@@ -709,19 +914,17 @@ function IngredientEditorModal({ ingredient, onClose, onSave }) {
         </Field>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        {isNew && (
-          <Field label="Stock Initial">
-            <input
-              type="number"
-              min="0"
-              step="any"
-              className={inputCls}
-              value={currentStock}
-              onChange={(e) => setCurrentStock(parseFloat(e.target.value) || 0)}
-            />
-          </Field>
-        )}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Field label={isNew ? "Stock Initial" : `Stock Actuel (${unit})`}>
+          <input
+            type="number"
+            min="0"
+            step="any"
+            className={inputCls}
+            value={currentStock}
+            onChange={(e) => setCurrentStock(e.target.value)}
+          />
+        </Field>
         <Field label="Seuil Critique (Min)">
           <input
             type="number"
@@ -729,7 +932,7 @@ function IngredientEditorModal({ ingredient, onClose, onSave }) {
             step="any"
             className={inputCls}
             value={minThreshold}
-            onChange={(e) => setMinThreshold(parseFloat(e.target.value) || 0)}
+            onChange={(e) => setMinThreshold(e.target.value)}
           />
         </Field>
         <Field label="Stock Cible (Idéal)">
@@ -739,7 +942,7 @@ function IngredientEditorModal({ ingredient, onClose, onSave }) {
             step="any"
             className={inputCls}
             value={idealStock}
-            onChange={(e) => setIdealStock(parseFloat(e.target.value) || 0)}
+            onChange={(e) => setIdealStock(e.target.value)}
           />
         </Field>
         <Field label="Prix d'achat HT (€)">
@@ -749,7 +952,7 @@ function IngredientEditorModal({ ingredient, onClose, onSave }) {
             step="0.001"
             className={inputCls}
             value={costPerUnit}
-            onChange={(e) => setCostPerUnit(parseFloat(e.target.value) || 0)}
+            onChange={(e) => setCostPerUnit(e.target.value)}
           />
         </Field>
       </div>

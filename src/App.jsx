@@ -215,6 +215,10 @@ export default function App() {
   useEffect(() => { saveCollection("reservations", reservations); }, [reservations]);
   useEffect(() => { saveCollection("history", history); }, [history]);
   useEffect(() => { saveCollection("closings", closings); }, [closings]);
+  useEffect(() => { saveCollection("products", products); }, [products]);
+  useEffect(() => { saveCollection("ingredients", ingredients); }, [ingredients]);
+  useEffect(() => { saveCollection("recipes", recipes); }, [recipes]);
+  useEffect(() => { saveCollection("stockMovements", stockMovements); }, [stockMovements]);
 
   // ── Synchronisation Temps Réel Socket.IO ───────────────────
   useEffect(() => {
@@ -1024,9 +1028,92 @@ export default function App() {
   };
 
   // ── Actions Gestion : produits ─────────────────────────────
-  const addProduct    = (data) => setProducts((prev) => [...prev, { id: uid("prod"), allergens: [], ...data }]);
-  const updateProduct = (id, data) => setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
-  const deleteProduct = (id) => setProducts((prev) => prev.filter((p) => p.id !== id));
+  const addProduct = (data) => {
+    if (data.directStock) {
+      const prodId = data.id || uid("prod");
+      const ingId = uid("ing");
+      const rcId = uid("rc");
+      const initialStock = Number(data.initialStock) || 0;
+      const minThreshold = Number(data.minThreshold) || 5;
+      const costPerUnit = Number(data.costPerUnit) || 0;
+      const ingCategory = ["boissons", "bieres", "vins", "cafes"].includes(data.cat) ? "Boissons" : "Épicerie";
+
+      const newProduct = {
+        id: prodId,
+        allergens: [],
+        ...data,
+        available: initialStock > 0 ? (data.available !== undefined ? data.available : true) : false,
+      };
+
+      const newIngredient = {
+        id: ingId,
+        name: data.name,
+        category: ingCategory,
+        unit: "piece",
+        currentStock: initialStock,
+        minThreshold,
+        idealStock: Math.max(20, initialStock * 1.5),
+        costPerUnit,
+        supplier: null,
+      };
+
+      const newRecipe = {
+        id: rcId,
+        productId: prodId,
+        ingredientId: ingId,
+        ingredientName: data.name,
+        quantity: 1,
+        unit: "piece",
+        costPerUnit,
+        currentStock: initialStock,
+        isCritical: true,
+        notes: "Suivi de stock direct unitaire",
+      };
+
+      setProducts((prev) => [...prev, newProduct]);
+      setIngredients((prev) => [...prev, newIngredient]);
+      setRecipes((prev) => [...prev, newRecipe]);
+
+      if (initialStock > 0) {
+        setStockMovements((prev) => [
+          {
+            id: uid("mov"),
+            ingredientId: ingId,
+            ingredientName: data.name,
+            category: ingCategory,
+            unit: "piece",
+            type: "DELIVERY",
+            quantity: initialStock,
+            unitCost: costPerUnit,
+            reason: `Stock initial lors de la création du produit "${data.name}"`,
+            createdAt: Date.now(),
+          },
+          ...prev,
+        ]);
+      }
+
+      emitOrQueue("catalog:create_product_with_stock", { ...data, id: prodId });
+      pushToast(`Produit "${data.name}" créé avec ${initialStock} en stock`, "server");
+    } else {
+      const newProduct = { id: data.id || uid("prod"), allergens: [], ...data };
+      setProducts((prev) => [...prev, newProduct]);
+      emitOrQueue("catalog:create_product", newProduct);
+      pushToast(`Produit "${data.name}" créé`, "server");
+    }
+  };
+
+  const updateProduct = (id, data) => {
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
+    emitOrQueue("catalog:update_product", { id, ...data });
+    pushToast("Produit mis à jour", "server");
+  };
+
+  const deleteProduct = (id) => {
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+    setRecipes((prev) => prev.filter((r) => r.productId !== id));
+    emitOrQueue("catalog:delete_product", { id });
+    pushToast("Produit supprimé", "server");
+  };
 
   // ── Actions Gestion : menus ────────────────────────────────
   const addMenu    = (data) => setMenus((prev) => [...prev, { id: uid("menu"), groups: [], ...data }]);
@@ -1240,6 +1327,9 @@ export default function App() {
           tables={tables}
           orders={orders}
           isMobile={isMobile}
+          currentStaff={currentStaff}
+          roles={roles}
+          onToggleProductAvailable={handleToggleProductAvailable}
           onBack={() => setServerView("plan")}
           onAdd={(p) => addProductToOrder(activeTable.id, p)}
           onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(activeTable.id, menuProduct, composition)}

@@ -10,6 +10,7 @@ import { TablesModule } from "../tables/tables.module";
 import { PrinterModule } from "../printer/printer.module";
 import { RecipesModule } from "../recipes/recipes.module";
 import { ClosingModule } from "../closing/closing.module";
+import { CatalogModule } from "../catalog/catalog.module";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ClosingModule } from "../closing/closing.module";
     PrinterModule,
     RecipesModule,
     ClosingModule,
+    CatalogModule,
   ],
   providers: [WebsocketGateway],
   exports: [WebsocketGateway],

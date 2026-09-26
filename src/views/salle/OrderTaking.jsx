@@ -31,6 +31,8 @@ export default function OrderTaking({
   table, order, now, products, isMobile,
   recipes = [], ingredients = [], config = {},
   tables = [], orders = [],
+  currentStaff, roles,
+  onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
   onQty, onRemove, onNote,
   onSend, onServe, onCheckout, onBackToPlan, onToast,
@@ -40,6 +42,7 @@ export default function OrderTaking({
   onTransferTable,
   onMergeTable,
 }) {
+  const isHeadWaiterOrAdmin = currentStaff?.roleId === "head_waiter" || currentStaff?.roleId === "admin";
   const [activeCat, setActiveCat]     = useState(CATEGORIES[0].id);
   const [query, setQuery]             = useState("");
   const [noteFor, setNoteFor]         = useState(null);
@@ -112,8 +115,16 @@ export default function OrderTaking({
 
   const handleProductTap = (p) => {
     const portions = getPortionsAvailable(p);
-    if (!isAvailable(p) || portions === 0) {
-      onToast?.(`⛔ ${p.name} est en rupture de stock`, "warn");
+    const outOfStock = !isAvailable(p) || portions === 0;
+
+    if (outOfStock) {
+      if (isHeadWaiterOrAdmin) {
+        if (confirm(`Le produit "${p.name}" est en rupture. En tant que responsable de salle, souhaitez-vous le remettre en vente ?`)) {
+          onToggleProductAvailable?.(p.id);
+        }
+      } else {
+        onToast?.(`⛔ ${p.name} est en rupture de stock. Contactez le responsable de salle pour modifier la disponibilité.`, "warn");
+      }
       return;
     }
     if (p.isMenu) setComposerMenu(p);
@@ -178,6 +189,8 @@ export default function OrderTaking({
             portionsLeft={getPortionsAvailable(p)}
             config={config}
             now={now}
+            canManageAvailability={isHeadWaiterOrAdmin}
+            onToggleAvailability={() => onToggleProductAvailable?.(p.id)}
             onTap={() => handleProductTap(p)}
           />
         ))}
@@ -528,7 +541,7 @@ export default function OrderTaking({
 
 /* ── Sous-composants ─────────────────────────────────────────── */
 
-function ProductCard({ p, isMobile, onTap, portionsLeft, config, now }) {
+function ProductCard({ p, isMobile, onTap, portionsLeft, config, now, canManageAvailability, onToggleAvailability }) {
   const cat = CATEGORIES.find((c) => c.id === p.cat);
   const baseAvailable = isAvailable(p);
   const isOutOfStock = !baseAvailable || portionsLeft === 0;
@@ -544,12 +557,51 @@ function ProductCard({ p, isMobile, onTap, portionsLeft, config, now }) {
       style={{ opacity: !isOutOfStock ? 1 : 0.6 }}
     >
       {isOutOfStock ? (
-        <span className="absolute top-1.5 right-1.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" style={{ background: "#C1361B", color: "#FFF7ED" }}>
-          <Ban size={9} /> RUPTURE
-        </span>
+        <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
+          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" style={{ background: "#C1361B", color: "#FFF7ED" }}>
+            <Ban size={9} /> RUPTURE
+          </span>
+          {canManageAvailability && (
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleAvailability?.();
+              }}
+              title="Responsable de salle : Remettre en vente"
+              className="text-[9px] px-1.5 py-0.5 rounded-full bg-black/10 hover:bg-black/20 text-[#2B2622] font-bold cursor-pointer"
+            >
+              Remettre
+            </span>
+          )}
+        </div>
       ) : portionsLeft !== null && portionsLeft <= 4 ? (
-        <span className="absolute top-1.5 right-1.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs" style={{ background: "#D9A441", color: "#FFF7ED" }}>
-          Plus que {portionsLeft}
+        <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
+          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs" style={{ background: "#D9A441", color: "#FFF7ED" }}>
+            Plus que {portionsLeft}
+          </span>
+          {canManageAvailability && (
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleAvailability?.();
+              }}
+              title="Responsable de salle : Basculer en rupture"
+              className="text-[9px] px-1.5 py-0.5 rounded-full bg-black/10 hover:bg-black/20 text-[#2B2622] font-bold cursor-pointer"
+            >
+              86
+            </span>
+          )}
+        </div>
+      ) : canManageAvailability ? (
+        <span
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleAvailability?.();
+          }}
+          title="Responsable de salle : Marquer rupture (86)"
+          className="absolute top-1.5 right-1.5 opacity-0 hover:opacity-100 text-[8px] px-1.5 py-0.5 rounded-full bg-black/10 text-[#5B5346] font-bold cursor-pointer transition-opacity z-10"
+        >
+          86
         </span>
       ) : null}
       <div className={`rounded-lg flex items-center justify-center shrink-0 ${isMobile ? "w-14 h-14 text-3xl" : "w-12 h-12 text-2xl"}`}

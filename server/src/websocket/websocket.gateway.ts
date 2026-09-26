@@ -19,6 +19,7 @@ import { TablesService } from "../tables/tables.service";
 import { PrinterService } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
+import { CatalogService } from "../catalog/catalog.service";
 
 @WebSocketGateway({
   cors: {
@@ -42,7 +43,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     private tablesService: TablesService,
     private printerService: PrinterService,
     private recipesService: RecipesService,
-    private closingService: ClosingService
+    private closingService: ClosingService,
+    private catalogService: CatalogService
   ) {}
 
   async handleConnection(client: Socket) {
@@ -748,7 +750,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const { id, ...rest } = data;
       const updated = await this.stockService.updateIngredient(id, rest);
       const ingredients = await this.stockService.findAllIngredients();
+      const movements = await this.stockService.getMovements(60);
       this.server.emit("stock:updated", ingredients);
+      this.server.emit("stock:movements_updated", movements);
       return { ok: true, ingredient: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -792,6 +796,81 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }));
       this.server.emit("recipe:updated", parsedRecipes);
       return { ok: true, recipes: parsedRecipes };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("catalog:create_product")
+  async handleCreateProduct(@MessageBody() data: any) {
+    try {
+      const created = await this.catalogService.createProduct(data);
+      const allProducts = await this.catalogService.getProducts();
+      this.server.emit("catalog:products_updated", allProducts);
+      return { ok: true, product: created };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("catalog:create_product_with_stock")
+  async handleCreateProductWithStock(@MessageBody() data: any) {
+    try {
+      const result = await this.catalogService.createProductWithStock(data);
+      const allProducts = await this.catalogService.getProducts();
+      const allIngredients = await this.stockService.findAllIngredients();
+      const movements = await this.stockService.getMovements(60);
+      const recipes = await this.prisma.recipeItem.findMany({
+        include: {
+          ingredient: {
+            select: { id: true, name: true, unit: true, costPerUnit: true, currentStock: true },
+          },
+        },
+      });
+      const parsedRecipes = recipes.map((rc) => ({
+        id: rc.id,
+        productId: rc.productId,
+        ingredientId: rc.ingredientId,
+        ingredientName: rc.ingredient.name,
+        quantity: rc.quantity,
+        unit: rc.unit,
+        costPerUnit: rc.ingredient.costPerUnit,
+        currentStock: rc.ingredient.currentStock,
+        isCritical: rc.isCritical,
+        notes: rc.notes || "",
+      }));
+
+      this.server.emit("catalog:products_updated", allProducts);
+      this.server.emit("stock:updated", allIngredients);
+      this.server.emit("stock:movements_updated", movements);
+      this.server.emit("recipe:updated", parsedRecipes);
+
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("catalog:update_product")
+  async handleUpdateProduct(@MessageBody() data: { id: string; [key: string]: any }) {
+    try {
+      const { id, ...rest } = data;
+      const updated = await this.catalogService.updateProduct(id, rest);
+      const allProducts = await this.catalogService.getProducts();
+      this.server.emit("catalog:products_updated", allProducts);
+      return { ok: true, product: updated };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @SubscribeMessage("catalog:delete_product")
+  async handleDeleteProduct(@MessageBody() data: { id: string }) {
+    try {
+      await this.catalogService.deleteProduct(data.id);
+      const allProducts = await this.catalogService.getProducts();
+      this.server.emit("catalog:products_updated", allProducts);
+      return { ok: true, id: data.id };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

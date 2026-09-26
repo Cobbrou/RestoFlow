@@ -116,6 +116,7 @@ export class StockService {
       name?: string;
       category?: string;
       unit?: string;
+      currentStock?: number;
       minThreshold?: number;
       idealStock?: number;
       costPerUnit?: number;
@@ -126,12 +127,27 @@ export class StockService {
     const existing = await this.prisma.ingredient.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException(`Ingrédient introuvable : ${id}`);
 
+    if (data.currentStock !== undefined && Number(data.currentStock) !== existing.currentStock) {
+      const delta = Number(data.currentStock) - existing.currentStock;
+      await this.prisma.stockMovement.create({
+        data: {
+          id: `mov_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          ingredientId: id,
+          type: "ADJUSTMENT",
+          quantity: delta,
+          unitCost: data.costPerUnit !== undefined ? Number(data.costPerUnit) : existing.costPerUnit,
+          reason: "Ajustement d'inventaire",
+        },
+      });
+    }
+
     return this.prisma.ingredient.update({
       where: { id },
       data: {
         name: data.name ?? existing.name,
         category: data.category ?? existing.category,
         unit: data.unit ?? existing.unit,
+        currentStock: data.currentStock !== undefined ? Number(data.currentStock) : existing.currentStock,
         minThreshold: data.minThreshold !== undefined ? Number(data.minThreshold) : existing.minThreshold,
         idealStock: data.idealStock !== undefined ? Number(data.idealStock) : existing.idealStock,
         costPerUnit: data.costPerUnit !== undefined ? Number(data.costPerUnit) : existing.costPerUnit,

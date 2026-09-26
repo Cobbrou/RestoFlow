@@ -262,11 +262,32 @@ function TableForm({ table, defaultNumber, onCancel, onSave }) {
    PRODUITS
 ══════════════════════════════════════════════════════════════ */
 
-function ProductManager({ products, onAddProduct, onUpdateProduct, onDeleteProduct }) {
+function ProductManager({ products, ingredients, recipes, onAddProduct, onUpdateProduct, onDeleteProduct }) {
   const [editing,   setEditing]   = useState(null);
   const [filterCat, setFilterCat] = useState(null);
   const realCats = CATEGORIES.filter((c) => c.id !== "menus");
   const shown = filterCat ? products.filter((p) => p.cat === filterCat) : products;
+
+  const getProductStockInfo = (product) => {
+    const prodRecipes = recipes?.filter((r) => r.productId === product.id) || [];
+    if (prodRecipes.length === 0) return { tracked: false, portions: null };
+
+    let minPossible = Infinity;
+    let criticalCount = 0;
+    for (const rc of prodRecipes) {
+      if (rc.isCritical && rc.quantity > 0) {
+        criticalCount++;
+        const ing = ingredients?.find((i) => i.id === rc.ingredientId);
+        const currentStock = ing ? ing.currentStock : rc.currentStock ?? 0;
+        const possible = Math.floor(currentStock / rc.quantity);
+        if (possible < minPossible) {
+          minPossible = Math.max(0, possible);
+        }
+      }
+    }
+    const portions = minPossible === Infinity ? null : minPossible;
+    return { tracked: true, portions, recipeCount: prodRecipes.length, criticalCount };
+  };
 
   return (
     <div>
@@ -275,15 +296,18 @@ function ProductManager({ products, onAddProduct, onUpdateProduct, onDeleteProdu
           <button onClick={() => setFilterCat(null)}
             className="rf-tap px-3 py-1.5 rounded-full text-xs font-semibold"
             style={{ background: filterCat === null ? "#2B2622" : "rgba(0,0,0,.05)", color: filterCat === null ? "#FAF6EE" : "#5B5346" }}>
-            Tous
+            Tous ({products.length})
           </button>
-          {realCats.map((c) => (
-            <button key={c.id} onClick={() => setFilterCat(c.id)}
-              className="rf-tap px-3 py-1.5 rounded-full text-xs font-semibold"
-              style={{ background: filterCat === c.id ? c.accent : "rgba(0,0,0,.05)", color: filterCat === c.id ? "#FAF6EE" : "#5B5346" }}>
-              {c.name}
-            </button>
-          ))}
+          {realCats.map((c) => {
+            const count = products.filter((p) => p.cat === c.id).length;
+            return (
+              <button key={c.id} onClick={() => setFilterCat(c.id)}
+                className="rf-tap px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{ background: filterCat === c.id ? c.accent : "rgba(0,0,0,.05)", color: filterCat === c.id ? "#FAF6EE" : "#5B5346" }}>
+                {c.name} ({count})
+              </button>
+            );
+          })}
         </div>
         <button onClick={() => setEditing("new")}
           className="rf-tap flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white shrink-0"
@@ -292,36 +316,53 @@ function ProductManager({ products, onAddProduct, onUpdateProduct, onDeleteProdu
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {shown.map((p) => {
           const cat = CATEGORIES.find((c) => c.id === p.cat);
           const available = isAvailable(p);
+          const stockInfo = getProductStockInfo(p);
+
           return (
-            <div key={p.id} className="rounded-xl border border-black/10 bg-white p-3 flex gap-3">
-              <div className="w-11 h-11 rounded-lg flex items-center justify-center text-xl shrink-0"
+            <div key={p.id} className="rounded-xl border border-black/10 bg-white p-3 flex gap-3 shadow-xs">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0"
                 style={{ background: (cat?.accent || "#999") + "22", filter: available ? "none" : "grayscale(1)" }}>
                 {p.emoji || "🍽️"}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-1">
-                  <span className="text-sm font-semibold text-[#2B2622] leading-tight">{p.name}</span>
+                  <span className="text-sm font-semibold text-[#2B2622] leading-tight truncate">{p.name}</span>
                   <div className="flex gap-1 shrink-0">
-                    <button onClick={() => setEditing(p)} className="rf-tap p-1 rounded-full bg-black/5"><Pencil size={12} /></button>
-                    <button onClick={() => onDeleteProduct(p.id)} className="rf-tap p-1 rounded-full bg-black/5 text-[#C1361B]"><Trash2 size={12} /></button>
+                    <button onClick={() => setEditing(p)} className="rf-tap p-1 rounded-full bg-black/5" title="Modifier"><Pencil size={12} /></button>
+                    <button onClick={() => onDeleteProduct(p.id)} className="rf-tap p-1 rounded-full bg-black/5 text-[#C1361B]" title="Supprimer"><Trash2 size={12} /></button>
                   </div>
                 </div>
-                <p className="text-[11px] text-[#8A8378] leading-snug">{p.desc}</p>
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-xs font-bold">{money(p.price)}</span>
-                  <span className="text-[10px] text-[#8A8378]">{cat?.name}</span>
-                </div>
+                <p className="text-[11px] text-[#8A8378] leading-snug line-clamp-1">{p.desc || "Aucune description"}</p>
+
                 <div className="flex items-center justify-between mt-1.5">
+                  <span className="text-xs font-bold text-[#2B2622]">{money(p.price)}</span>
+                  {stockInfo.tracked ? (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                      stockInfo.portions === 0
+                        ? "bg-[#C1361B]/10 text-[#C1361B]"
+                        : stockInfo.portions <= 5
+                        ? "bg-[#D9A441]/15 text-[#B5793A]"
+                        : "bg-[#2E9E5B]/10 text-[#2E9E5B]"
+                    }`}>
+                      <Boxes size={10} />
+                      {stockInfo.portions === 0 ? "Épuisé (0 en stock)" : `${stockInfo.portions} portion${stockInfo.portions > 1 ? "s" : ""}`}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-[#8A8378] italic">Stock non suivi</span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-black/5">
                   <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5"
                     style={{ background: available ? "#4A785622" : "#C1361B22", color: available ? "#4A7856" : "#C1361B" }}>
-                    {available ? "DISPONIBLE" : <><Ban size={9} /> RUPTURE</>}
+                    {available ? "EN VENTE" : <><Ban size={9} /> RUPTURE</>}
                   </span>
                   <button onClick={() => onUpdateProduct(p.id, { available: !available })} className="rf-tap text-[10px] font-semibold text-[#3E7CB1]">
-                    {available ? "Marquer en rupture" : "Remettre disponible"}
+                    {available ? "Marquer rupture" : "Remettre en vente"}
                   </button>
                 </div>
               </div>
@@ -335,6 +376,8 @@ function ProductManager({ products, onAddProduct, onUpdateProduct, onDeleteProdu
         <ProductForm
           product={editing === "new" ? null : editing}
           categories={realCats}
+          recipes={recipes}
+          ingredients={ingredients}
           onCancel={() => setEditing(null)}
           onSave={(data) => {
             if (editing === "new") onAddProduct(data);
@@ -347,7 +390,7 @@ function ProductManager({ products, onAddProduct, onUpdateProduct, onDeleteProdu
   );
 }
 
-function ProductForm({ product, categories, onCancel, onSave }) {
+function ProductForm({ product, categories, recipes, ingredients, onCancel, onSave }) {
   const [name,           setName]           = useState(product?.name           ?? "");
   const [cat,            setCat]            = useState(product?.cat            ?? categories[0]?.id);
   const [price,          setPrice]          = useState(product?.price          ?? "");
@@ -356,18 +399,37 @@ function ProductForm({ product, categories, onCancel, onSave }) {
   const [emoji,          setEmoji]          = useState(product?.emoji          ?? "🍽️");
   const [allergens,      setAllergens]      = useState((product?.allergens     ?? []).join(", "));
   const [available,      setAvailable]      = useState(product ? isAvailable(product) : true);
+
+  // Détection si le produit a déjà un suivi direct ou une recette
+  const existingRecipes = recipes?.filter((r) => r.productId === product?.id) || [];
+  const isDirectRecipe = existingRecipes.length === 1 && existingRecipes[0].quantity === 1 && existingRecipes[0].unit === "piece";
+  const directIng = isDirectRecipe ? ingredients?.find((i) => i.id === existingRecipes[0].ingredientId) : null;
+
+  // Mode de stock: "direct" | "recipe" | "none"
+  const [stockMode, setStockMode] = useState(() => {
+    if (!product) return "direct"; // Par défaut à la création : suivi direct simple recommandé !
+    if (isDirectRecipe) return "direct";
+    if (existingRecipes.length > 0) return "recipe";
+    return "none";
+  });
+
+  const [initialStock, setInitialStock] = useState(directIng?.currentStock ?? 20);
+  const [minThreshold, setMinThreshold] = useState(directIng?.minThreshold ?? 5);
+  const [costPerUnit,  setCostPerUnit]  = useState(directIng?.costPerUnit ?? "");
+
   const valid = name.trim() && price !== "" && !isNaN(Number(price));
 
   return (
-    <Modal title={product ? "Modifier le produit" : "Nouveau produit"} onClose={onCancel}>
+    <Modal title={product ? "Modifier le produit" : "Nouveau produit"} onClose={onCancel} wide>
       <div className="grid grid-cols-[64px_1fr] gap-3">
         <Field label="Icône">
           <input className={inputCls + " text-center text-xl"} value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={2} />
         </Field>
         <Field label="Nom du produit">
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex : Burger Classic" />
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex : Burger Classic, Bière Blonde, Tiramisu…" />
         </Field>
       </div>
+
       <div className="grid grid-cols-3 gap-3">
         <Field label="Catégorie">
           <select className={inputCls} value={cat} onChange={(e) => setCat(e.target.value)}>
@@ -381,18 +443,118 @@ function ProductForm({ product, categories, onCancel, onSave }) {
           <input type="number" step="0.5" min={0} className={inputCls} value={happyHourPrice} onChange={(e) => setHappyHourPrice(e.target.value)} placeholder="Optionnel" />
         </Field>
       </div>
+
       <Field label="Description courte">
-        <input className={inputCls} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Ex : Bœuf, cheddar, oignons confits" />
+        <input className={inputCls} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Ex : Bœuf charolais, cheddar affiné, oignons confits" />
       </Field>
+
       <Field label="Allergènes (séparés par des virgules)">
         <input className={inputCls} value={allergens} onChange={(e) => setAllergens(e.target.value)} placeholder="Ex : Gluten, Lait" />
       </Field>
-      <Field label="Disponibilité">
+
+      {/* ── Section Suivi de Stock Unifiée ── */}
+      <div className="p-3.5 rounded-xl border border-black/10 bg-black/[.02] space-y-3">
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-[#2B2622] block">
+            📦 Suivi du Stock & Inventaire
+          </label>
+          <p className="text-[11px] text-[#8A8378]">
+            Définissez comment ce produit est approvisionné et décompté
+          </p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => setStockMode("direct")}
+            className="rf-tap p-2.5 rounded-xl border text-left text-xs transition-all flex flex-col justify-between"
+            style={{
+              borderColor: stockMode === "direct" ? "#C1440E" : "rgba(0,0,0,0.1)",
+              background: stockMode === "direct" ? "#C1440E10" : "white",
+            }}
+          >
+            <span className="font-bold text-[#2B2622]">🥤 Stock Direct Unitaire</span>
+            <span className="text-[10px] text-[#6B6355] mt-1">1 portion = 1 unité (Boissons, bières, desserts prêts, revente)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStockMode("recipe")}
+            className="rf-tap p-2.5 rounded-xl border text-left text-xs transition-all flex flex-col justify-between"
+            style={{
+              borderColor: stockMode === "recipe" ? "#C1440E" : "rgba(0,0,0,0.1)",
+              background: stockMode === "recipe" ? "#C1440E10" : "white",
+            }}
+          >
+            <span className="font-bold text-[#2B2622]">🍳 Fiche Technique</span>
+            <span className="text-[10px] text-[#6B6355] mt-1">Plat cuisiné complexe avec plusieurs ingrédients</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStockMode("none")}
+            className="rf-tap p-2.5 rounded-xl border text-left text-xs transition-all flex flex-col justify-between"
+            style={{
+              borderColor: stockMode === "none" ? "#C1440E" : "rgba(0,0,0,0.1)",
+              background: stockMode === "none" ? "#C1440E10" : "white",
+            }}
+          >
+            <span className="font-bold text-[#2B2622]">⚪ Aucun Suivi</span>
+            <span className="text-[10px] text-[#6B6355] mt-1">Produit toujours disponible, sans décompte</span>
+          </button>
+        </div>
+
+        {stockMode === "direct" && (
+          <div className="grid grid-cols-3 gap-3 pt-1">
+            <Field label={product ? "Stock actuel (portions)" : "Stock initial (portions)"}>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={inputCls}
+                value={initialStock}
+                onChange={(e) => setInitialStock(e.target.value)}
+                placeholder="Ex : 24"
+              />
+            </Field>
+            <Field label="Seuil d'alerte mini">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className={inputCls}
+                value={minThreshold}
+                onChange={(e) => setMinThreshold(e.target.value)}
+                placeholder="Ex : 5"
+              />
+            </Field>
+            <Field label="Coût d'achat HT (€, opt.)">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className={inputCls}
+                value={costPerUnit}
+                onChange={(e) => setCostPerUnit(e.target.value)}
+                placeholder="Ex : 0.85"
+              />
+            </Field>
+          </div>
+        )}
+
+        {stockMode === "recipe" && (
+          <p className="text-[11px] text-[#5B5346] bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+            ℹ️ Vous pourrez composer la fiche technique (ingrédients, dosages et coûts matière) dans l'onglet <strong>Fiches & Coûts</strong>.
+          </p>
+        )}
+      </div>
+
+      <Field label="Disponibilité immédiate">
         <div className="flex gap-2">
           <button type="button" onClick={() => setAvailable(true)}
             className="rf-tap flex-1 py-2 rounded-lg text-xs font-bold"
             style={{ background: available ? "#4A7856" : "rgba(0,0,0,.05)", color: available ? "#FAF6EE" : "#5B5346" }}>
-            Disponible
+            En vente
           </button>
           <button type="button" onClick={() => setAvailable(false)}
             className="rf-tap flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1"
@@ -401,7 +563,8 @@ function ProductForm({ product, categories, onCancel, onSave }) {
           </button>
         </div>
       </Field>
-      <div className="flex gap-2 mt-1">
+
+      <div className="flex gap-2 mt-2">
         <button onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
         <button disabled={!valid}
           onClick={() => onSave({
@@ -411,6 +574,10 @@ function ProductForm({ product, categories, onCancel, onSave }) {
             emoji: emoji || "🍽️",
             allergens: allergens.split(",").map((s) => s.trim()).filter(Boolean),
             available,
+            directStock: stockMode === "direct",
+            initialStock: Number(initialStock) || 0,
+            minThreshold: Number(minThreshold) || 5,
+            costPerUnit: costPerUnit !== "" && !isNaN(Number(costPerUnit)) ? Number(costPerUnit) : 0,
           })}
           className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
           style={{ background: "#C1440E" }}>
