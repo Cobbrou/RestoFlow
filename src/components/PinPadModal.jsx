@@ -3,6 +3,7 @@ import { Delete, ShieldAlert, ArrowLeft, Loader2 } from "lucide-react";
 import Modal from "./Modal.jsx";
 import { getRoleName } from "../utils/permissions.js";
 import { getSocket } from "../services/socket.js";
+import { saveStaffOfflinePin, verifyStaffOfflinePin } from "../services/db.js";
 
 export default function PinPadModal({
   isOpen,
@@ -53,7 +54,7 @@ export default function PinPadModal({
     setError("");
   };
 
-  const verifyPin = (candidatePin) => {
+  const verifyPin = async (candidatePin) => {
     if (!selectedStaff) {
       setError("Veuillez sélectionner un équipier");
       return;
@@ -67,9 +68,10 @@ export default function PinPadModal({
       socket.emit(
         "auth:verify_pin",
         { pin: candidatePin, staffId: selectedStaff.id },
-        (res) => {
+        async (res) => {
           setIsVerifying(false);
           if (res?.ok && res?.staff) {
+            await saveStaffOfflinePin(selectedStaff.id, candidatePin, res.staff);
             onSuccess(res.staff, res.token);
             onClose();
           } else {
@@ -79,28 +81,37 @@ export default function PinPadModal({
         }
       );
     } else {
-      // Fallback via endpoint REST HTTP si le socket n'est pas encore connecté
-      fetch("/api/auth/pin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: candidatePin, staffId: selectedStaff.id }),
-      })
-        .then((r) => r.json())
-        .then((res) => {
-          setIsVerifying(false);
-          if (res?.ok && res?.staff) {
-            onSuccess(res.staff, res.token);
-            onClose();
-          } else {
-            setError(res?.message || "Code PIN incorrect");
-            setTimeout(() => setPin(""), 600);
-          }
-        })
-        .catch(() => {
-          setIsVerifying(false);
-          setError("Erreur de connexion au serveur");
-          setTimeout(() => setPin(""), 600);
+      // Tentative via REST HTTP si possible
+      try {
+        const response = await fetch("/api/auth/pin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin: candidatePin, staffId: selectedStaff.id }),
         });
+        const res = await response.json();
+        setIsVerifying(false);
+        if (res?.ok && res?.staff) {
+          await saveStaffOfflinePin(selectedStaff.id, candidatePin, res.staff);
+          onSuccess(res.staff, res.token);
+          onClose();
+          return;
+        } else {
+          setError(res?.message || "Code PIN incorrect");
+          setTimeout(() => setPin(""), 600);
+          return;
+        }
+      } catch {
+        // Mode 100% hors-ligne : vérification via le hash stocké dans IndexedDB
+        const offlineStaff = await verifyStaffOfflinePin(selectedStaff.id, candidatePin);
+        setIsVerifying(false);
+        if (offlineStaff) {
+          onSuccess(offlineStaff, "offline-token");
+          onClose();
+        } else {
+          setError("Code PIN incorrect ou équipier non encore synchronisé hors-ligne");
+          setTimeout(() => setPin(""), 600);
+        }
+      }
     }
   };
 

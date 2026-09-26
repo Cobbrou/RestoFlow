@@ -12,6 +12,7 @@
 ![Prisma](https://img.shields.io/badge/Prisma-6.4-2D3748?logo=prisma&logoColor=white)
 ![Socket.IO](https://img.shields.io/badge/Socket.IO-4.8-010101?logo=socketdotio&logoColor=white)
 ![Recharts](https://img.shields.io/badge/Recharts-3.10-22B5BF)
+![PWA](https://img.shields.io/badge/PWA-Prête%20%26%20Offline-blueviolet?logo=pwa&logoColor=white)
 ![Licence](https://img.shields.io/badge/Licence-Propriétaire-orange)
 ![Statut](https://img.shields.io/badge/Statut-En%20Développement%20Actif-success)
 
@@ -32,6 +33,7 @@
 3. [Stack Technique](#-stack-technique)
 4. [Prochaines Features & Roadmap](#-prochaines-features--roadmap)
    - [Jalons de la Roadmap (v1.0)](#jalons-de-la-roadmap-v10)
+   - [Détail de la Phase 8 : Modularité & Modules à la Carte](#-détail-de-la-phase-8--modularité--paramétrage-à-la-carte-feature-flags)
    - [Perspectives & Idées futures (Post-v1.0)](#perspectives--idées-futures-post-v10)
 5. [Axes d'Amélioration & Correctifs Identifiés](#-axes-damélioration--correctifs-identifiés)
    - [🔒 Sécurité Backend & Guards RBAC](#1--sécurité--absence-de-guards-rbac-sur-le-backend-websocket--rest)
@@ -131,21 +133,33 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
   - Rôles personnalisables (Serveur, Chef de rang, Cuisine, Manager, Admin) avec palette de couleurs.
   - Matrice granulaire de permissions découpée par domaine : Salle, Cuisine, Gestion, Caisse et Administration.
 
-### 8. ⚡ Synchronisation Temps Réel & Mode Déconnecté
+### 8. ⚡ Synchronisation Temps Réel & Mode PWA / Offline Complet
 - **Passerelle WebSockets (Socket.IO)** : diffusion instantanée de tous les événements (nouvelles commandes, changements de statut, alertes de stock, règlements).
-- **Tolérance aux pannes réseau** :
-  - Indicateur visuel d'état de connexion (`ConnectionBadge`).
-  - File d'attente d'actions hors-ligne (`actionQueue`) avec rejeu automatique et synchronisation dès le rétablissement du réseau.
+- **Service Worker & Manifest PWA (`vite-plugin-pwa`)** :
+  - Mise en cache intégrale de l'application (HTML, CSS, JS, icônes, alertes sonores) via Workbox.
+  - Fonctionnement autonome sans connexion internet (lancement direct depuis l'écran d'accueil ou le bureau).
+  - Bannière d'installation PWA (`PwaInstallPrompt`) et invite de mise à jour non-intrusive.
+- **Persistance Locale Haute Performance (`IndexedDB`)** :
+  - Sauvegarde automatique de l'état complet du restaurant (`restoflow_db`) : tables, commandes, réservations, stocks, personnel, configuration.
+  - Au rechargement ou au démarrage hors-ligne, restauration instantanée du dernier état réel (aucun écrasement par les données de démo).
+- **File d'Attente Résiliente & Rejeu (`OfflineQueueModal`)** :
+  - Enregistrement transactionnel de toutes les actions déconnectées (prises de commande, encaissements, transferts).
+  - Badge interactif (`ConnectionBadge`) affichant le nombre d'opérations en attente et ouvrant la modale d'inspection.
+  - Rejeu automatique avec suivi des statuts (`pending`, `syncing`, `failed`), bouton "Forcer la synchronisation" et notification de confirmation.
+- **Authentification PIN Déconnectée** :
+  - Hachage cryptographique SHA-256 local permettant aux serveurs de changer de profil et de déverrouiller la tablette même lors d'une coupure réseau prolongée.
 
 ---
 
 ## 🛠️ Stack Technique
 
-### Frontend SPA
+### Frontend SPA & PWA
 | Outil | Rôle |
 |---|---|
 | **React 19** | Bibliothèque UI moderne avec hooks réactifs |
 | **Vite 8** | Environnement de développement et bundler ultra-rapide |
+| **Vite PWA (`vite-plugin-pwa`)** | Service Worker Workbox, manifest web et gestion de cache hors-ligne |
+| **IndexedDB (`idb`)** | Persistance locale transactionnelle haute performance de l'état et de la file d'attente |
 | **Tailwind CSS v4** | Moteur de styles utility-first optimisé avec `@tailwindcss/vite` |
 | **Recharts 3** | Graphiques interactifs du tableau de bord |
 | **Lucide React** | Bibliothèque d'icônes vectorielles cohérente |
@@ -175,8 +189,42 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
 | **Phase 3 : Impression, Caisse Pro & Réductions** | 🟢 **Terminée** | Générateur thermique binaire ESC/POS (80/58mm), simulateur TPE (NFC / puce), ventilation TVA (10%/20%), remises/codes promo et modale back-office "Caisse & Imprimantes". |
 | **Phase 4 : Réservations, Salle Dynamique & Service** | 🟢 **Terminée** | Widget de réservation en ligne, **gestion des "Suites" & réclame** (envoi cadencé en cuisine), **fusion & transfert de tables**, et **dispatch multi-postes (KDS Bar vs KDS Cuisine)**. |
 | **Phase 5 : Sécurité PIN, Modularité & Impression TCP Raw** | 🟢 **Terminée** | Hachage cryptographique des PINs (bcrypt) & sessions signées HMAC, exclusion des PINs de `sync:init`, découpage modulaire NestJS (`OrdersService`, `BillingService`, `ConfigService`, `TablesService`, `StockService`, `PrinterService`), suppression du prop drilling via `RestoFlowContext`, code-splitting Vite (bundle initial réduit à 157 ko), et impression directe hardware TCP raw port 9100. |
-| **Phase 6 : Mode PWA & Offline Complet** | 🟡 **Prochaine étape** | Service Workers (`vite-plugin-pwa`), persistance locale IndexedDB, fonctionnement 100% autonome garanti lors des coupures prolongées. |
-| **Phase 7 : Clôture de Caisse & Conformité Fiscale** | 🔴 Planifiée | Rapports Z et X journaliers certifiés, journal d'encaissement inaltérable chaîné (loi anti-fraude TVA / NF525), tarification Happy Hour programmée et export comptable (FEC). |
+| **Phase 6 : Mode PWA & Offline Complet** | 🟢 **Terminée** | Service Worker (`vite-plugin-pwa`), persistance locale haute fidélité IndexedDB, validation du code PIN hors-ligne, file d'attente d'actions résiliente avec inspection manuelle (`OfflineQueueModal`), et fonctionnement 100% autonome garanti lors des coupures prolongées. |
+| **Phase 7 : Clôture de Caisse & Conformité Fiscale** | 🟡 **Prochaine étape** | Rapports Z et X journaliers certifiés, journal d'encaissement inaltérable chaîné (loi anti-fraude TVA / NF525), tarification Happy Hour programmée et export comptable (FEC). |
+| **Phase 8 : Modularité & Activation des Modules "À la Carte" (Feature Toggles)** | ⚪ **Planifiée (avant v1.0)** | Hub centralisé de configuration permettant d'activer/désactiver les fonctionnalités non primordiales selon le profil du restaurant (stocks, réservations en ligne, cadencement des suites, KDS bar/cuisine, remises...), allégement visuel dynamique de l'interface et persistance offline/serveur. |
+
+#### 🎛️ Détail de la Phase 8 : Modularité & Paramétrage "À la Carte" (Feature Flags)
+
+Tous les établissements n'ont pas les mêmes contraintes opérationnelles : un food truck, un bar à tapas ou un bistrot rapide cherchent une vélocité maximale sans inventaire complexe ni réservations, tandis qu'un restaurant gastronomique exploite l'intégralité des fiches techniques, des réservations en ligne et du cadencement de service.
+
+Cette phase introduit un **panneau de contrôle des modules activables à la demande** dans l'espace Configuration / Back-office :
+
+- **📦 Gestion des Stocks & Ingrédients** (`enableStockManagement`) :
+  - *Actif* : fiches techniques, calcul du food cost, décompte atomique à la commande, alertes et blocage automatique sur rupture.
+  - *Inactif* : masquage des onglets *Stocks* et *Fiches Techniques*, aucune contrainte de stock à la commande pour une saisie ultra-rapide.
+- **📅 Réservations en ligne & Planificateur de Salle** (`enableOnlineReservations`) :
+  - *Actif* : widget client de réservation en ligne, affichage des heures réservées et des noms de clients sur les tables du plan de salle.
+  - *Inactif* : masquage complet du module de réservation (plan de salle 100% épuré dédié au flux sans réservation).
+- **⏱️ Cadencement des "Suites" & Réclame** (`enableCoursePacing`) :
+  - *Actif* : découpage du service par vagues (Entrées, Plats, Desserts) avec envoi cadencé et bouton "Envoyer la suite" en cuisine.
+  - *Inactif* : envoi direct et global de la commande en cuisine sans étapes intermédiaires (idéal brasserie rapide, snacking, bars).
+- **🍸 Dispatch Multi-Postes (KDS Bar vs KDS Cuisine)** (`enableMultiStationKds`) :
+  - *Actif* : routage séparé des boissons vers l'écran ou l'imprimante Bar et des plats chauds vers la Cuisine.
+  - *Inactif* : centralisation de tous les bons sur un écran KDS unique.
+- **🏷️ Remises & Codes Promotionnels** (`enableDiscounts`) :
+  - *Actif* : modale d'application de remises fixes/pourcentages et gestion des codes promo.
+  - *Inactif* : encaissement direct au tarif carte sans option de réduction pour simplifier l'écran de caisse.
+- **💳 Modes de Partage d'Addition Avancés** (`enableAdvancedSplitModes`) :
+  - *Actif* : 4 modes complets (unique, parts égales, par article/split itemisé, montant proportionnel libre).
+  - *Inactif* : mode épuré restreint au règlement direct total et à la division à parts égales.
+- **🔒 Authentification PIN Multi-Serveurs** (`enablePinAuth`) :
+  - *Actif* : verrouillage par code PIN entre chaque action pour traçabilité multi-opérateurs.
+  - *Inactif* : mode "Opérateur unique / Caisse rapide" sans demande de PIN récurrent pour les gérants seuls.
+
+**Architecture technique :**
+- Schéma Prisma étendu avec un modèle `ModulesConfig` synchronisé en temps réel via WebSocket (`config:modules_update`).
+- Hook réactif `useModules()` côté client React pour masquer dynamiquement onglets, boutons, modales et menus sans alourdir le DOM.
+- Persistance locale dans IndexedDB (`restoflow_db`) pour garantir la conservation du paramétrage même lors d'une utilisation hors-ligne.
 
 ### 💡 Perspectives & Idées futures (Post-v1.0)
 

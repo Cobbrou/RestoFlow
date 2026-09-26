@@ -33,6 +33,13 @@ import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
 import { getSocket } from "./services/socket.js";
 import { enqueueAction, flushQueue } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
+import PwaInstallPrompt from "./components/PwaInstallPrompt.jsx";
+import {
+  saveFullState,
+  loadCachedState,
+  saveCollection,
+  saveCachedAuth,
+} from "./services/db.js";
 
 const DEFAULT_CONFIG = {
   name: "Bistrot Parisien",
@@ -153,6 +160,35 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   }, []);
 
+  // ── Restauration immédiate depuis IndexedDB (Mode 100% Autonome / Offline) ──
+  useEffect(() => {
+    let active = true;
+    loadCachedState().then((cached) => {
+      if (!active || !cached) return;
+      if (cached.tables?.length)         setTables(cached.tables);
+      if (cached.orders)                 setOrders(cached.orders);
+      if (cached.reservations)           setReservations(cached.reservations);
+      if (cached.history)                setHistory(cached.history);
+      if (cached.products?.length)       setProducts(cached.products);
+      if (cached.menus?.length)          setMenus(cached.menus);
+      if (cached.staff?.length)          setStaff(cached.staff);
+      if (cached.roles?.length)          setRoles(cached.roles);
+      if (cached.ingredients?.length)    setIngredients(cached.ingredients);
+      if (cached.recipes?.length)        setRecipes(cached.recipes);
+      if (cached.stockMovements?.length) setStockMovements(cached.stockMovements);
+      if (cached.config)                 setConfig(cached.config);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Sauvegarde des mutations locales régulières dans IndexedDB
+  useEffect(() => { saveCollection("tables", tables); }, [tables]);
+  useEffect(() => { saveCollection("orders", orders); }, [orders]);
+  useEffect(() => { saveCollection("reservations", reservations); }, [reservations]);
+  useEffect(() => { saveCollection("history", history); }, [history]);
+
   // ── Synchronisation Temps Réel Socket.IO ───────────────────
   useEffect(() => {
     const socket = getSocket();
@@ -171,6 +207,9 @@ export default function App() {
       if (fullState.recipes)        setRecipes(fullState.recipes);
       if (fullState.stockMovements) setStockMovements(fullState.stockMovements);
       if (fullState.config)         setConfig(fullState.config);
+
+      // Persistance complète dans IndexedDB
+      saveFullState(fullState);
     };
 
     const handleTableUpdated = (updatedTable) => {
@@ -264,8 +303,15 @@ export default function App() {
       if (updatedConfig) setConfig(updatedConfig);
     };
 
-    const handleConnect = () => {
-      flushQueue(socket);
+    const handleConnect = async () => {
+      try {
+        const syncResult = await flushQueue(socket);
+        if (syncResult && syncResult.flushed > 0) {
+          pushToast(`Reconnexion réussie — ${syncResult.flushed} action(s) synchronisée(s)`, "server");
+        }
+      } catch (err) {
+        console.warn("[App] Erreur vidage file au retour en ligne :", err);
+      }
       socket.emit("sync:request", {}, (res) => {
         if (res && res.state) handleSyncInit(res.state);
       });
@@ -400,6 +446,7 @@ export default function App() {
     try {
       localStorage.setItem("rf_active_staff", JSON.stringify(staffMember));
     } catch {}
+    saveCachedAuth(staffMember);
 
     const currentRoleObj = roles.find((r) => r.id === staffMember.roleId);
     const targetTab = getDefaultTabForStaff(staffMember, currentRoleObj);
@@ -425,6 +472,7 @@ export default function App() {
     try {
       localStorage.removeItem("rf_active_staff");
     } catch {}
+    saveCachedAuth(null);
     setIsPinModalOpen(true);
   };
 
@@ -1189,6 +1237,9 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      {/* ── Notification PWA & Invitation à l'installation ── */}
+      <PwaInstallPrompt />
       </div>
     </RestoFlowProvider>
   );
