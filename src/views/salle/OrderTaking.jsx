@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import {
   ArrowLeft, Search, Plus, Minus, X, StickyNote,
   AlertTriangle, Check, LayoutList, Ban, Receipt, Tag, Sparkles,
@@ -54,6 +54,16 @@ export default function OrderTaking({
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [kitchenPrintModal, setKitchenPrintModal] = useState(false);
   const [tableActionModal, setTableActionModal] = useState(null); // "transfer" | "merge" | null
+
+  // 🪟 Axe 6 : Détection de clôture ou encaissement concurrent par un autre terminal
+  const initialOrderIdRef = useRef(order?.id);
+  useEffect(() => {
+    // Si la commande initiale qui a ouvert cet écran n'existe plus ou est fermée
+    if (initialOrderIdRef.current && (!order || order.status === "closed")) {
+      onToast?.(`⚠️ La Table ${table?.number || ""} a été encaissée ou libérée sur un autre terminal`, "warn");
+      onBackToPlan?.();
+    }
+  }, [order, table?.number, onToast, onBackToPlan]);
 
   const items        = order?.items || [];
   const draftItems   = items.filter((i) => i.status === "draft");

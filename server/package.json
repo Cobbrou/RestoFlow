@@ -8,6 +8,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
+    "test": "vitest run",
     "db:push": "prisma db push",
     "db:seed": "ts-node prisma/seed.ts"
   },
@@ -33,6 +34,7 @@
     "@types/node": "^22.13.10",
     "prisma": "^6.4.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.2"
   }
 }

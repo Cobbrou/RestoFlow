@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   Ban,
   Clock,
+  Archive,
+  RotateCcw,
 } from "lucide-react";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { money } from "../../utils/index.js";
@@ -35,24 +37,31 @@ export default function StockManager({
   onAddIngredient,
   onUpdateIngredient,
   onDeleteIngredient,
+  onRestoreIngredient,
 }) {
   const [subView, setSubView] = useState("levels"); // "levels" | "movements"
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "ok" | "low" | "out"
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [showArchived, setShowArchived] = useState(false);
 
   // Modals state
   const [deliveryModalOpen, setDeliveryModalOpen] = useState(false);
   const [wasteModalOpen, setWasteModalOpen] = useState(false);
   const [ingredientModal, setIngredientModal] = useState(null); // null | "new" | ingredient object
 
-  // KPIs
+  // KPIs (calculés uniquement sur les ingrédients actifs non archivés)
+  const activeIngredients = useMemo(
+    () => ingredients.filter((i) => !i.archived),
+    [ingredients]
+  );
+
   const summary = useMemo(() => {
     let totalValue = 0;
     let lowCount = 0;
     let outCount = 0;
 
-    for (const ing of ingredients) {
+    for (const ing of activeIngredients) {
       totalValue += ing.currentStock * ing.costPerUnit;
       if (ing.currentStock <= 0) {
         outCount++;
@@ -62,17 +71,23 @@ export default function StockManager({
     }
 
     return {
-      totalItems: ingredients.length,
+      totalItems: activeIngredients.length,
       totalValue: Number(totalValue.toFixed(2)),
       lowCount,
       outCount,
-      okCount: ingredients.length - lowCount - outCount,
+      okCount: activeIngredients.length - lowCount - outCount,
     };
-  }, [ingredients]);
+  }, [activeIngredients]);
 
   // Filtering
   const filteredIngredients = useMemo(() => {
     return ingredients.filter((ing) => {
+      if (showArchived) {
+        if (!ing.archived) return false;
+      } else {
+        if (ing.archived) return false;
+      }
+
       const matchSearch =
         ing.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (ing.supplier && ing.supplier.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -86,7 +101,7 @@ export default function StockManager({
 
       return true;
     });
-  }, [ingredients, searchTerm, categoryFilter, statusFilter]);
+  }, [ingredients, searchTerm, categoryFilter, statusFilter, showArchived]);
 
   return (
     <div className="space-y-5">
@@ -250,6 +265,19 @@ export default function StockManager({
               >
                 🔴 En Rupture
               </button>
+
+              <button
+                onClick={() => setShowArchived((prev) => !prev)}
+                className={`rf-tap flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0 transition-all ${
+                  showArchived
+                    ? "bg-[#3E7CB1]/20 text-[#3E7CB1] font-bold border border-[#3E7CB1]/40"
+                    : "bg-black/5 text-[#5B5346] hover:text-[#14110D]"
+                }`}
+                title="Consulter les ingrédients archivés"
+              >
+                <Archive size={12} />
+                <span>{showArchived ? "Archivés (affichés)" : "Voir archivés"}</span>
+              </button>
             </div>
           </div>
 
@@ -282,12 +310,17 @@ export default function StockManager({
                         <td className="py-3 px-4 font-semibold text-[#2B2622]">
                           <div className="flex items-center gap-2">
                             <span>{ing.name}</span>
-                            {isOut && (
+                            {ing.archived && (
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-[#8A8378]/20 text-[#8A8378]">
+                                ARCHIVÉ
+                              </span>
+                            )}
+                            {isOut && !ing.archived && (
                               <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-[#C1361B]/10 text-[#C1361B]">
                                 RUPTURE
                               </span>
                             )}
-                            {isLow && (
+                            {isLow && !ing.archived && (
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#D9A441]/15 text-[#B5793A]">
                                 CRITIQUE
                               </span>
@@ -325,38 +358,55 @@ export default function StockManager({
                         </td>
                         <td className="py-3 px-3 text-right">
                           <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => setDeliveryModalOpen(ing.id)}
-                              className="rf-tap p-1.5 rounded-lg text-[#2E9E5B] hover:bg-[#2E9E5B]/10"
-                              title={`Réceptionner une livraison de ${ing.name}`}
-                            >
-                              <PackagePlus size={14} />
-                            </button>
-                            <button
-                              onClick={() => setWasteModalOpen(ing.id)}
-                              className="rf-tap p-1.5 rounded-lg text-[#C1361B] hover:bg-[#C1361B]/10"
-                              title={`Déclarer une perte pour ${ing.name}`}
-                            >
-                              <TrendingDown size={14} />
-                            </button>
-                            <button
-                              onClick={() => setIngredientModal(ing)}
-                              className="rf-tap p-1.5 rounded-lg text-[#5B5346] hover:bg-black/5"
-                              title="Modifier l'ingrédient"
-                            >
-                              <Pencil size={13} />
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (confirm(`Supprimer définitivement l'ingrédient "${ing.name}" ?`)) {
-                                  onDeleteIngredient?.(ing.id);
-                                }
-                              }}
-                              className="rf-tap p-1.5 rounded-lg text-[#C1361B] hover:bg-[#C1361B]/10"
-                              title="Supprimer"
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            {ing.archived ? (
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Restaurer l'ingrédient "${ing.name}" ?`)) {
+                                    onRestoreIngredient?.(ing.id);
+                                  }
+                                }}
+                                className="rf-tap flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#2E9E5B] bg-[#2E9E5B]/10 hover:bg-[#2E9E5B]/20"
+                                title="Restaurer l'ingrédient"
+                              >
+                                <RotateCcw size={12} />
+                                <span>Restaurer</span>
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => setDeliveryModalOpen(ing.id)}
+                                  className="rf-tap p-1.5 rounded-lg text-[#2E9E5B] hover:bg-[#2E9E5B]/10"
+                                  title={`Réceptionner une livraison de ${ing.name}`}
+                                >
+                                  <PackagePlus size={14} />
+                                </button>
+                                <button
+                                  onClick={() => setWasteModalOpen(ing.id)}
+                                  className="rf-tap p-1.5 rounded-lg text-[#C1361B] hover:bg-[#C1361B]/10"
+                                  title={`Déclarer une perte pour ${ing.name}`}
+                                >
+                                  <TrendingDown size={14} />
+                                </button>
+                                <button
+                                  onClick={() => setIngredientModal(ing)}
+                                  className="rf-tap p-1.5 rounded-lg text-[#5B5346] hover:bg-black/5"
+                                  title="Modifier l'ingrédient"
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Archiver l'ingrédient "${ing.name}" ? (L'historique des mouvements de stock sera conservé)`)) {
+                                      onDeleteIngredient?.(ing.id);
+                                    }
+                                  }}
+                                  className="rf-tap p-1.5 rounded-lg text-[#C1361B] hover:bg-[#C1361B]/10"
+                                  title="Archiver"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>

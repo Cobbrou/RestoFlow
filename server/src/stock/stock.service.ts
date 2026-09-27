@@ -164,7 +164,18 @@ export class StockService {
         "Impossible de supprimer cet ingrédient car il est utilisé dans une ou plusieurs fiches techniques"
       );
     }
-    return this.prisma.ingredient.delete({ where: { id } });
+    // Soft-delete : archivage pour préserver l'historique et la traçabilité des mouvements
+    return this.prisma.ingredient.update({
+      where: { id },
+      data: { archived: true },
+    });
+  }
+
+  async restoreIngredient(id: string) {
+    return this.prisma.ingredient.update({
+      where: { id },
+      data: { archived: false },
+    });
   }
 
   async recordMovement(input: StockMovementInput) {

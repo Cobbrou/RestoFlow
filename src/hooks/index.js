@@ -1,16 +1,81 @@
 import { useRef, useCallback, useState, useEffect } from "react";
 
+let globalAudioCtx = null;
+const audioListeners = new Set();
+
+function getGlobalAudioContext() {
+  if (typeof window === "undefined") return null;
+  if (!globalAudioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      globalAudioCtx = new AudioContextClass();
+    }
+  }
+  return globalAudioCtx;
+}
+
+export function unlockAudio() {
+  const ctx = getGlobalAudioContext();
+  if (ctx && ctx.state === "suspended") {
+    return ctx.resume().then(() => {
+      audioListeners.forEach((fn) => fn(ctx.state));
+      return ctx.state;
+    });
+  }
+  return Promise.resolve(ctx?.state || "unsupported");
+}
+
+// Déverrouillage automatique au premier touch/clic sur l'application (Autoplay Policy)
+if (typeof window !== "undefined") {
+  const handleFirstInteraction = () => {
+    unlockAudio();
+    window.removeEventListener("pointerdown", handleFirstInteraction);
+    window.removeEventListener("keydown", handleFirstInteraction);
+  };
+  window.addEventListener("pointerdown", handleFirstInteraction, { passive: true, once: true });
+  window.addEventListener("keydown", handleFirstInteraction, { passive: true, once: true });
+}
+
+export function useAudioState() {
+  const [state, setState] = useState(() => {
+    const ctx = getGlobalAudioContext();
+    return ctx ? ctx.state : "unsupported";
+  });
+
+  useEffect(() => {
+    const update = (s) => setState(s);
+    audioListeners.add(update);
+    const ctx = getGlobalAudioContext();
+    if (ctx) {
+      setState(ctx.state);
+    }
+    return () => {
+      audioListeners.delete(update);
+    };
+  }, []);
+
+  return {
+    state,
+    isSuspended: state === "suspended",
+    isUnlocked: state === "running",
+    unlock: unlockAudio,
+  };
+}
+
 /**
- * Génère et joue un bip audio synthétique via l'API Web Audio.
+ * Génère et joue un bip audio synthétique via l'API Web Audio (résistant aux blocages d'autoplay).
  * @returns {(freq?: number) => void}
  */
 export function useBeep() {
-  const ctxRef = useRef(null);
   return useCallback((freq = 720) => {
     try {
-      if (!ctxRef.current)
-        ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      const ctx = ctxRef.current;
+      const ctx = getGlobalAudioContext();
+      if (!ctx) return;
+
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.type = "sine";

@@ -8,10 +8,38 @@ let socket = null;
 const statusListeners = new Set();
 let isConnected = false;
 
+function getSavedToken() {
+  try {
+    return localStorage.getItem("rf_session_token") || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setSocketToken(token) {
+  try {
+    if (token) {
+      localStorage.setItem("rf_session_token", token);
+    } else {
+      localStorage.removeItem("rf_session_token");
+    }
+  } catch {}
+
+  if (socket) {
+    socket.auth = { token };
+    if (socket.connected) {
+      // Déclenche une reconnexion pour rafraîchir l'authentification handshake
+      socket.disconnect().connect();
+    }
+  }
+}
+
 export function getSocket() {
   if (!socket) {
+    const token = getSavedToken();
     socket = io(BACKEND_URL, {
       transports: ["websocket", "polling"],
+      auth: token ? { token } : {},
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,

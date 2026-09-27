@@ -30,7 +30,7 @@ import { PRODUCTS_SEED } from "./data/products.js";
 import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct, getProductEffectivePrice, deduplicateHistory } from "./utils/index.js";
 import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
-import { getSocket } from "./services/socket.js";
+import { getSocket, setSocketToken } from "./services/socket.js";
 import { enqueueAction, flushQueue } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
 import PwaInstallPrompt from "./components/PwaInstallPrompt.jsx";
@@ -445,11 +445,20 @@ export default function App() {
     }
   }, [currentStaff, roles, role]);
 
-  // Helper pour émettre avec fallback dans la file d'attente hors-ligne
-  const emitOrQueue = (eventType, payload) => {
+  // Helper pour émettre avec fallback dans la file d'attente hors-ligne et réconciliation / rollback (Axe 3)
+  const emitOrQueue = (eventType, payload, onAck) => {
     const socket = getSocket();
     if (socket && socket.connected) {
-      socket.emit(eventType, payload);
+      socket.emit(eventType, payload, (response) => {
+        if (response && response.ok === false) {
+          pushToast(response.error || "Une erreur est survenue sur le serveur", "warn");
+          if (onAck) onAck(response);
+          // Réconciliation automatique avec l'état réel de la base de données
+          socket.emit("sync:request");
+        } else if (onAck) {
+          onAck(response);
+        }
+      });
     } else {
       enqueueAction(eventType, payload);
     }
@@ -504,10 +513,13 @@ export default function App() {
     setServerView("commande");
   };
 
-  const handleStaffPinSuccess = (staffMember) => {
+  const handleStaffPinSuccess = (staffMember, token) => {
     setCurrentStaff(staffMember);
     setIsPinModalOpen(false);
     setPendingTableToOpen(null);
+    if (token) {
+      setSocketToken(token);
+    }
     try {
       localStorage.setItem("rf_active_staff", JSON.stringify(staffMember));
     } catch {}
@@ -922,6 +934,11 @@ export default function App() {
     const sourceT = tables.find((t) => t.id === sourceTableId);
     const targetT = tables.find((t) => t.id === targetTableId);
 
+    // Snapshot pour rollback en cas de rejet serveur (Axe 3)
+    const prevOrders = orders;
+    const prevReservations = reservations;
+    const prevActiveTableId = activeTableId;
+
     setOrders((prev) =>
       prev.map((o) => (o.tableId === sourceTableId ? { ...o, tableId: targetTableId } : o))
     );
@@ -934,7 +951,18 @@ export default function App() {
       pushToast(`↔️ Table ${sourceT?.number} transférée vers Table ${targetT?.number}`, "server");
     }
 
-    emitOrQueue("tables:transfer", { sourceTableId, targetTableId });
+    emitOrQueue(
+      "tables:transfer",
+      { sourceTableId, targetTableId, staffName: currentStaff?.name },
+      (res) => {
+        if (res && res.ok === false) {
+          // Annulation optimiste immédiate
+          setOrders(prevOrders);
+          setReservations(prevReservations);
+          setActiveTableId(prevActiveTableId);
+        }
+      }
+    );
     if (activeTableId === sourceTableId) {
       setActiveTableId(targetTableId);
     }
@@ -947,6 +975,10 @@ export default function App() {
     const targetOrder = orders.find((o) => o.tableId === targetTableId);
 
     if (!sourceOrder || !targetOrder) return;
+
+    // Snapshot pour rollback en cas de rejet serveur (Axe 3)
+    const prevOrders = orders;
+    const prevActiveTableId = activeTableId;
 
     setOrders((prev) => {
       const remaining = prev.filter((o) => o.id !== sourceOrder.id);
@@ -964,7 +996,17 @@ export default function App() {
       pushToast(`🔗 Table ${sourceT?.number} fusionnée dans Table ${targetT?.number}`, "server");
     }
 
-    emitOrQueue("tables:merge", { sourceTableId, targetTableId });
+    emitOrQueue(
+      "tables:merge",
+      { sourceTableId, targetTableId, staffName: currentStaff?.name },
+      (res) => {
+        if (res && res.ok === false) {
+          // Annulation optimiste immédiate
+          setOrders(prevOrders);
+          setActiveTableId(prevActiveTableId);
+        }
+      }
+    );
     if (activeTableId === sourceTableId) {
       setActiveTableId(targetTableId);
     }
@@ -1147,7 +1189,12 @@ export default function App() {
 
   const handleDeleteIngredient = (id) => {
     emitOrQueue("stock:delete_ingredient", { id });
-    pushToast("Ingrédient supprimé", "server");
+    pushToast("Ingrédient archivé", "server");
+  };
+
+  const handleRestoreIngredient = (id) => {
+    emitOrQueue("stock:restore_ingredient", { id });
+    pushToast("Ingrédient restauré", "server");
   };
 
   const handleSaveRecipe = (productId, items) => {
@@ -1214,6 +1261,7 @@ export default function App() {
       onAddIngredient: handleAddIngredient,
       onUpdateIngredient: handleUpdateIngredient,
       onDeleteIngredient: handleDeleteIngredient,
+      onRestoreIngredient: handleRestoreIngredient,
       onSaveRecipe: handleSaveRecipe,
       onToggleProductAvailable: handleToggleProductAvailable,
     }),

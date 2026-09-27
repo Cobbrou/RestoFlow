@@ -83,6 +83,7 @@ model Ingredient {
   costPerUnit  Float           @default(0)   // Prix unitaire d'achat HT
   supplier     String?         // Nom fournisseur principal
   supplierRef  String?         // Référence fournisseur
+  archived     Boolean         @default(false)
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   recipeItems  RecipeItem[]
@@ -106,7 +107,7 @@ model RecipeItem {
 model StockMovement {
   id           String      @id
   ingredientId String
-  ingredient   Ingredient  @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient  @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
   type         String      // "ORDER_CONSUMPTION" | "DELIVERY" | "WASTE" | "ADJUSTMENT" | "CANCEL_RETURN"
   quantity     Float       // + pour entrée, - pour consommation / perte
   unitCost     Float?      // Coût d'achat unitaire

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import {
   LayoutGrid, Table2, Clock, Users, CheckCircle2,
-  Flame, Printer, X, BellRing, ChefHat, Wine, Layers
+  Flame, Printer, X, BellRing, ChefHat, Wine, Layers, Volume2
 } from "lucide-react";
 import {
   tableStatus, STATUS_META, orderKitchenStatus,
@@ -9,6 +9,7 @@ import {
 } from "../../utils/index.js";
 import { AllergyBadge } from "../salle/OrderTaking.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
+import { useAudioState } from "../../hooks/index.js";
 
 /**
  * CuisineShell — Enveloppe de la vue KDS avec support Multi-postes (Cuisine vs Bar)
@@ -25,6 +26,7 @@ export default function CuisineShell({
   onStart,
   onReady,
 }) {
+  const { isSuspended, unlock } = useAudioState();
   const [printOrder, setPrintOrder] = useState(null); // { order, table, defaultTab } | null
   const [stationFilter, setStationFilter] = useState(() => {
     try {
@@ -77,6 +79,18 @@ export default function CuisineShell({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {/* Alerte déblocage audio si suspendu par le navigateur */}
+          {isSuspended && (
+            <button
+              onClick={() => unlock()}
+              className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#D9A441]/20 text-[#D9A441] border border-[#D9A441]/40 animate-pulse hover:bg-[#D9A441]/30"
+              title="Cliquez pour débloquer les alertes sonores de commande sur ce terminal"
+            >
+              <Volume2 size={14} />
+              <span>Activer les bips KDS</span>
+            </button>
+          )}
+
           {/* Dispatch Multi-postes (Phase 4) */}
           <div className="flex gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
             {[

@@ -8,7 +8,7 @@ import {
   MessageBody,
 } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, UseGuards, UsePipes, ValidationPipe } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthService } from "../auth/auth.service";
 import { OrdersService } from "../orders/orders.service";
@@ -20,12 +20,20 @@ import { PrinterService } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
+import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
+import { RequirePermissions } from "../auth/decorators/permissions.decorator";
+import { AddItemDto } from "../orders/dto/add-item.dto";
+import { ChangeQtyDto } from "../orders/dto/change-qty.dto";
+import { CheckoutDto } from "../orders/dto/checkout.dto";
+import { StockMovementDto } from "../stock/dto/stock-movement.dto";
+import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto";
 
 @WebSocketGateway({
   cors: {
     origin: "*",
   },
 })
+@UseGuards(WsPermissionsGuard)
 @Injectable()
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -247,9 +255,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.order", "gestion.tables")
   @SubscribeMessage("tables:transfer")
   async handleTableTransfer(
-    @MessageBody() data: { sourceTableId: string; targetTableId: string; staffName?: string }
+    @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: TransferTableDto
   ) {
     try {
       const res = await this.tablesService.transferTable(data.sourceTableId, data.targetTableId);
@@ -270,9 +279,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.order", "gestion.tables")
   @SubscribeMessage("tables:merge")
   async handleTableMerge(
-    @MessageBody() data: { sourceTableId: string; targetTableId: string; staffName?: string }
+    @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: MergeTableDto
   ) {
     try {
       const res = await this.tablesService.mergeTables(data.sourceTableId, data.targetTableId);
@@ -505,6 +515,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Facturation, Caisse & Remises (BillingService) ──────────────────
 
+  @RequirePermissions("caisse.discount")
   @SubscribeMessage("order:discount:apply")
   async handleApplyDiscount(@MessageBody() data: { orderId: string; discount: any }) {
     try {
@@ -517,6 +528,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.discount")
   @SubscribeMessage("order:discount:remove")
   async handleRemoveDiscount(@MessageBody() data: { orderId: string }) {
     try {
@@ -529,8 +541,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.checkout")
   @SubscribeMessage("order:checkout")
-  async handleCheckout(@MessageBody() data: any) {
+  async handleCheckout(
+    @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CheckoutDto
+  ) {
     try {
       const res = await this.billingService.processCheckout(data);
 
@@ -598,6 +613,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     return { ok: true, config };
   }
 
+  @RequirePermissions("caisse.settings")
   @SubscribeMessage("config:update")
   async handleUpdateConfig(@MessageBody() data: any) {
     try {
@@ -685,8 +701,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     return { ok: true, ingredients, movements };
   }
 
+  @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:add_movement")
-  async handleAddStockMovement(@MessageBody() data: any) {
+  async handleAddStockMovement(
+    @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: StockMovementDto
+  ) {
     try {
       const result = await this.stockService.recordMovement({
         ingredientId: data.ingredientId,
@@ -730,6 +749,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:create_ingredient")
   async handleCreateIngredient(@MessageBody() data: any) {
     try {
@@ -744,6 +764,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:update_ingredient")
   async handleUpdateIngredient(@MessageBody() data: { id: string; [key: string]: any }) {
     try {
@@ -759,6 +780,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:delete_ingredient")
   async handleDeleteIngredient(@MessageBody() data: { id: string }) {
     try {
@@ -771,6 +793,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.stocks")
+  @SubscribeMessage("stock:restore_ingredient")
+  async handleRestoreIngredient(@MessageBody() data: { id: string }) {
+    try {
+      await this.stockService.restoreIngredient(data.id);
+      const ingredients = await this.stockService.findAllIngredients();
+      this.server.emit("stock:updated", ingredients);
+      return { ok: true, id: data.id };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("gestion.recipes")
   @SubscribeMessage("recipe:save")
   async handleSaveRecipe(@MessageBody() data: { productId: string; items: any[] }) {
     try {
@@ -801,6 +837,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.products")
   @SubscribeMessage("catalog:create_product")
   async handleCreateProduct(@MessageBody() data: any) {
     try {
@@ -813,6 +850,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.products", "gestion.stocks")
   @SubscribeMessage("catalog:create_product_with_stock")
   async handleCreateProductWithStock(@MessageBody() data: any) {
     try {
@@ -851,6 +889,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.products")
   @SubscribeMessage("catalog:update_product")
   async handleUpdateProduct(@MessageBody() data: { id: string; [key: string]: any }) {
     try {
@@ -864,6 +903,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("gestion.products")
   @SubscribeMessage("catalog:delete_product")
   async handleDeleteProduct(@MessageBody() data: { id: string }) {
     try {
@@ -914,6 +954,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:process_z")
   async handleProcessZClosing(@MessageBody() data: any) {
     try {
