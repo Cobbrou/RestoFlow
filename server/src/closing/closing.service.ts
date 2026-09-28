@@ -221,7 +221,14 @@ export class ClosingService {
       serverSalesMap[srv].tickets += 1;
       serverSalesMap[srv].total += ticket.total;
 
-      coversCount += 2; // Estimation moyenne par ticket ou tableNumber
+      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
+      try {
+        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
+        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
+        coversCount += mainItems.length > 0 ? mainItems.length : 1;
+      } catch {
+        coversCount += 1;
+      }
     }
 
     const vatBreakdown = Object.keys(vatMap).map((k) => ({
@@ -364,7 +371,14 @@ export class ClosingService {
         paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
       }
 
-      coversCount += 2;
+      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
+      try {
+        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
+        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
+        coversCount += mainItems.length > 0 ? mainItems.length : 1;
+      } catch {
+        coversCount += 1;
+      }
     }
 
     const round2 = (n: number) => Math.round(n * 100) / 100;

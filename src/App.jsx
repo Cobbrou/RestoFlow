@@ -7,6 +7,7 @@ import PinPadModal from "./components/PinPadModal.jsx";
 import FloorPlan from "./views/salle/FloorPlan.jsx";
 import OrderTaking from "./views/salle/OrderTaking.jsx";
 import CuisineShell from "./views/cuisine/CuisineShell.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 
 import { RestoFlowProvider } from "./context/RestoFlowContext.jsx";
 
@@ -209,16 +210,21 @@ export default function App() {
     };
   }, []);
 
-  // Sauvegarde des mutations locales régulières dans IndexedDB
-  useEffect(() => { saveCollection("tables", tables); }, [tables]);
-  useEffect(() => { saveCollection("orders", orders); }, [orders]);
-  useEffect(() => { saveCollection("reservations", reservations); }, [reservations]);
-  useEffect(() => { saveCollection("history", history); }, [history]);
-  useEffect(() => { saveCollection("closings", closings); }, [closings]);
-  useEffect(() => { saveCollection("products", products); }, [products]);
-  useEffect(() => { saveCollection("ingredients", ingredients); }, [ingredients]);
-  useEffect(() => { saveCollection("recipes", recipes); }, [recipes]);
-  useEffect(() => { saveCollection("stockMovements", stockMovements); }, [stockMovements]);
+  // Sauvegarde debounced des mutations locales dans IndexedDB (évite le flood I/O)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveCollection("tables", tables);
+      saveCollection("orders", orders);
+      saveCollection("reservations", reservations);
+      saveCollection("history", history);
+      saveCollection("closings", closings);
+      saveCollection("products", products);
+      saveCollection("ingredients", ingredients);
+      saveCollection("recipes", recipes);
+      saveCollection("stockMovements", stockMovements);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [tables, orders, reservations, history, closings, products, ingredients, recipes, stockMovements]);
 
   // ── Synchronisation Temps Réel Socket.IO ───────────────────
   useEffect(() => {
@@ -557,11 +563,7 @@ export default function App() {
     const cat = product?.cat || "";
     const isBar =
       cat === "boissons" ||
-      product?.station === "bar" ||
-      product?.id?.startsWith("p18") ||
-      product?.id?.startsWith("p19") ||
-      product?.id?.startsWith("p20") ||
-      product?.id?.startsWith("p21");
+      product?.station === "bar";
     const station = isBar ? "bar" : (product?.station || "kitchen");
     let course = "plat";
     if (isBar) {
@@ -773,9 +775,7 @@ export default function App() {
     const finalMethod = paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
     // Numéro de facture séquentiel lisible
-    const nowYear = new Date().getFullYear();
-    const seqNum = String((history.length + 1)).padStart(4, "0");
-    const ticketNumber = meta?.ticketNumber || `FAC-${nowYear}-${seqNum}`;
+    const ticketNumber = meta?.ticketNumber || null; // Le serveur génère le numéro de facture définitif
 
     const receipt = {
       id: uid("rcpt"),
@@ -1351,87 +1351,97 @@ export default function App() {
 
       {/* ── Vue Salle ── */}
       {role === "serveur" && serverView === "plan" && (
-        <FloorPlan
-          tables={tables}
-          orders={orders}
-          reservations={reservations}
-          now={now}
-          onOpen={openTable}
-          onToggleAlert={toggleAlert}
-          onOpenReservations={() => setIsReservationModalOpen(true)}
-          onOpenTableAction={(mode, table) => setTableActionModal({ mode, sourceTable: table })}
-          isMobile={isMobile}
-        />
+        <ErrorBoundary label="Plan de salle">
+          <FloorPlan
+            tables={tables}
+            orders={orders}
+            reservations={reservations}
+            now={now}
+            onOpen={openTable}
+            onToggleAlert={toggleAlert}
+            onOpenReservations={() => setIsReservationModalOpen(true)}
+            onOpenTableAction={(mode, table) => setTableActionModal({ mode, sourceTable: table })}
+            isMobile={isMobile}
+          />
+        </ErrorBoundary>
       )}
       {role === "serveur" && serverView === "commande" && activeTable && (
-        <OrderTaking
-          table={activeTable}
-          order={activeOrder}
-          now={now}
-          products={combinedProducts}
-          recipes={recipes}
-          ingredients={ingredients}
-          config={config}
-          tables={tables}
-          orders={orders}
-          isMobile={isMobile}
-          currentStaff={currentStaff}
-          roles={roles}
-          onToggleProductAvailable={handleToggleProductAvailable}
-          onBack={() => setServerView("plan")}
-          onAdd={(p) => addProductToOrder(activeTable.id, p)}
-          onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(activeTable.id, menuProduct, composition)}
-          onQty={(itemId, d) => changeQty(activeOrder.id, itemId, d)}
-          onRemove={(itemId) => removeItem(activeOrder.id, itemId)}
-          onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
-          onSend={() => sendToKitchen(activeOrder.id)}
-          onServe={() => serveAndMaybeFree(activeOrder.id)}
-          onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}
-          onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
-          onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
-          onBackToPlan={() => setServerView("plan")}
-          onCallCourse={(courseOrOrderId, maybeCourse) => {
-            const course = maybeCourse || courseOrOrderId;
-            handleCallCourse(activeOrder.id, course);
-          }}
-          onChangeItemCourse={(itemId, course) => handleChangeItemCourse(activeOrder.id, itemId, course)}
-          onTransferTable={(fromId, toId) => handleTransferTable(fromId, toId)}
-          onMergeTable={(fromId, toId) => handleMergeTable(fromId, toId)}
-        />
+        <ErrorBoundary label="Prise de commande">
+          <OrderTaking
+            table={activeTable}
+            order={activeOrder}
+            now={now}
+            products={combinedProducts}
+            recipes={recipes}
+            ingredients={ingredients}
+            config={config}
+            tables={tables}
+            orders={orders}
+            isMobile={isMobile}
+            currentStaff={currentStaff}
+            roles={roles}
+            onToggleProductAvailable={handleToggleProductAvailable}
+            onBack={() => setServerView("plan")}
+            onAdd={(p) => addProductToOrder(activeTable.id, p)}
+            onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(activeTable.id, menuProduct, composition)}
+            onQty={(itemId, d) => changeQty(activeOrder.id, itemId, d)}
+            onRemove={(itemId) => removeItem(activeOrder.id, itemId)}
+            onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
+            onSend={() => sendToKitchen(activeOrder.id)}
+            onServe={() => serveAndMaybeFree(activeOrder.id)}
+            onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}
+            onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
+            onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
+            onBackToPlan={() => setServerView("plan")}
+            onCallCourse={(courseOrOrderId, maybeCourse) => {
+              const course = maybeCourse || courseOrOrderId;
+              handleCallCourse(activeOrder.id, course);
+            }}
+            onChangeItemCourse={(itemId, course) => handleChangeItemCourse(activeOrder.id, itemId, course)}
+            onTransferTable={(fromId, toId) => handleTransferTable(fromId, toId)}
+            onMergeTable={(fromId, toId) => handleMergeTable(fromId, toId)}
+          />
+        </ErrorBoundary>
       )}
 
       {/* ── Vue Cuisine ── */}
       {role === "cuisine" && (
-        <CuisineShell
-          view={cuisineView}
-          setView={setCuisineView}
-          tables={tables}
-          orders={orders}
-          now={now}
-          products={combinedProducts}
-          config={config}
-          onStart={startPrep}
-          onReady={markReady}
-        />
+        <ErrorBoundary label="Cuisine KDS">
+          <CuisineShell
+            view={cuisineView}
+            setView={setCuisineView}
+            tables={tables}
+            orders={orders}
+            now={now}
+            products={combinedProducts}
+            config={config}
+            onStart={startPrep}
+            onReady={markReady}
+          />
+        </ErrorBoundary>
       )}
 
       {/* ── Dashboard (Lazy Loaded) ── */}
       {role === "dashboard" && (
-        <Suspense fallback={<ViewFallback />}>
-          <Dashboard history={history} orders={orders} tables={tables} />
-        </Suspense>
+        <ErrorBoundary label="Dashboard">
+          <Suspense fallback={<ViewFallback />}>
+            <Dashboard history={history} orders={orders} tables={tables} />
+          </Suspense>
+        </ErrorBoundary>
       )}
 
       {/* ── Gestion (Lazy Loaded & Sans Prop Drilling) ── */}
       {role === "gestion" && (
-        <Suspense fallback={<ViewFallback />}>
-          <Gestion
-            view={gestionView}
-            setView={setGestionView}
-            closings={closings}
-            onProcessZ={handleProcessZ}
-          />
-        </Suspense>
+        <ErrorBoundary label="Gestion">
+          <Suspense fallback={<ViewFallback />}>
+            <Gestion
+              view={gestionView}
+              setView={setGestionView}
+              closings={closings}
+              onProcessZ={handleProcessZ}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
 
       {/* ── Modale Gestion des Réservations & Widget (Phase 4) ── */}

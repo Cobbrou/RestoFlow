@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
@@ -71,9 +71,8 @@ export class OrdersService {
       }
     }
     if (!table) {
-      table = await this.prisma.table.findFirst();
+      throw new NotFoundException(`Table introuvable : ${tableId}`);
     }
-    if (!table) throw new NotFoundException("Aucune table trouvée");
 
     const resolvedTableId = table.id;
 
@@ -121,17 +120,7 @@ export class OrdersService {
     });
 
     if (!order) {
-      const firstTable = await this.prisma.table.findFirst();
-      if (!firstTable) throw new NotFoundException("Commande introuvable");
-      order = await this.prisma.order.create({
-        data: {
-          id: data.orderId,
-          tableId: firstTable.id,
-          server: "Service",
-          status: "open",
-        },
-        include: { items: true },
-      });
+      throw new NotFoundException(`Commande introuvable : ${data.orderId}`);
     }
 
     let dbProduct: any = null;
@@ -146,11 +135,7 @@ export class OrdersService {
       cat === "boissons" ||
       data.product?.station === "bar" ||
       dbProduct?.station === "bar" ||
-      data.station === "bar" ||
-      data.product?.id?.startsWith("p18") ||
-      data.product?.id?.startsWith("p19") ||
-      data.product?.id?.startsWith("p20") ||
-      data.product?.id?.startsWith("p21");
+      data.station === "bar";
 
     const station = isBar ? "bar" : (data.station || data.product?.station || dbProduct?.station || "kitchen");
     let course = data.course;
@@ -219,6 +204,9 @@ export class OrdersService {
   async changeQty(orderId: string, itemId: string, delta: number) {
     const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
     if (!item) throw new NotFoundException("Article non trouvé");
+    if (item.status !== 'draft') {
+      throw new BadRequestException(`Impossible de modifier un article en statut "${item.status}". Seuls les articles brouillons peuvent être modifiés.`);
+    }
 
     const newQty = item.qty + delta;
     if (newQty <= 0) {
@@ -238,7 +226,12 @@ export class OrdersService {
   }
 
   async removeItem(orderId: string, itemId: string) {
-    await this.prisma.orderItem.deleteMany({ where: { id: itemId } });
+    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
+    if (!item) throw new NotFoundException('Article introuvable');
+    if (item.status !== 'draft') {
+      throw new BadRequestException(`Impossible de supprimer un article en statut "${item.status}". Seuls les articles brouillons peuvent être supprimés.`);
+    }
+    await this.prisma.orderItem.delete({ where: { id: itemId } });
     const updated = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, table: true },
@@ -264,11 +257,7 @@ export class OrdersService {
       include: { items: true, table: true },
     });
     if (!order) {
-      order = await this.prisma.order.findFirst({
-        where: { status: "open" },
-        include: { items: true, table: true },
-      });
-      if (!order) throw new NotFoundException("Commande introuvable");
+      throw new NotFoundException(`Commande introuvable : ${orderId}`);
     }
 
     const now = new Date();

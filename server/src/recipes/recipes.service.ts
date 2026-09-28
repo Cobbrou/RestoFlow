@@ -63,9 +63,10 @@ export class RecipesService {
         minPortionsAvailable = product.available ? 99 : 0;
       }
 
-      // PV HT (TVA 10%)
+      // PV HT (TVA)
       const pvTTC = product.price;
-      const pvHT = pvTTC / 1.10;
+      const vatRate = product?.vatRate || 10;
+      const pvHT = pvTTC / (1 + vatRate / 100);
       const roundedPortionCost = Number(portionCost.toFixed(2));
       const grossMarginHT = Number((pvHT - roundedPortionCost).toFixed(2));
       const marginRate = pvHT > 0 ? Number(((grossMarginHT / pvHT) * 100).toFixed(1)) : 0;

@@ -187,7 +187,7 @@ model OrderHistory {
   vatDetails     String?  // JSON snapshot of VAT breakdown [{ rate, ht, vat, ttc }]
   paymentMethod  String
   payments       String   // JSON snapshot of payment breakdowns
-  sequenceNumber Int?     // Numéro séquentiel strict de transaction (NF525)
+  sequenceNumber Int?     @unique // Numéro séquentiel strict de transaction (NF525)
   previousHash   String?  // Hash du ticket précédent (chaînage)
   signature      String?  // Hash SHA-256 de ce ticket
   closedInZId    String?  // Référence au rapport Z dans lequel ce ticket a été clôturé

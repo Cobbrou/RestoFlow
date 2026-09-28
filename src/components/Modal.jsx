@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 /**
  * Composant modal générique avec overlay sombre.
@@ -9,7 +10,37 @@ import { X } from "lucide-react";
  *  - wide     : si true, max-width = 2xl (au lieu de md)
  *  - children : contenu du corps
  */
-export default function Modal({ isOpen = true, title, onClose, children, wide }) {
+export default function Modal({ isOpen = true, title, onClose, children, wide, "aria-label": ariaLabel }) {
+  const modalRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen && modalRef.current) {
+      modalRef.current.focus();
+    }
+  }, [isOpen]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      if (onClose) onClose();
+    } else if (e.key === "Tab") {
+      // Simple focus trap (prevents tabbing outside the modal)
+      const focusableElements = modalRef.current.querySelectorAll(
+        'a[href], button, textarea, input, select, [tabindex]:not([tabindex="-1"])'
+      );
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (!e.shiftKey && document.activeElement === lastElement) {
+        firstElement?.focus();
+        e.preventDefault();
+      } else if (e.shiftKey && document.activeElement === firstElement) {
+        lastElement?.focus();
+        e.preventDefault();
+      }
+    }
+  };
+
   if (!isOpen) return null;
   return (
     <div
@@ -17,13 +48,19 @@ export default function Modal({ isOpen = true, title, onClose, children, wide })
       onClick={onClose}
     >
       <div
-        className={`rf-anim-pop bg-white rounded-2xl w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[85vh] overflow-y-auto rf-scrollbar shadow-xl`}
+        ref={modalRef}
+        tabIndex="-1"
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel || title}
+        onKeyDown={handleKeyDown}
+        className={`rf-anim-pop bg-white rounded-2xl w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[85vh] overflow-y-auto rf-scrollbar shadow-xl outline-none`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* En-tête sticky */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-black/10 sticky top-0 bg-white">
           <h3 className="rf-display text-lg font-semibold text-[#2B2622]">{title}</h3>
-          <button onClick={onClose} className="rf-tap p-1.5 rounded-full bg-black/5">
+          <button onClick={onClose} className="rf-tap p-1.5 rounded-full bg-black/5" aria-label="Fermer">
             <X size={16} />
           </button>
         </div>

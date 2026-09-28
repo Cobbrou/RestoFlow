@@ -11,10 +11,19 @@ export interface SessionPayload {
   exp: number;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || "restoflow-secure-session-key-2026";
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET environment variable is required in production');
+  }
+  return 'restoflow-dev-only-key-DO-NOT-USE-IN-PROD';
+})();
 
 @Injectable()
 export class AuthService {
+  private pinAttempts = new Map<string, { count: number; lastAttempt: number }>();
+  private readonly MAX_PIN_ATTEMPTS = 5;
+  private readonly PIN_LOCKOUT_MS = 60_000; // 1 minute lockout
+
   constructor(private prisma: PrismaService) {}
 
   generateToken(staff: { id: string; name: string; roleId: string; permissions: string[] }): string {
@@ -39,7 +48,7 @@ export class AuthService {
       if (parts.length !== 3) return null;
       const [header, body, signature] = parts;
       const expected = crypto.createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64url");
-      if (signature !== expected) return null;
+      if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
       const payload: SessionPayload = JSON.parse(Buffer.from(body, "base64url").toString());
       if (payload.exp && Date.now() > payload.exp) return null;
       return payload;
@@ -49,6 +58,12 @@ export class AuthService {
   }
 
   async verifyPin(pin: string, staffId?: string) {
+    const rateLimitKey = staffId || 'global';
+    const attempt = this.pinAttempts.get(rateLimitKey);
+    if (attempt && attempt.count >= this.MAX_PIN_ATTEMPTS && (Date.now() - attempt.lastAttempt) < this.PIN_LOCKOUT_MS) {
+      throw new UnauthorizedException(`Trop de tentatives. Réessayez dans ${Math.ceil((this.PIN_LOCKOUT_MS - (Date.now() - attempt.lastAttempt)) / 1000)} secondes.`);
+    }
+
     if (!pin || pin.length < 4) {
       throw new UnauthorizedException("Code PIN invalide (4 chiffres requis)");
     }
@@ -62,8 +77,10 @@ export class AuthService {
       if (!staff) {
         throw new UnauthorizedException("Équipier introuvable ou compte inactif");
       }
-      const matches = bcrypt.compareSync(pin, staff.pin) || staff.pin === pin;
+      const matches = bcrypt.compareSync(pin, staff.pin);
       if (!matches) {
+        const current = this.pinAttempts.get(rateLimitKey) || { count: 0, lastAttempt: 0 };
+        this.pinAttempts.set(rateLimitKey, { count: current.count + 1, lastAttempt: Date.now() });
         throw new UnauthorizedException("Code PIN incorrect");
       }
     } else {
@@ -74,13 +91,15 @@ export class AuthService {
       });
 
       for (const candidate of activeStaffList) {
-        if (bcrypt.compareSync(pin, candidate.pin) || candidate.pin === pin) {
+        if (bcrypt.compareSync(pin, candidate.pin)) {
           staff = candidate;
           break;
         }
       }
 
       if (!staff) {
+        const current = this.pinAttempts.get(rateLimitKey) || { count: 0, lastAttempt: 0 };
+        this.pinAttempts.set(rateLimitKey, { count: current.count + 1, lastAttempt: Date.now() });
         throw new UnauthorizedException("Code PIN non reconnu");
       }
     }
@@ -97,6 +116,8 @@ export class AuthService {
         permissions,
       },
     };
+
+    this.pinAttempts.delete(rateLimitKey);
 
     const token = this.generateToken({
       id: safeStaff.id,

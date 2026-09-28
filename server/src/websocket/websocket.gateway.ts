@@ -27,10 +27,11 @@ import { ChangeQtyDto } from "../orders/dto/change-qty.dto";
 import { CheckoutDto } from "../orders/dto/checkout.dto";
 import { StockMovementDto } from "../stock/dto/stock-movement.dto";
 import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto";
+import { CreateReservationDto } from "../tables/dto/reservation.dto";
 
 @WebSocketGateway({
   cors: {
-    origin: "*",
+    origin: process.env.CORS_ORIGIN?.split(',') || ["http://localhost:5173", "http://localhost:4173"],
   },
 })
 @UseGuards(WsPermissionsGuard)
@@ -320,7 +321,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage("order:add_item")
-  async handleAddItem(@MessageBody() data: any) {
+  async handleAddItem(@MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: AddItemDto) {
     try {
       const order = await this.ordersService.addItem(data);
       this.server.emit("order:updated", order);
@@ -582,9 +583,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Impression Matérielle Directe (Axe 4) ───────────────────────────
 
+  @RequirePermissions("admin.printers")
   @SubscribeMessage("printer:test")
   async handlePrinterTest(@MessageBody() data: { ip: string; port?: number }) {
     try {
+      const cfg = await this.configService.getConfig();
+      const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
+      if (!allowedIps.includes(data.ip)) {
+        return { success: false, error: `IP ${data.ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.` };
+      }
       const res = await this.printerService.testPrinter(data.ip, data.port || 9100);
       return res;
     } catch (err: any) {
@@ -592,9 +599,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("admin.printers")
   @SubscribeMessage("printer:send_raw")
   async handlePrinterSendRaw(@MessageBody() data: { ip: string; port?: number; buffer: number[] | string }) {
     try {
+      const cfg = await this.configService.getConfig();
+      const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
+      if (!allowedIps.includes(data.ip)) {
+        return { success: false, error: `IP ${data.ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.` };
+      }
       const buffer = Array.isArray(data.buffer)
         ? Buffer.from(data.buffer)
         : Buffer.from(data.buffer, "base64");
@@ -628,7 +641,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   // ── Réservations ────────────────────────────────────────────────────
 
   @SubscribeMessage("reservation:create")
-  async handleCreateReservation(@MessageBody() data: any) {
+  async handleCreateReservation(@MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CreateReservationDto) {
     try {
       const res = await this.prisma.reservation.create({
         data: {
