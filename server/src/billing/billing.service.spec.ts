@@ -27,6 +27,7 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       stockMovement: {
         create: vi.fn(),
       },
+      $transaction: vi.fn().mockImplementation(async (cb) => cb(mockPrisma)),
     };
 
     billingService = new BillingService(mockPrisma);

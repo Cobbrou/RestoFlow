@@ -142,9 +142,11 @@ export class ClosingService {
     const vatMap: Record<number, { ht: number; vat: number; ttc: number }> = {};
     const itemSalesMap: Record<string, { name: string; qty: number; total: number; cat?: string }> = {};
     const serverSalesMap: Record<string, { tickets: number; total: number }> = {};
+    let totalTips = 0;
 
     for (const ticket of unclosedTickets) {
       totalNet += ticket.total;
+      totalTips += Number((ticket as any).tip || 0);
       const sub = ticket.subtotal != null ? ticket.subtotal : ticket.total;
       totalGross += sub;
 
@@ -258,6 +260,7 @@ export class ClosingService {
       totalNet: Math.round(totalNet * 100) / 100,
       totalHT: Math.round(totalHT * 100) / 100,
       totalVAT: Math.round(totalVAT * 100) / 100,
+      totalTips: Math.round(totalTips * 100) / 100,
       averageTicket,
       paymentsBreakdown: {
         carte: Math.round((paymentsBreakdown.carte || 0) * 100) / 100,
@@ -311,6 +314,7 @@ export class ClosingService {
     let totalHT = 0;
     let totalVAT = 0;
     let coversCount = 0;
+    let totalTips = 0;
 
     const paymentsBreakdown: Record<string, number> = {
       carte: 0,
@@ -322,6 +326,7 @@ export class ClosingService {
 
     for (const ticket of unclosedTickets) {
       totalNet += ticket.total;
+      totalTips += Number((ticket as any).tip || 0);
       const sub = ticket.subtotal != null ? ticket.subtotal : ticket.total;
       totalGross += sub;
 
@@ -387,6 +392,7 @@ export class ClosingService {
     const finalNet = round2(totalNet);
     const finalHT = round2(totalHT);
     const finalVAT = round2(totalVAT);
+    const finalTips = round2(totalTips);
     const grandTotal = round2(grandTotalBefore + finalNet);
 
     const vatBreakdown = Object.keys(vatMap).map((k) => ({
@@ -440,6 +446,7 @@ export class ClosingService {
           totalNet: finalNet,
           totalHT: finalHT,
           totalVAT: finalVAT,
+          totalTips: finalTips,
           ticketsCount: unclosedTickets.length,
           coversCount,
           paymentsBreakdown: JSON.stringify(paymentsBreakdown),

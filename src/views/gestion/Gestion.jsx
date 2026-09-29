@@ -9,10 +9,13 @@ import StockManager from "./StockManager.jsx";
 import RecipeManager from "./RecipeManager.jsx";
 import CaisseSettingsManager from "./CaisseSettingsManager.jsx";
 import ClosingManager from "./ClosingManager.jsx";
+import ModulesManager from "./ModulesManager.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
 import { useRestoFlow } from "../../context/RestoFlowContext.jsx";
+import { useModules } from "../../hooks/useModules.js";
+import { SlidersHorizontal } from "lucide-react";
 
 /**
  * Gestion — Back-office avec 9 sous-vues :
@@ -34,17 +37,21 @@ export default function Gestion(props) {
     ctx = {};
   }
   const merged = { ...ctx, ...props };
+  const { hasStocks } = useModules();
   const { view, setView, currentStaff, roles } = merged;
 
   const tabs = [
     { id: "tables",        label: "Tables",               icon: Table2 },
     { id: "produits",      label: "Produits",             icon: Package },
     { id: "menus",         label: "Menus",                icon: LayoutList },
-    { id: "stocks",        label: "Stocks",               icon: Boxes },
-    { id: "recettes",      label: "Fiches & Coûts",       icon: FileSpreadsheet },
+    ...(hasStocks ? [
+      { id: "stocks",        label: "Stocks",               icon: Boxes },
+      { id: "recettes",      label: "Fiches & Coûts",       icon: FileSpreadsheet },
+    ] : []),
     { id: "historique",    label: "Historique",           icon: Receipt },
     { id: "clotures",      label: "Clôtures & Fiscalité", icon: Lock },
     { id: "caisse_params", label: "Caisse & Imprimantes", icon: Printer },
+    { id: "modules",       label: "Modules & Options",    icon: SlidersHorizontal },
     { id: "equipe",        label: "Équipe & Rôles",       icon: ShieldCheck },
   ];
 
@@ -57,11 +64,12 @@ export default function Gestion(props) {
       case "tables":        return hasPermission(currentStaff, currentRoleObj, "gestion.tables");
       case "produits":      return hasPermission(currentStaff, currentRoleObj, "gestion.products");
       case "menus":         return hasPermission(currentStaff, currentRoleObj, "gestion.menus");
-      case "stocks":        return hasPermission(currentStaff, currentRoleObj, "gestion.stocks");
-      case "recettes":      return hasPermission(currentStaff, currentRoleObj, "gestion.recipes");
+      case "stocks":        return hasStocks && hasPermission(currentStaff, currentRoleObj, "gestion.stocks");
+      case "recettes":      return hasStocks && hasPermission(currentStaff, currentRoleObj, "gestion.recipes");
       case "historique":    return hasPermission(currentStaff, currentRoleObj, "caisse.history");
       case "clotures":      return hasPermission(currentStaff, currentRoleObj, "caisse.close") || hasPermission(currentStaff, currentRoleObj, "caisse.history");
       case "caisse_params": return hasPermission(currentStaff, currentRoleObj, "caisse.settings");
+      case "modules":       return hasPermission(currentStaff, currentRoleObj, "caisse.settings");
       case "equipe":        return hasPermission(currentStaff, currentRoleObj, "gestion.staff");
       default:              return false;
     }
@@ -104,6 +112,7 @@ export default function Gestion(props) {
       {view === "historique"    && <HistoryManager history={merged.history || []} config={merged.config} />}
       {view === "clotures"      && <ClosingManager {...merged} />}
       {view === "caisse_params" && <CaisseSettingsManager config={merged.config} onUpdateConfig={merged.onUpdateConfig} pushToast={merged.pushToast} />}
+      {view === "modules"       && <ModulesManager config={merged.config} onUpdateModules={merged.onUpdateModules} pushToast={merged.pushToast} />}
       {view === "equipe"        && <StaffRoleManager {...merged} />}
     </div>
   );

@@ -36,4 +36,9 @@ export class CheckoutDto {
   @IsOptional()
   @IsString()
   ticketNumber?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  tip?: number;
 }

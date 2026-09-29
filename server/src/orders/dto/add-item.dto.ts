@@ -1,22 +1,20 @@
-import { IsString, IsNotEmpty, IsNumber, IsOptional, Min, IsArray } from "class-validator";
+import { IsString, IsNotEmpty, IsOptional, IsObject } from "class-validator";
 
 export class AddItemDto {
   @IsString()
   @IsNotEmpty()
   orderId: string;
 
-  @IsString()
-  @IsNotEmpty()
-  productId: string;
-
-  @IsNumber()
-  @Min(0)
-  price: number;
+  @IsOptional()
+  @IsObject()
+  product?: any;
 
   @IsOptional()
-  @IsNumber()
-  @Min(1)
-  qty?: number = 1;
+  @IsString()
+  productId?: string;
+
+  @IsOptional()
+  price?: number;
 
   @IsOptional()
   @IsString()
@@ -27,6 +25,13 @@ export class AddItemDto {
   course?: string;
 
   @IsOptional()
-  @IsArray()
-  composition?: any[];
+  @IsString()
+  station?: string;
+
+  @IsOptional()
+  @IsString()
+  courseStatus?: string;
+
+  @IsOptional()
+  composition?: any;
 }

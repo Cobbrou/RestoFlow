@@ -17,10 +17,12 @@ import {
   RotateCcw,
   Sparkles,
   Wifi,
+  HeartHandshake,
 } from "lucide-react";
 import { money } from "../../utils/index.js";
 import TpeModal from "../../components/TpeModal.jsx";
 import { calculateVatBreakdown } from "../../utils/vat.js";
+import { useModules } from "../../hooks/useModules.js";
 
 export const PAYMENT_METHODS = [
   { id: "carte",   label: "Carte",   icon: CreditCard, emoji: "💳" },
@@ -34,8 +36,11 @@ export const PAYMENT_METHODS = [
  *  - Remises et codes promo
  *  - Ventilation TVA
  *  - Liaison TPE Bancaire
+ *  - Pourboires & modularité à la carte
  */
 export default function PaymentModal({ order, table, config = {}, onCancel, onConfirm }) {
+  const { hasAdvancedSplits, hasTips } = useModules();
+
   // Articles facturables (hors brouillons)
   const items = useMemo(() => (order.items || []).filter((i) => i.status !== "draft"), [order]);
   const subtotal = useMemo(() => items.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0), [items]);
@@ -51,6 +56,15 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
 
   // Montant total net
   const total = useMemo(() => Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100), [subtotal, discountAmount]);
+
+  // Pourboire (Tip)
+  const [tip, setTip] = useState(0);
+  const [tipOption, setTipOption] = useState("none"); // "none" | "5%" | "10%" | "15%" | "custom"
+  const [customTip, setCustomTip] = useState("");
+
+  const effectiveTotal = useMemo(() => {
+    return Math.round((total + (hasTips ? tip : 0)) * 100) / 100;
+  }, [total, tip, hasTips]);
 
   // Ventilation TVA
   const vatDetails = useMemo(() => calculateVatBreakdown(items, discount), [items, discount]);
@@ -71,8 +85,8 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
     () => payments.reduce((s, p) => s + p.amount, 0),
     [payments]
   );
-  const remainingAmount = Math.max(0, Math.round((total - paidAmount) * 100) / 100);
-  const isFullyPaid = remainingAmount <= 0.009 && (payments.length > 0 || total === 0);
+  const remainingAmount = Math.max(0, Math.round((effectiveTotal - paidAmount) * 100) / 100);
+  const isFullyPaid = remainingAmount <= 0.009 && (payments.length > 0 || effectiveTotal === 0);
 
   // ── Mode Unique (Single) ───────────────────────────────────
   const [singleMethod, setSingleMethod] = useState(null);
@@ -84,7 +98,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
 
   // Calcul exact des parts avec répartition équitable des centimes
   const equalShares = useMemo(() => {
-    const totalCents = Math.round(total * 100);
+    const totalCents = Math.round(effectiveTotal * 100);
     const count = Math.max(1, guestCount);
     const baseCents = Math.floor(totalCents / count);
     const remainder = totalCents % count;
@@ -197,7 +211,9 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   const handleFinalize = () => {
     const meta = {
       subtotal,
-      total,
+      total: effectiveTotal,
+      rawTotal: total,
+      tip: hasTips ? tip : 0,
       discount,
       vatDetails,
       tpeData: latestTpeData,
@@ -208,8 +224,8 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
       onConfirm(singleMethod, [
         {
           id: `pay_single_${Date.now()}`,
-          label: "Paiement unique",
-          amount: total,
+          label: hasTips && tip > 0 ? `Paiement unique (dont pourboire ${money(tip)})` : "Paiement unique",
+          amount: effectiveTotal,
           method: singleMethod,
           paidAt: Date.now(),
           tpeData: latestTpeData || null,
@@ -356,7 +372,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
 
         {/* ── SÉLECTEUR DE MODE DE PARTAGE ────────────────────── */}
         <div className="px-5 pt-3 pb-2 bg-white border-b border-black/10">
-          <div className="grid grid-cols-4 gap-1.5 p-1 bg-black/5 rounded-2xl">
+          <div className={`grid gap-1.5 p-1 bg-black/5 rounded-2xl ${hasAdvancedSplits ? "grid-cols-4" : "grid-cols-2"}`}>
             <button
               onClick={() => setMode("single")}
               className={`rf-tap flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-bold transition-all ${
@@ -381,29 +397,33 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
               <span className="truncate">Parts égales</span>
             </button>
 
-            <button
-              onClick={() => setMode("item")}
-              className={`rf-tap flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-bold transition-all ${
-                mode === "item"
-                  ? "bg-[#2B2622] text-[#FAF6EE] shadow-sm"
-                  : "text-[#6B6355] hover:text-[#2B2622]"
-              }`}
-            >
-              <ListOrdered size={14} />
-              <span className="truncate">Par article</span>
-            </button>
+            {hasAdvancedSplits && (
+              <>
+                <button
+                  onClick={() => setMode("item")}
+                  className={`rf-tap flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-bold transition-all ${
+                    mode === "item"
+                      ? "bg-[#2B2622] text-[#FAF6EE] shadow-sm"
+                      : "text-[#6B6355] hover:text-[#2B2622]"
+                  }`}
+                >
+                  <ListOrdered size={14} />
+                  <span className="truncate">Par article</span>
+                </button>
 
-            <button
-              onClick={() => setMode("proportional")}
-              className={`rf-tap flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-bold transition-all ${
-                mode === "proportional"
-                  ? "bg-[#2B2622] text-[#FAF6EE] shadow-sm"
-                  : "text-[#6B6355] hover:text-[#2B2622]"
-              }`}
-            >
-              <PieChart size={14} />
-              <span className="truncate">Proportionnel</span>
-            </button>
+                <button
+                  onClick={() => setMode("proportional")}
+                  className={`rf-tap flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-bold transition-all ${
+                    mode === "proportional"
+                      ? "bg-[#2B2622] text-[#FAF6EE] shadow-sm"
+                      : "text-[#6B6355] hover:text-[#2B2622]"
+                  }`}
+                >
+                  <PieChart size={14} />
+                  <span className="truncate">Proportionnel</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -520,11 +540,84 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                   </div>
                 )}
 
+                {hasTips && tip > 0 && (
+                  <div className="flex justify-between items-center text-xs text-pink-600 font-bold">
+                    <span className="flex items-center gap-1">
+                      <HeartHandshake size={12} />
+                      Pourboire de service
+                    </span>
+                    <span>+{money(tip)}</span>
+                  </div>
+                )}
+
                 <div className="pt-2 border-t border-black/10 flex justify-between items-center">
                   <span className="text-base font-bold text-[#2B2622]">Montant total TTC</span>
-                  <span className="text-xl font-extrabold text-[#2B2622]">{money(total)}</span>
+                  <span className="text-xl font-extrabold text-[#2B2622]">{money(effectiveTotal)}</span>
                 </div>
               </div>
+
+              {/* Module Pourboire (Tips) */}
+              {hasTips && (
+                <div className="rounded-2xl bg-white border border-black/10 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#5B5346] uppercase tracking-wider flex items-center gap-1.5">
+                      <HeartHandshake size={14} className="text-pink-600" />
+                      Ajouter un pourboire
+                    </span>
+                    {tip > 0 && (
+                      <span className="text-xs font-bold text-pink-600">
+                        +{money(tip)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5 pt-1">
+                    {[
+                      { id: "none", label: "0 €", calc: 0 },
+                      { id: "5%",  label: "5%",  calc: Math.round(total * 0.05 * 100) / 100 },
+                      { id: "10%", label: "10%", calc: Math.round(total * 0.10 * 100) / 100 },
+                      { id: "15%", label: "15%", calc: Math.round(total * 0.15 * 100) / 100 },
+                      { id: "custom", label: "Libre", calc: null },
+                    ].map((btn) => {
+                      const active = tipOption === btn.id;
+                      return (
+                        <button
+                          key={btn.id}
+                          type="button"
+                          onClick={() => {
+                            setTipOption(btn.id);
+                            if (btn.calc !== null) setTip(btn.calc);
+                          }}
+                          className={`py-1.5 px-1 rounded-xl text-xs font-bold transition-all border ${
+                            active
+                              ? "bg-pink-600 text-white border-pink-600 shadow-xs"
+                              : "bg-black/[0.03] text-stone-600 border-black/5 hover:border-black/20"
+                          }`}
+                        >
+                          {btn.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {tipOption === "custom" && (
+                    <div className="pt-2 flex items-center gap-2">
+                      <span className="text-xs text-stone-500 font-medium">Montant :</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="0.00"
+                        value={customTip}
+                        onChange={(e) => {
+                          setCustomTip(e.target.value);
+                          setTip(Math.max(0, Number(e.target.value) || 0));
+                        }}
+                        className="w-24 px-2.5 py-1 text-xs font-bold rounded-lg border border-black/15 outline-none focus:border-pink-500"
+                      />
+                      <span className="text-xs font-semibold text-stone-600">€</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Moyen de paiement */}
               <div>
@@ -566,20 +659,20 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                     <button
                       onClick={() => {
                         setTpeSession({
-                          amount: total,
-                          label: "Paiement unique",
+                          amount: effectiveTotal,
+                          label: hasTips && tip > 0 ? `Paiement unique (dont pourboire ${money(tip)})` : "Paiement unique",
                           callback: (tpeRes) => {
                             setLatestTpeData(tpeRes);
                             onConfirm("carte", [
                               {
                                 id: `pay_single_${Date.now()}`,
-                                label: "Paiement unique (CB TPE)",
-                                amount: total,
+                                label: hasTips && tip > 0 ? `Paiement unique (CB TPE dont pourboire ${money(tip)})` : "Paiement unique (CB TPE)",
+                                amount: effectiveTotal,
                                 method: "carte",
                                 paidAt: Date.now(),
                                 tpeData: tpeRes,
                               },
-                            ], { subtotal, total, discount, vatDetails, tpeData: tpeRes });
+                            ], { subtotal, total: effectiveTotal, rawTotal: total, tip: hasTips ? tip : 0, discount, vatDetails, tpeData: tpeRes });
                           },
                         });
                       }}
@@ -587,7 +680,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                       style={{ background: "#2E9E5B" }}
                     >
                       <CreditCard size={14} />
-                      <span>Lancer TPE ({money(total)})</span>
+                      <span>Lancer TPE ({money(effectiveTotal)})</span>
                     </button>
                   </div>
                 )}

@@ -9,7 +9,7 @@ import {
 } from "../../utils/index.js";
 import { AllergyBadge } from "../salle/OrderTaking.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
-import { useAudioState } from "../../hooks/index.js";
+import { useAudioState, useModules } from "../../hooks/index.js";
 
 /**
  * CuisineShell — Enveloppe de la vue KDS avec support Multi-postes (Cuisine vs Bar)
@@ -26,6 +26,7 @@ export default function CuisineShell({
   onStart,
   onReady,
 }) {
+  const { hasMultiStation } = useModules();
   const { isSuspended, unlock } = useAudioState();
   const [printOrder, setPrintOrder] = useState(null); // { order, table, defaultTab } | null
   const [stationFilter, setStationFilter] = useState(() => {
@@ -36,6 +37,8 @@ export default function CuisineShell({
     }
   });
 
+  const effectiveStation = hasMultiStation ? stationFilter : "all";
+
   const handleStationChange = (st) => {
     setStationFilter(st);
     try {
@@ -45,10 +48,10 @@ export default function CuisineShell({
 
   // Helper pour savoir si un item appartient au poste actif
   const isItemForStation = (item) => {
-    if (stationFilter === "all") return true;
+    if (!hasMultiStation || effectiveStation === "all") return true;
     const isBar = item.station === "bar" || (item.productId?.startsWith("p18") || item.productId?.startsWith("p19") || item.productId?.startsWith("p20") || item.productId?.startsWith("p21"));
-    if (stationFilter === "bar") return isBar;
-    if (stationFilter === "kitchen") return !isBar;
+    if (effectiveStation === "bar") return isBar;
+    if (effectiveStation === "kitchen") return !isBar;
     return true;
   };
 
@@ -58,21 +61,21 @@ export default function CuisineShell({
         <div>
           <h1 className="rf-display text-2xl font-semibold text-[#F2ECDD] flex items-center gap-2">
             <span>Écran de Production (KDS)</span>
-            {stationFilter === "bar" && (
+            {hasMultiStation && effectiveStation === "bar" && (
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#3E7CB1]/20 text-[#3E7CB1] border border-[#3E7CB1]/40 font-mono font-bold">
                 🍸 POSTE BAR
               </span>
             )}
-            {stationFilter === "kitchen" && (
+            {hasMultiStation && effectiveStation === "kitchen" && (
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#D9A441]/20 text-[#D9A441] border border-[#D9A441]/40 font-mono font-bold">
                 👨‍🍳 POSTE CUISINE
               </span>
             )}
           </h1>
           <p className="text-sm text-[#9A917E]">
-            {stationFilter === "bar"
+            {hasMultiStation && effectiveStation === "bar"
               ? "File de préparation des boissons, cocktails & cafés"
-              : stationFilter === "kitchen"
+              : hasMultiStation && effectiveStation === "kitchen"
               ? "File de préparation des entrées, plats chauds & desserts"
               : "Suivi global de toutes les commandes en temps réel"}
           </p>
@@ -91,31 +94,33 @@ export default function CuisineShell({
             </button>
           )}
 
-          {/* Dispatch Multi-postes (Phase 4) */}
-          <div className="flex gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
-            {[
-              { id: "all", label: "Tous postes", icon: Layers },
-              { id: "kitchen", label: "Cuisine", icon: ChefHat },
-              { id: "bar", label: "Bar", icon: Wine },
-            ].map((s) => {
-              const Icon = s.icon;
-              const active = stationFilter === s.id;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => handleStationChange(s.id)}
-                  className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
-                  style={{
-                    background: active ? "#D9A441" : "transparent",
-                    color: active ? "#14110D" : "#C9C2B0",
-                  }}
-                >
-                  <Icon size={13} />
-                  <span>{s.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          {/* Dispatch Multi-postes (Phase 4 / Phase 8 Flag) */}
+          {hasMultiStation && (
+            <div className="flex gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
+              {[
+                { id: "all", label: "Tous postes", icon: Layers },
+                { id: "kitchen", label: "Cuisine", icon: ChefHat },
+                { id: "bar", label: "Bar", icon: Wine },
+              ].map((s) => {
+                const Icon = s.icon;
+                const active = effectiveStation === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => handleStationChange(s.id)}
+                    className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                    style={{
+                      background: active ? "#D9A441" : "transparent",
+                      color: active ? "#14110D" : "#C9C2B0",
+                    }}
+                  >
+                    <Icon size={13} />
+                    <span>{s.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Bascule Vue Kanban / Par Table */}
           <div className="flex gap-1 p-1 rounded-full bg-white/5">

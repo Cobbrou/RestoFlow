@@ -124,3 +124,5 @@ export function useNow() {
   }, []);
   return now;
 }
+
+export { useModules, DEFAULT_MODULES_CONFIG } from "./useModules.js";

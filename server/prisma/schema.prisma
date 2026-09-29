@@ -191,6 +191,7 @@ model OrderHistory {
   previousHash   String?  // Hash du ticket précédent (chaînage)
   signature      String?  // Hash SHA-256 de ce ticket
   closedInZId    String?  // Référence au rapport Z dans lequel ce ticket a été clôturé
+  tip            Float?   @default(0) // Pourboire perçu
   createdAt      DateTime @default(now())
 }
 
@@ -206,6 +207,7 @@ model DailyClosing {
   totalNet          Float    // CA net TTC
   totalHT           Float    // CA net HT
   totalVAT          Float    // Total TVA collectée
+  totalTips         Float?   @default(0) // Total pourboires collectés
   ticketsCount      Int      // Nombre total de tickets
   coversCount       Int      // Nombre total de personnes/couverts
   paymentsBreakdown String   // JSON snapshot: { carte: 150.0, especes: 80.0, ... }
@@ -238,6 +240,7 @@ model RestaurantConfig {
   printers         String    @default("[]") // JSON string of printer configs
   promoCodes       String    @default("[]") // JSON string of promo codes
   happyHourConfig  String?   @default("{\"enabled\":false,\"startTime\":\"17:00\",\"endTime\":\"20:00\",\"days\":[1,2,3,4,5],\"discountPercent\":20,\"categories\":[\"boissons\"]}")
+  modulesConfig    String?   @default("{\"enableStockManagement\":true,\"enableOnlineReservations\":true,\"enableCoursePacing\":true,\"enableMultiStationKds\":true,\"enableDiscounts\":true,\"enableAdvancedSplitModes\":true,\"enablePinAuth\":true,\"enableTips\":true}")
   fecExportConfig  String?   @default("{\"journalCode\":\"VT\",\"accountVente10\":\"706000\",\"accountVente20\":\"707000\",\"accountVat10\":\"445710\",\"accountVat20\":\"445720\",\"accountCard\":\"512000\",\"accountCash\":\"530000\",\"accountOther\":\"580000\"}")
   grandTotal       Float     @default(0) // Grand Total perpétuel cumulé
   lastClosingDate  DateTime?

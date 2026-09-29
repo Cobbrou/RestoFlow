@@ -30,7 +30,7 @@ import { seedTables, seedOrders, seedHistory, seedMenus, seedReservations, uid }
 import { PRODUCTS_SEED } from "./data/products.js";
 import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct, getProductEffectivePrice, deduplicateHistory } from "./utils/index.js";
-import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
+import { useBeep, useContainerWidth, useNow, DEFAULT_MODULES_CONFIG } from "./hooks/index.js";
 import { getSocket, setSocketToken } from "./services/socket.js";
 import { enqueueAction, flushQueue } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
@@ -67,6 +67,7 @@ const DEFAULT_CONFIG = {
     { code: "FIDELITE10", type: "percent", value: 10, description: "Remise Fidélité 10%", active: true },
     { code: "VIP25", type: "percent", value: 25, description: "Remise VIP 25%", active: true },
   ],
+  modulesConfig: DEFAULT_MODULES_CONFIG,
   grandTotal: 0,
   lastClosingDate: null,
   happyHourConfig: {
@@ -353,6 +354,15 @@ export default function App() {
       if (updatedConfig) setConfig(updatedConfig);
     };
 
+    const handleModulesUpdated = (modules) => {
+      if (modules) {
+        setConfig((prev) => ({
+          ...prev,
+          modulesConfig: modules,
+        }));
+      }
+    };
+
     const handleClosingNewZ = (newClosing) => {
       if (!newClosing) return;
       setClosings((prev) => [newClosing, ...prev.filter((c) => c.id !== newClosing.id)]);
@@ -405,6 +415,7 @@ export default function App() {
     socket.on("catalog:products_updated", handleCatalogProductsUpdated);
     socket.on("stock:alert", handleStockAlert);
     socket.on("config:updated", handleConfigUpdated);
+    socket.on("config:modules_updated", handleModulesUpdated);
     socket.on("closing:new_z", handleClosingNewZ);
     socket.on("connect", handleConnect);
 
@@ -432,6 +443,7 @@ export default function App() {
       socket.off("catalog:products_updated", handleCatalogProductsUpdated);
       socket.off("stock:alert", handleStockAlert);
       socket.off("config:updated", handleConfigUpdated);
+      socket.off("config:modules_updated", handleModulesUpdated);
       socket.off("closing:new_z", handleClosingNewZ);
       socket.off("connect", handleConnect);
     };
@@ -731,6 +743,15 @@ export default function App() {
     pushToast("Configuration de la caisse mise à jour", "server");
   };
 
+  const handleUpdateModules = (newModules) => {
+    setConfig((prev) => ({
+      ...prev,
+      modulesConfig: newModules,
+    }));
+    emitOrQueue("config:update_modules", { modules: newModules });
+    pushToast("Configuration des modules mise à jour", "server");
+  };
+
   const handleProcessZ = (payload) => {
     return new Promise((resolve, reject) => {
       const socket = getSocket();
@@ -789,6 +810,7 @@ export default function App() {
       vatDetails,
       tpeData,
       total,
+      tip: Number(meta?.tip || 0),
       paymentMethod: finalMethod,
       payments:      paymentList,
       paidAt,
@@ -805,6 +827,7 @@ export default function App() {
         discount,
         vatDetails,
         total,
+        tip: Number(meta?.tip || 0),
         tableNumber: table?.number,
         paymentMethod: finalMethod,
         payments: paymentList,
@@ -840,6 +863,7 @@ export default function App() {
       discount,
       vatDetails,
       ticketNumber,
+      tip: Number(meta?.tip || 0),
     });
 
     return receipt;
@@ -1241,6 +1265,8 @@ export default function App() {
       gestionView,
       pushToast,
       onUpdateConfig: handleUpdateConfig,
+      onUpdateModules: handleUpdateModules,
+      modulesConfig: config?.modulesConfig || DEFAULT_MODULES_CONFIG,
       onProcessZ: handleProcessZ,
       onAddTable: addTable,
       onUpdateTable: updateTable,
@@ -1284,6 +1310,7 @@ export default function App() {
       gestionView,
       pushToast,
       handleUpdateConfig,
+      handleUpdateModules,
       handleProcessZ,
       addTable,
       updateTable,

@@ -71,13 +71,15 @@ export default function ThermalReceiptPreview({
       else if (disc.type === "percent") discountAmount = Math.round(subtotal * (disc.value / 100) * 100) / 100;
       else discountAmount = Math.min(subtotal, disc.value || 0);
     }
-    const total = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+    const tipAmount = receipt?.tip || activeOrder.tip || 0;
+    const total = Math.max(0, Math.round((subtotal - discountAmount + tipAmount) * 100) / 100);
 
     return {
       ...activeOrder,
       tableNumber: activeTable?.number ?? 1,
       subtotal,
       total,
+      tip: tipAmount,
       discount: activeOrder.discount,
       paidAt: null,
     };

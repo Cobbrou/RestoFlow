@@ -121,7 +121,12 @@ export function generateCustomerReceiptText(receipt = {}, config = {}, width = 4
     }
   }
 
-  const computedTotal = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+  const tipAmount = receipt.tip || 0;
+  if (tipAmount > 0) {
+    lines.push(formatRow("POURBOIRE (SERVICE)", money(tipAmount), width));
+  }
+
+  const computedTotal = Math.max(0, Math.round((subtotal - discountAmount + tipAmount) * 100) / 100);
   const total = receipt.total != null ? receipt.total : computedTotal;
 
   lines.push(formatSeparator("=", width));
@@ -311,6 +316,9 @@ export function generateXReportText(xData = {}, config = {}, width = 42) {
   lines.push(formatRow("TOTAL NET TTC", money(xData.totalNet || 0), width));
   lines.push(formatRow("TOTAL NET HT", money(xData.totalHT || 0), width));
   lines.push(formatRow("TOTAL TVA COLLECTÉE", money(xData.totalVAT || 0), width));
+  if (xData.totalTips > 0) {
+    lines.push(formatRow("POURBOIRES (NON IMPOSABLES)", money(xData.totalTips), width));
+  }
   lines.push(formatSeparator("=", width));
 
   lines.push(formatRow(`Nombre de tickets émis :`, `${xData.ticketsCount || 0}`, width));
@@ -384,6 +392,9 @@ export function generateZReportText(zData = {}, config = {}, width = 42) {
   lines.push(formatRow("CHIFFRE D'AFFAIRES NET TTC", money(zData.totalNet || 0), width));
   lines.push(formatRow("TOTAL NET HT", money(zData.totalHT || 0), width));
   lines.push(formatRow("TOTAL TVA COLLECTÉE", money(zData.totalVAT || 0), width));
+  if (zData.totalTips > 0) {
+    lines.push(formatRow("POURBOIRES (NON IMPOSABLES)", money(zData.totalTips), width));
+  }
   lines.push(formatSeparator("=", width));
 
   // Grand Total Perpétuel Cumulé (GT)

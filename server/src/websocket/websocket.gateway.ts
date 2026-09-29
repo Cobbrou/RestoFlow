@@ -171,6 +171,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       vatDetails: h.vatDetails ? JSON.parse(h.vatDetails) : null,
       paymentMethod: h.paymentMethod,
       payments: JSON.parse(h.payments || "[]"),
+      tip: h.tip ?? 0,
       createdAt: h.createdAt.getTime(),
     }));
 
@@ -323,7 +324,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage("order:add_item")
   async handleAddItem(@MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: AddItemDto) {
     try {
-      const order = await this.ordersService.addItem(data);
+      const order = await this.ordersService.addItem({
+        orderId: data.orderId,
+        product: data.product || { id: data.productId || "", name: "Article", price: data.price || 0 },
+        composition: data.composition,
+        course: data.course,
+        courseStatus: data.courseStatus,
+        station: data.station,
+      });
       this.server.emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
@@ -576,6 +584,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         historyRecord.items
           .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E`)
           .join("\n") +
+        (historyRecord.tip > 0 ? `\nPourboire: ${Number(historyRecord.tip).toFixed(2)}E` : "") +
         `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01\x1b\x70\x00\x19\xfa`;
       await this.printerService.sendRaw(caissePrinter.ip, caissePrinter.port || 9100, Buffer.from(rawText, "latin1"));
     }
@@ -633,6 +642,19 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const updated = await this.configService.updateConfig(data);
       this.server.emit("config:updated", updated);
       return { ok: true, config: updated };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("caisse.settings")
+  @SubscribeMessage("config:update_modules")
+  async handleUpdateModules(@MessageBody() data: { modules: any }) {
+    try {
+      const updated = await this.configService.updateModulesConfig(data.modules);
+      this.server.emit("config:modules_updated", updated.modulesConfig);
+      this.server.emit("config:updated", updated);
+      return { ok: true, modulesConfig: updated.modulesConfig };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

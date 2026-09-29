@@ -12,6 +12,7 @@ export interface CheckoutInput {
   discount?: any;
   vatDetails?: any;
   ticketNumber?: string;
+  tip?: number;
 }
 
 @Injectable()
@@ -148,6 +149,7 @@ export class BillingService {
             : null,
           paymentMethod: finalMethod,
           payments: JSON.stringify(paymentList),
+          tip: Number(data.tip || 0),
           sequenceNumber: nextSeq,
           previousHash,
           signature,
