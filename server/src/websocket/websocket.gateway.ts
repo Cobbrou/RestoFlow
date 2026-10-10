@@ -21,6 +21,9 @@ import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
+import { WsAuthGuard, authenticateSocket } from "../auth/guards/ws-auth.guard";
+import { Public } from "../auth/decorators/public.decorator";
+import { ALLOWED_ORIGINS } from "../cors";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
 import { AddItemDto } from "../orders/dto/add-item.dto";
 import { ChangeQtyDto } from "../orders/dto/change-qty.dto";
@@ -30,10 +33,11 @@ import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto"
 
 @WebSocketGateway({
   cors: {
-    origin: "*",
+    origin: ALLOWED_ORIGINS,
   },
 })
-@UseGuards(WsPermissionsGuard)
+// 🔒 Toute action exige une session valide (sauf @Public), puis les permissions déclarées
+@UseGuards(WsAuthGuard, WsPermissionsGuard)
 @Injectable()
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -58,6 +62,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
     try {
+      // Sans session : uniquement de quoi afficher l'écran de connexion PIN
+      if (!authenticateSocket(client, this.authService)) {
+        client.emit("sync:init", await this.getPublicState());
+        client.emit("auth:required");
+        return;
+      }
+      client.emit("auth:ok");
       const fullState = await this.getFullState();
       client.emit("sync:init", fullState);
     } catch (err) {
@@ -67,6 +78,23 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+  }
+
+  /**
+   * État minimal exposé avant authentification (sélection de l'équipier au clavier PIN)
+   */
+  private async getPublicState() {
+    const [staff, roles] = await Promise.all([
+      this.prisma.staff.findMany({
+        where: { active: true },
+        select: { id: true, name: true, roleId: true, active: true, avatarBg: true },
+      }),
+      this.prisma.role.findMany(),
+    ]);
+    return {
+      staff,
+      roles: roles.map((r) => ({ ...r, permissions: JSON.parse(r.permissions || "[]") })),
+    };
   }
 
   /**
@@ -226,12 +254,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Synchronisation & Auth (Axe 1) ──────────────────────────────────
 
+  @Public()
   @SubscribeMessage("sync:request")
-  async handleSyncRequest(@ConnectedSocket() _client: Socket) {
+  async handleSyncRequest(@ConnectedSocket() client: Socket) {
+    if (!authenticateSocket(client, this.authService)) {
+      return { ok: true, state: await this.getPublicState(), authRequired: true };
+    }
     const fullState = await this.getFullState();
     return { ok: true, state: fullState };
   }
 
+  @Public()
   @SubscribeMessage("auth:verify_pin")
   async handleVerifyPin(@MessageBody() data: { pin: string; staffId?: string }) {
     try {
@@ -582,6 +615,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Impression Matérielle Directe (Axe 4) ───────────────────────────
 
+  @RequirePermissions("caisse.settings")
   @SubscribeMessage("printer:test")
   async handlePrinterTest(@MessageBody() data: { ip: string; port?: number }) {
     try {
@@ -592,6 +626,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.settings")
   @SubscribeMessage("printer:send_raw")
   async handlePrinterSendRaw(@MessageBody() data: { ip: string; port?: number; buffer: number[] | string }) {
     try {
@@ -944,6 +979,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Clôture de Caisse & Conformité Fiscale (ClosingService - Phase 7) ──
 
+  @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:get_x")
   async handleGetXReport() {
     try {
@@ -956,10 +992,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:process_z")
-  async handleProcessZClosing(@MessageBody() data: any) {
+  async handleProcessZClosing(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
       const zReport = await this.closingService.processZClosing({
-        closedBy: data.closedBy,
+        // Le Z est signé au nom de la session, jamais d'un nom fourni par le client
+        closedBy: client.data.user.name,
         openingCash: data.openingCash,
         countedCash: data.countedCash,
         notes: data.notes,
@@ -978,6 +1015,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:get_history")
   async handleGetClosingHistory(@MessageBody() data?: { limit?: number }) {
     try {
@@ -988,6 +1026,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:verify_chain")
   async handleVerifyFiscalChain() {
     try {
@@ -998,6 +1037,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:get_fec")
   async handleGetFecExport(@MessageBody() data?: any) {
     try {

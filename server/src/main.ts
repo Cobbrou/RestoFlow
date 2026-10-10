@@ -1,6 +1,7 @@
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { Logger, ValidationPipe } from "@nestjs/common";
+import { ALLOWED_ORIGINS } from "./cors";
 
 async function bootstrap() {
   const logger = new Logger("RestoFlowServer");
@@ -14,8 +15,9 @@ async function bootstrap() {
     })
   );
 
+  // 🔒 Liste blanche d'origines (le front passe par le proxy Vite, donc même origine par défaut)
   app.enableCors({
-    origin: "*",
+    origin: ALLOWED_ORIGINS,
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
     credentials: true,
   });

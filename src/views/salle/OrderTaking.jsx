@@ -821,6 +821,8 @@ function MenuComposer({ menu, products, getPortionsAvailable, onCancel, onConfir
     const composition = groups.map((g) => ({
       title: g.title,
       names: (selections[g.id] || []).map((id) => products.find((p) => p.id === id)?.name).filter(Boolean),
+      // Identifiants requis par le serveur pour décompter le stock de chaque composant
+      productIds: (selections[g.id] || []).filter((id) => products.some((p) => p.id === id)),
     }));
     onConfirm(composition);
   };

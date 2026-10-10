@@ -167,32 +167,15 @@ export default function ClosingManager({
         if (res?.ok && res.audit) {
           setAuditResult(res.audit);
         } else {
-          setAuditResult({
-            isChainValid: true,
-            status: "CONFORME_NF525",
-            ticketsVerified: history.length,
-            closingsVerified: closings.length,
-            totalTickets: history.length,
-            totalClosings: closings.length,
-            verifiedAt: new Date().toISOString(),
-            errors: [],
-          });
+          // Jamais de certificat de conformité fabriqué : l'audit n'a pas pu être réalisé
+          setAuditResult(null);
+          pushToast?.(`Audit NF525 impossible : ${res?.error || "réponse serveur invalide"}`, "warn");
         }
       });
     } else {
-      setTimeout(() => {
-        setAuditing(false);
-        setAuditResult({
-          isChainValid: true,
-          status: "CONFORME_NF525_LOCAL",
-          ticketsVerified: history.length,
-          closingsVerified: closings.length,
-          totalTickets: history.length,
-          totalClosings: closings.length,
-          verifiedAt: new Date().toISOString(),
-          errors: [],
-        });
-      }, 500);
+      setAuditing(false);
+      setAuditResult(null);
+      pushToast?.("Audit NF525 impossible hors-ligne : seul le serveur peut vérifier la chaîne fiscale.", "warn");
     }
   };
 
@@ -200,20 +183,24 @@ export default function ClosingManager({
   const handleConfirmZClosing = () => {
     setSubmittingZ(true);
     const payload = {
-      closedBy: currentStaff?.name || "Administrateur",
       openingCash: Number(openingCash) || 0,
       countedCash: countedCash !== "" ? Number(countedCash) : undefined,
       notes: zNotes.trim() || undefined,
     };
 
     if (onProcessZ) {
-      onProcessZ(payload);
-      setSubmittingZ(false);
-      setConfirmZModal(false);
-      setCountedCash("");
-      setZNotes("");
-      setSubTab("z_history");
-      pushToast?.("success", "Clôture de caisse Rapport Z effectuée et scellée avec succès !");
+      // Le toast de succès/erreur est émis par onProcessZ (App) selon la réponse serveur
+      onProcessZ(payload)
+        .then(() => {
+          setCountedCash("");
+          setZNotes("");
+          setSubTab("z_history");
+        })
+        .catch(() => {})
+        .finally(() => {
+          setSubmittingZ(false);
+          setConfirmZModal(false);
+        });
     } else if (socket && socket.connected) {
       socket.emit("closing:process_z", payload, (res) => {
         setSubmittingZ(false);
@@ -222,16 +209,16 @@ export default function ClosingManager({
           setCountedCash("");
           setZNotes("");
           setSubTab("z_history");
-          pushToast?.("success", `Rapport ${res.closing.reportNumber} scellé et enregistré avec succès !`);
+          pushToast?.(`Rapport ${res.closing.reportNumber} scellé et enregistré avec succès !`, "server");
           fetchXReport();
         } else {
-          pushToast?.("error", res?.error || "Erreur lors de la clôture de caisse.");
+          pushToast?.(res?.error || "Erreur lors de la clôture de caisse.", "warn");
         }
       });
     } else {
       setSubmittingZ(false);
       setConfirmZModal(false);
-      pushToast?.("error", "Impossible de clôturer la caisse en mode déconnecté du serveur.");
+      pushToast?.("Impossible de clôturer la caisse en mode déconnecté du serveur.", "warn");
     }
   };
 

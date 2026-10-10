@@ -302,6 +302,17 @@ export class StockService {
           const comp = typeof item.composition === "string" ? JSON.parse(item.composition) : item.composition;
           if (Array.isArray(comp)) {
             for (const c of comp) {
+              // Groupe de menu composé : { title, names, productIds }
+              if (Array.isArray(c?.productIds)) {
+                c.productIds.forEach((pId: string, idx: number) => {
+                  productQuantities.push({
+                    productId: pId,
+                    qty: item.qty,
+                    itemName: `${item.name} (${c.names?.[idx] || pId})`,
+                  });
+                });
+                continue;
+              }
               const pId = typeof c === "string" ? c : c?.id || c?.productId;
               if (pId) {
                 productQuantities.push({ productId: pId, qty: item.qty, itemName: `${item.name} (${c.name || pId})` });

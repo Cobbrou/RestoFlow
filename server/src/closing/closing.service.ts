@@ -27,8 +27,7 @@ export class ClosingService {
    * Clé secrète de scellement NF525 issue de la configuration du restaurant
    */
   private async getNf525Key(): Promise<string> {
-    const cfg = await this.configService.getConfig();
-    return cfg.nf525Key || "RESTOFLOW_NF525_SECRET_KEY";
+    return this.configService.getNf525Key();
   }
 
   /**

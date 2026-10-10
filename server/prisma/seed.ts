@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import * as crypto from "crypto";
 
 const prisma = new PrismaClient();
 
@@ -291,6 +292,7 @@ async function main() {
   // 0. Configuration Restaurant & Imprimantes (Phase 3)
   await prisma.restaurantConfig.create({
     data: {
+      nf525Key: crypto.randomBytes(32).toString("hex"),
       id: "default",
       name: "RestoFlow Bistrot",
       legalName: "RESTOFLOW BISTROT SAS",

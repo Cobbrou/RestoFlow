@@ -112,7 +112,8 @@ export class BillingService {
     const previousHash = lastHistory?.signature || "GENESIS_TICKET_RESTOFLOW";
 
     const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" } });
-    const secretKey = cfg?.nf525Key || "RESTOFLOW_NF525_SECRET_KEY";
+    if (!cfg?.nf525Key) throw new Error("Clé NF525 absente de la configuration");
+    const secretKey = cfg.nf525Key;
 
     const signaturePayload = [
       nextSeq,

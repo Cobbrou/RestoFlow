@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import GlobalStyle from "./components/GlobalStyle.jsx";
 import TopNav from "./components/TopNav.jsx";
 import ToastStack from "./components/ToastStack.jsx";
@@ -30,7 +30,7 @@ import { PRODUCTS_SEED } from "./data/products.js";
 import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct, getProductEffectivePrice, deduplicateHistory } from "./utils/index.js";
 import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
-import { getSocket, setSocketToken } from "./services/socket.js";
+import { getSocket, setSocketToken, hasValidSessionToken, clearSessionToken } from "./services/socket.js";
 import { enqueueAction, flushQueue } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
 import PwaInstallPrompt from "./components/PwaInstallPrompt.jsx";
@@ -221,6 +221,7 @@ export default function App() {
   useEffect(() => { saveCollection("stockMovements", stockMovements); }, [stockMovements]);
 
   // ── Synchronisation Temps Réel Socket.IO ───────────────────
+  const syncHandlerRef = useRef(null);
   useEffect(() => {
     const socket = getSocket();
 
@@ -302,8 +303,8 @@ export default function App() {
       setReservations((prev) => prev.map((r) => (r.id === reservation.id ? reservation : r)));
     };
 
-    const handleReservationDeleted = ({ reservationId }) => {
-      setReservations((prev) => prev.filter((r) => r.id !== reservationId));
+    const handleReservationDeleted = ({ id }) => {
+      setReservations((prev) => prev.filter((r) => r.id !== id));
     };
 
     const handleTablesTransferred = (payload) => {
@@ -363,9 +364,10 @@ export default function App() {
           return h;
         })
       );
-      pushToast(`Clôture Z n°${newClosing.zNumber || ""} enregistrée`, "server");
+      pushToast(`Clôture ${newClosing.reportNumber || "Z"} enregistrée`, "server");
     };
 
+    // Le serveur confirme la session (auth:ok) avant tout rejeu : sinon les actions seraient rejetées puis perdues
     const handleConnect = async () => {
       try {
         const syncResult = await flushQueue(socket);
@@ -380,6 +382,7 @@ export default function App() {
       });
     };
 
+    syncHandlerRef.current = handleSyncInit;
     socket.on("sync:init", handleSyncInit);
     socket.on("table:updated", handleTableUpdated);
     socket.on("order:updated", handleOrderUpdated);
@@ -394,15 +397,36 @@ export default function App() {
     socket.on("tables:transferred", handleTablesTransferred);
     socket.on("tables:merged", handleTablesMerged);
     socket.on("stock:updated", handleStockUpdated);
-    socket.on("recipes:updated", handleRecipesUpdated);
+    socket.on("recipe:updated", handleRecipesUpdated);
     socket.on("stock:movements_updated", handleMovementsUpdated);
     socket.on("catalog:products_updated", handleCatalogProductsUpdated);
     socket.on("stock:alert", handleStockAlert);
     socket.on("config:updated", handleConfigUpdated);
     socket.on("closing:new_z", handleClosingNewZ);
-    socket.on("connect", handleConnect);
+    // Session absente/expirée côté serveur : retour à l'écran PIN (sans reconnexion, évite une boucle)
+    const handleAuthRequired = () => {
+      clearSessionToken();
+      setCurrentStaff((prev) => {
+        if (prev) pushToast("Session expirée : veuillez saisir à nouveau votre code PIN", "warn");
+        return null;
+      });
+      try {
+        localStorage.removeItem("rf_active_staff");
+      } catch {}
+      saveCachedAuth(null);
+      setIsPinModalOpen(true);
+    };
 
-    if (socket.connected) {
+    // Erreurs levées par les guards serveur (droits insuffisants, session invalide)
+    const handleServerException = (err) => {
+      pushToast(err?.message || "Action refusée par le serveur", "warn");
+    };
+
+    socket.on("auth:ok", handleConnect);
+    socket.on("auth:required", handleAuthRequired);
+    socket.on("exception", handleServerException);
+
+    if (socket.connected && hasValidSessionToken()) {
       flushQueue(socket);
     }
 
@@ -421,13 +445,15 @@ export default function App() {
       socket.off("tables:transferred", handleTablesTransferred);
       socket.off("tables:merged", handleTablesMerged);
       socket.off("stock:updated", handleStockUpdated);
-      socket.off("recipes:updated", handleRecipesUpdated);
+      socket.off("recipe:updated", handleRecipesUpdated);
       socket.off("stock:movements_updated", handleMovementsUpdated);
       socket.off("catalog:products_updated", handleCatalogProductsUpdated);
       socket.off("stock:alert", handleStockAlert);
       socket.off("config:updated", handleConfigUpdated);
       socket.off("closing:new_z", handleClosingNewZ);
-      socket.off("connect", handleConnect);
+      socket.off("auth:ok", handleConnect);
+      socket.off("auth:required", handleAuthRequired);
+      socket.off("exception", handleServerException);
     };
   }, [soundOn, beep, pushToast]);
 
@@ -454,7 +480,9 @@ export default function App() {
           pushToast(response.error || "Une erreur est survenue sur le serveur", "warn");
           if (onAck) onAck(response);
           // Réconciliation automatique avec l'état réel de la base de données
-          socket.emit("sync:request");
+          socket.emit("sync:request", {}, (res) => {
+            if (res && res.state) syncHandlerRef.current?.(res.state);
+          });
         } else if (onAck) {
           onAck(response);
         }
@@ -734,8 +762,8 @@ export default function App() {
       const socket = getSocket();
       if (socket && socket.connected) {
         socket.emit("closing:process_z", payload, (res) => {
-          if (res && res.success) {
-            pushToast(`✅ Clôture Z n°${res.closing?.zNumber || ""} validée avec succès`, "server");
+          if (res && res.ok) {
+            pushToast(`✅ Clôture ${res.closing?.reportNumber || "Z"} validée avec succès`, "server");
             resolve(res);
           } else {
             pushToast(`❌ Erreur lors du Z : ${res?.error || "Inconnue"}`, "warn");
@@ -743,9 +771,8 @@ export default function App() {
           }
         });
       } else {
-        enqueueAction("closing:process_z", payload);
-        pushToast("Clôture Z enregistrée en file locale (hors-ligne)", "server");
-        resolve({ success: true, offline: true });
+        pushToast("Clôture Z impossible hors-ligne : reconnectez la caisse au serveur", "warn");
+        reject(new Error("offline"));
       }
     });
   };
@@ -1028,19 +1055,19 @@ export default function App() {
     setReservations((prev) =>
       prev.map((r) => (r.id === reservationId ? { ...r, status } : r))
     );
-    emitOrQueue("reservation:update_status", { reservationId, status });
+    emitOrQueue("reservation:update_status", { id: reservationId, status });
   };
 
   const handleAssignReservationTable = (reservationId, tableId) => {
     setReservations((prev) =>
       prev.map((r) => (r.id === reservationId ? { ...r, tableId } : r))
     );
-    emitOrQueue("reservation:assign_table", { reservationId, tableId });
+    emitOrQueue("reservation:assign_table", { id: reservationId, tableId });
   };
 
   const handleDeleteReservation = (reservationId) => {
     setReservations((prev) => prev.filter((r) => r.id !== reservationId));
-    emitOrQueue("reservation:delete", { reservationId });
+    emitOrQueue("reservation:delete", { id: reservationId });
     pushToast("Réservation supprimée", "server");
   };
 
@@ -1048,8 +1075,8 @@ export default function App() {
     setReservations((prev) =>
       prev.map((r) => (r.id === reservation.id ? { ...r, status: "seated", tableId: table.id } : r))
     );
-    emitOrQueue("reservation:assign_table", { reservationId: reservation.id, tableId: table.id });
-    emitOrQueue("reservation:update_status", { reservationId: reservation.id, status: "seated" });
+    emitOrQueue("reservation:assign_table", { id: reservation.id, tableId: table.id });
+    emitOrQueue("reservation:update_status", { id: reservation.id, status: "seated" });
 
     setActiveTableId(table.id);
     ensureOrderForTable(table.id);

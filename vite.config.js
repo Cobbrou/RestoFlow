@@ -77,6 +77,10 @@ export default defineConfig({
       },
     },
   },
+  // Ignore le build compilé du serveur (doublon CommonJS des specs)
+  test: {
+    exclude: ['**/node_modules/**', 'server/dist/**'],
+  },
   build: {
     chunkSizeWarningLimit: 600,
     rollupOptions: {

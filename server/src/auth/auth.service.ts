@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import * as bcrypt from "bcryptjs";
 import * as crypto from "crypto";
@@ -11,7 +11,20 @@ export interface SessionPayload {
   exp: number;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || "restoflow-secure-session-key-2026";
+// 🔒 Jamais de secret par défaut versionné : sans JWT_SECRET, clé aléatoire par démarrage
+// (les sessions sont alors invalidées à chaque redémarrage du serveur)
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
+if (!process.env.JWT_SECRET) {
+  new Logger("AuthService").warn(
+    "JWT_SECRET non défini : clé de session éphémère générée, les sessions expirent au redémarrage."
+  );
+}
+
+// Anti brute-force du PIN : verrouillage après N échecs consécutifs par équipier
+// ponytail: compteur en mémoire mono-processus, à déplacer en base si plusieurs instances serveur
+const MAX_PIN_ATTEMPTS = 5;
+const PIN_LOCK_MS = 5 * 60 * 1000;
+const pinFailures = new Map<string, { count: number; lockedUntil: number }>();
 
 @Injectable()
 export class AuthService {
@@ -38,10 +51,11 @@ export class AuthService {
       const parts = token.split(".");
       if (parts.length !== 3) return null;
       const [header, body, signature] = parts;
-      const expected = crypto.createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64url");
-      if (signature !== expected) return null;
+      const expected = crypto.createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest();
+      const given = Buffer.from(signature, "base64url");
+      if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
       const payload: SessionPayload = JSON.parse(Buffer.from(body, "base64url").toString());
-      if (payload.exp && Date.now() > payload.exp) return null;
+      if (!payload.exp || Date.now() > payload.exp) return null;
       return payload;
     } catch {
       return null;
@@ -52,38 +66,33 @@ export class AuthService {
     if (!pin || pin.length < 4) {
       throw new UnauthorizedException("Code PIN invalide (4 chiffres requis)");
     }
-
-    let staff = null;
-    if (staffId) {
-      staff = await this.prisma.staff.findFirst({
-        where: { id: staffId, active: true },
-        include: { role: true },
-      });
-      if (!staff) {
-        throw new UnauthorizedException("Équipier introuvable ou compte inactif");
-      }
-      const matches = bcrypt.compareSync(pin, staff.pin) || staff.pin === pin;
-      if (!matches) {
-        throw new UnauthorizedException("Code PIN incorrect");
-      }
-    } else {
-      // Recherche globale sur tous les équipiers actifs
-      const activeStaffList = await this.prisma.staff.findMany({
-        where: { active: true },
-        include: { role: true },
-      });
-
-      for (const candidate of activeStaffList) {
-        if (bcrypt.compareSync(pin, candidate.pin) || candidate.pin === pin) {
-          staff = candidate;
-          break;
-        }
-      }
-
-      if (!staff) {
-        throw new UnauthorizedException("Code PIN non reconnu");
-      }
+    if (!staffId) {
+      throw new UnauthorizedException("Sélectionnez un équipier avant de saisir le PIN");
     }
+
+    const failure = pinFailures.get(staffId);
+    if (failure && failure.lockedUntil > Date.now()) {
+      const minutes = Math.ceil((failure.lockedUntil - Date.now()) / 60000);
+      throw new UnauthorizedException(`Trop de tentatives. Réessayez dans ${minutes} min`);
+    }
+
+    const staff = await this.prisma.staff.findFirst({
+      where: { id: staffId, active: true },
+      include: { role: true },
+    });
+    if (!staff) {
+      throw new UnauthorizedException("Équipier introuvable ou compte inactif");
+    }
+
+    if (!(await bcrypt.compare(pin, staff.pin))) {
+      const count = (failure?.count || 0) + 1;
+      pinFailures.set(staffId, {
+        count: count >= MAX_PIN_ATTEMPTS ? 0 : count,
+        lockedUntil: count >= MAX_PIN_ATTEMPTS ? Date.now() + PIN_LOCK_MS : 0,
+      });
+      throw new UnauthorizedException("Code PIN incorrect");
+    }
+    pinFailures.delete(staffId);
 
     const permissions: string[] = JSON.parse(staff.role.permissions || "[]");
     const safeStaff = {

@@ -7,7 +7,17 @@ export class StaffService {
 
   async getStaff() {
     return this.prisma.staff.findMany({
-      include: { role: true },
+      // 🔒 Jamais de hash de PIN dans une réponse API
+      select: {
+        id: true,
+        name: true,
+        roleId: true,
+        email: true,
+        phone: true,
+        active: true,
+        avatarBg: true,
+        role: true,
+      },
       orderBy: { name: "asc" },
     });
   }
