@@ -28,8 +28,6 @@ import { WsAuthGuard, authenticateSocket } from "../auth/guards/ws-auth.guard";
 import { Public } from "../auth/decorators/public.decorator";
 import { ALLOWED_ORIGINS } from "../cors";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
-import { AddItemDto } from "../orders/dto/add-item.dto";
-import { ChangeQtyDto } from "../orders/dto/change-qty.dto";
 import { CheckoutDto } from "../orders/dto/checkout.dto";
 import { StockMovementDto } from "../stock/dto/stock-movement.dto";
 import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto";
@@ -127,8 +125,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         where: { status: "open" },
         include: { items: true, table: true },
       }),
-      this.prisma.product.findMany(),
-      this.prisma.menu.findMany(),
+      this.catalogService.getProducts(),
+      this.catalogService.getMenus(),
       this.prisma.role.findMany(),
       // 🔒 Sécurité Axe 1 : EXCLUSION TOTALE des PINs
       this.prisma.staff.findMany({
@@ -149,13 +147,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.prisma.ingredient.findMany({
         orderBy: { name: "asc" },
       }),
-      this.prisma.recipeItem.findMany({
-        include: {
-          ingredient: {
-            select: { id: true, name: true, unit: true, costPerUnit: true, currentStock: true },
-          },
-        },
-      }),
+      this.recipesService.listItems(),
       this.prisma.stockMovement.findMany({
         take: 60,
         orderBy: { createdAt: "desc" },
@@ -174,18 +166,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const parsedOrders = rawOrders.map((o) => this.ordersService.formatOrder(o));
 
-    const parsedProducts = products.map((p) => ({
-      ...p,
-      emoji: p.emoji || "🍽️",
-      allergens: JSON.parse(p.allergens || "[]"),
-    }));
-
-    const parsedMenus = menus.map((m) => ({
-      ...m,
-      emoji: m.emoji || "📋",
-      groups: JSON.parse(m.groups || "[]"),
-    }));
-
     const parsedRoles = roles.map((r) => ({
       ...r,
       permissions: JSON.parse(r.permissions || "[]"),
@@ -197,19 +177,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       ...ing,
       status: ing.currentStock <= 0 ? "out" : ing.currentStock <= ing.minThreshold ? "low" : "ok",
       stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
-    }));
-
-    const parsedRecipes = rawRecipes.map((rc) => ({
-      id: rc.id,
-      productId: rc.productId,
-      ingredientId: rc.ingredientId,
-      ingredientName: rc.ingredient.name,
-      quantity: rc.quantity,
-      unit: rc.unit,
-      costPerUnit: rc.ingredient.costPerUnit,
-      currentStock: rc.ingredient.currentStock,
-      isCritical: rc.isCritical,
-      notes: rc.notes || "",
     }));
 
     const parsedMovements = rawMovements.map((m) => ({
@@ -230,13 +197,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     return {
       tables,
       orders: parsedOrders,
-      products: parsedProducts,
-      menus: parsedMenus,
+      products,
+      menus,
       roles: parsedRoles,
       staff,
       history: parsedHistory,
       ingredients: parsedIngredients,
-      recipes: parsedRecipes,
+      recipes: rawRecipes,
       stockMovements: parsedMovements,
       config: rawConfig,
       reservations: rawReservations,
@@ -404,15 +371,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           this.server.emit("stock:alert", { message: msg });
         }
         if (stockResult.affectedProducts.length > 0) {
-          const allProducts = await this.prisma.product.findMany();
-          this.server.emit(
-            "catalog:products_updated",
-            allProducts.map((p) => ({
-              ...p,
-              emoji: p.emoji || "🍽️",
-              allergens: JSON.parse(p.allergens || "[]"),
-            }))
-          );
+          this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
         }
         this.server.emit("stock:updated", stockResult.refreshedIngredients);
         this.server.emit("stock:movements_updated", stockResult.recentMovements);
@@ -656,71 +615,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  // ── Réservations ────────────────────────────────────────────────────
-
-  @SubscribeMessage("reservation:create")
-  async handleCreateReservation(@MessageBody() data: any) {
-    try {
-      const res = await this.prisma.reservation.create({
-        data: {
-          id: data.id || `res_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          customerName: data.customerName,
-          phone: data.phone,
-          email: data.email || null,
-          date: data.date,
-          time: data.time,
-          guests: Number(data.guests) || 2,
-          status: data.status || "confirmed",
-          tableId: data.tableId || null,
-          notes: data.notes || null,
-        },
-      });
-      this.server.emit("reservation:created", res);
-      return { ok: true, reservation: res };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  @SubscribeMessage("reservation:update_status")
-  async handleUpdateReservationStatus(@MessageBody() data: { id: string; status: string }) {
-    try {
-      const res = await this.prisma.reservation.update({
-        where: { id: data.id },
-        data: { status: data.status },
-      });
-      this.server.emit("reservation:updated", res);
-      return { ok: true, reservation: res };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  @SubscribeMessage("reservation:assign_table")
-  async handleAssignReservationTable(@MessageBody() data: { id: string; tableId: string | null }) {
-    try {
-      const res = await this.prisma.reservation.update({
-        where: { id: data.id },
-        data: { tableId: data.tableId },
-      });
-      this.server.emit("reservation:updated", res);
-      return { ok: true, reservation: res };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  @SubscribeMessage("reservation:delete")
-  async handleDeleteReservation(@MessageBody() data: { id: string }) {
-    try {
-      await this.prisma.reservation.delete({ where: { id: data.id } });
-      this.server.emit("reservation:deleted", { id: data.id });
-      return { ok: true, id: data.id };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
   // ── Stocks & Recettes (StockService & RecipesService) ───────────────
 
   @SubscribeMessage("stock:request_sync")
@@ -763,15 +657,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.server.emit("stock:movements_updated", movements);
 
       if (result.affectedProducts.length > 0) {
-        const products = await this.prisma.product.findMany();
-        this.server.emit(
-          "catalog:products_updated",
-          products.map((p) => ({
-            ...p,
-            emoji: p.emoji || "🍽️",
-            allergens: JSON.parse(p.allergens || "[]"),
-          }))
-        );
+        this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
       }
 
       return { ok: true, movement: result.movement, ingredient: result.ingredient };
@@ -842,25 +728,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleSaveRecipe(@MessageBody() data: { productId: string; items: any[] }) {
     try {
       await this.recipesService.saveRecipe(data.productId, data.items);
-      const recipes = await this.prisma.recipeItem.findMany({
-        include: {
-          ingredient: {
-            select: { id: true, name: true, unit: true, costPerUnit: true, currentStock: true },
-          },
-        },
-      });
-      const parsedRecipes = recipes.map((rc) => ({
-        id: rc.id,
-        productId: rc.productId,
-        ingredientId: rc.ingredientId,
-        ingredientName: rc.ingredient.name,
-        quantity: rc.quantity,
-        unit: rc.unit,
-        costPerUnit: rc.ingredient.costPerUnit,
-        currentStock: rc.ingredient.currentStock,
-        isCritical: rc.isCritical,
-        notes: rc.notes || "",
-      }));
+      const parsedRecipes = await this.recipesService.listItems();
       this.server.emit("recipe:updated", parsedRecipes);
       return { ok: true, recipes: parsedRecipes };
     } catch (err: any) {
@@ -889,25 +757,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const allProducts = await this.catalogService.getProducts();
       const allIngredients = await this.stockService.findAllIngredients();
       const movements = await this.stockService.getMovements(60);
-      const recipes = await this.prisma.recipeItem.findMany({
-        include: {
-          ingredient: {
-            select: { id: true, name: true, unit: true, costPerUnit: true, currentStock: true },
-          },
-        },
-      });
-      const parsedRecipes = recipes.map((rc) => ({
-        id: rc.id,
-        productId: rc.productId,
-        ingredientId: rc.ingredientId,
-        ingredientName: rc.ingredient.name,
-        quantity: rc.quantity,
-        unit: rc.unit,
-        costPerUnit: rc.ingredient.costPerUnit,
-        currentStock: rc.ingredient.currentStock,
-        isCritical: rc.isCritical,
-        notes: rc.notes || "",
-      }));
+      const parsedRecipes = await this.recipesService.listItems();
 
       this.server.emit("catalog:products_updated", allProducts);
       this.server.emit("stock:updated", allIngredients);
@@ -958,15 +808,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         data: { available: !p.available },
       });
 
-      const allProducts = await this.prisma.product.findMany();
-      this.server.emit(
-        "catalog:products_updated",
-        allProducts.map((prod) => ({
-          ...prod,
-          emoji: prod.emoji || "🍽️",
-          allergens: JSON.parse(prod.allergens || "[]"),
-        }))
-      );
+      this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
       return { ok: true, product: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -975,7 +817,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Clôture de Caisse & Conformité Fiscale (ClosingService - Phase 7) ──
 
-  @RequirePermissions("caisse.checkout", "caisse.settings")
+  @RequirePermissions("caisse.close", "caisse.history")
   @SubscribeMessage("closing:get_x")
   async handleGetXReport() {
     try {
@@ -986,7 +828,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("caisse.checkout", "caisse.settings")
+  @RequirePermissions("caisse.close")
   @SubscribeMessage("closing:process_z")
   async handleProcessZClosing(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
@@ -1012,7 +854,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("caisse.checkout", "caisse.settings")
+  @RequirePermissions("caisse.close", "caisse.history")
   @SubscribeMessage("closing:get_history")
   async handleGetClosingHistory(@MessageBody() data?: { limit?: number }) {
     try {
@@ -1023,7 +865,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("caisse.checkout", "caisse.settings")
+  @RequirePermissions("caisse.fec", "caisse.close")
   @SubscribeMessage("closing:verify_chain")
   async handleVerifyFiscalChain(@ConnectedSocket() client: Socket) {
     try {
@@ -1035,7 +877,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("caisse.checkout", "caisse.settings")
+  @RequirePermissions("caisse.fec")
   @SubscribeMessage("closing:get_fec")
   async handleGetFecExport(@ConnectedSocket() client: Socket, @MessageBody() data?: any) {
     try {
@@ -1051,7 +893,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Avoirs & Journal des événements (NF525) ─────────────────────────
 
-  @RequirePermissions("caisse.settings")
+  @RequirePermissions("caisse.close")
   @SubscribeMessage("history:refund")
   async handleRefund(@ConnectedSocket() client: Socket, @MessageBody() data: { historyId: string; reason: string }) {
     try {
@@ -1069,7 +911,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("caisse.settings")
+  @RequirePermissions("caisse.fec", "caisse.close")
   @SubscribeMessage("journal:list")
   async handleJournalList(@MessageBody() data?: { limit?: number }) {
     try {

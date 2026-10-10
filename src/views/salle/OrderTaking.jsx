@@ -1,3 +1,4 @@
+import { useNow } from "../../hooks/index.js";
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import {
   ArrowLeft, Search, Plus, Minus, X, StickyNote,
@@ -28,10 +29,10 @@ const COURSE_CYCLE = ["entree", "plat", "dessert", "boisson", "direct"];
    ───────────────────────────────────────────────────────────── */
 
 export default function OrderTaking({
-  table, order, now, products, isMobile,
+  table, order, products, isMobile,
   recipes = [], ingredients = [], config = {},
   tables = [], orders = [],
-  currentStaff, roles,
+  currentStaff,
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
   onQty, onRemove, onNote,
@@ -42,6 +43,7 @@ export default function OrderTaking({
   onTransferTable,
   onMergeTable,
 }) {
+  const now = useNow();
   const isHeadWaiterOrAdmin = currentStaff?.roleId === "head_waiter" || currentStaff?.roleId === "admin";
   const [activeCat, setActiveCat]     = useState(CATEGORIES[0].id);
   const [query, setQuery]             = useState("");

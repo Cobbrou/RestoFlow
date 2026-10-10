@@ -13,6 +13,8 @@ import { BillingModule } from "./billing/billing.module";
 import { ConfigModule } from "./config/config.module";
 import { PrinterModule } from "./printer/printer.module";
 import { ClosingModule } from "./closing/closing.module";
+import { ReservationsModule } from "./reservations/reservations.module";
+import { ManagementModule } from "./management/management.module";
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { ClosingModule } from "./closing/closing.module";
     ConfigModule,
     PrinterModule,
     ClosingModule,
+    ReservationsModule,
+    ManagementModule,
   ],
 })
 export class AppModule {}

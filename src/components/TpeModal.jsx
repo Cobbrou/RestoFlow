@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   CreditCard,
   Wifi,
@@ -6,9 +6,7 @@ import {
   XCircle,
   AlertCircle,
   RotateCcw,
-  Receipt,
   X,
-  ShieldCheck,
 } from "lucide-react";
 import { money } from "../utils/index.js";
 

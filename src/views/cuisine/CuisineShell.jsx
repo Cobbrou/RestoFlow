@@ -9,7 +9,7 @@ import {
 } from "../../utils/index.js";
 import { AllergyBadge } from "../salle/OrderTaking.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
-import { useAudioState } from "../../hooks/index.js";
+import { useAudioState, useNow } from "../../hooks/index.js";
 
 /**
  * CuisineShell — Enveloppe de la vue KDS avec support Multi-postes (Cuisine vs Bar)
@@ -20,12 +20,12 @@ export default function CuisineShell({
   setView,
   tables,
   orders,
-  now,
   products,
   config = {},
   onStart,
   onReady,
 }) {
+  const now = useNow();
   const { isSuspended, unlock } = useAudioState();
   const [printOrder, setPrintOrder] = useState(null); // { order, table, defaultTab } | null
   const [stationFilter, setStationFilter] = useState(() => {
@@ -523,7 +523,6 @@ function KitchenByTable({
   orders,
   now,
   products,
-  stationFilter,
   isItemForStation,
   onPrintTicket,
 }) {

@@ -29,7 +29,7 @@ import { seedTables, seedOrders, seedHistory, seedMenus, seedReservations, uid }
 import { PRODUCTS_SEED } from "./data/products.js";
 import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct, getProductEffectivePrice, deduplicateHistory } from "./utils/index.js";
-import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
+import { useBeep, useContainerWidth } from "./hooks/index.js";
 import { getSocket, setSocketToken, hasValidSessionToken, clearSessionToken } from "./services/socket.js";
 import { enqueueAction, flushQueue, hasPendingActions, newActionId } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
@@ -167,7 +167,6 @@ export default function App() {
   const [activeTableId, setActiveTableId] = useState(null);
 
   // ── Horloge + sons + toasts ───────────────────────────────
-  const now      = useNow();
   const [toasts, setToasts]   = useState([]);
   const [soundOn, setSoundOn] = useState(true);
   const beep     = useBeep();
@@ -403,6 +402,10 @@ export default function App() {
     socket.on("stock:alert", handleStockAlert);
     socket.on("config:updated", handleConfigUpdated);
     socket.on("closing:new_z", handleClosingNewZ);
+    socket.on("tables:list", setTables);
+    socket.on("menus:list", setMenus);
+    socket.on("staff:list", setStaff);
+    socket.on("roles:list", setRoles);
     // Session absente/expirée côté serveur : retour à l'écran PIN (sans reconnexion, évite une boucle)
     const handleAuthRequired = () => {
       clearSessionToken();
@@ -451,6 +454,10 @@ export default function App() {
       socket.off("stock:alert", handleStockAlert);
       socket.off("config:updated", handleConfigUpdated);
       socket.off("closing:new_z", handleClosingNewZ);
+      socket.off("tables:list", setTables);
+      socket.off("menus:list", setMenus);
+      socket.off("staff:list", setStaff);
+      socket.off("roles:list", setRoles);
       socket.off("auth:ok", handleConnect);
       socket.off("auth:required", handleAuthRequired);
       socket.off("exception", handleServerException);
@@ -1110,11 +1117,20 @@ export default function App() {
 
   // ── Actions Gestion : tables ───────────────────────────────
   const tableHasActiveOrder = (tableId) => orders.some((o) => o.tableId === tableId);
-  const addTable    = (data) => setTables((prev) => [...prev, { id: uid("tbl"), reserved: false, alert: false, x: 50, y: 50, ...data }]);
-  const updateTable = (id, data) => setTables((prev) => prev.map((t) => (t.id === id ? { ...t, ...data } : t)));
+  // Back-office persisté côté serveur (ManagementGateway) : mise à jour optimiste, puis liste diffusée par le serveur
+  const addTable = (data) => {
+    const id = uid("tbl");
+    setTables((prev) => [...prev, { id, reserved: false, alert: false, x: 50, y: 50, ...data }]);
+    emitOrQueue("table:create", { id, ...data });
+  };
+  const updateTable = (id, data) => {
+    setTables((prev) => prev.map((t) => (t.id === id ? { ...t, ...data } : t)));
+    emitOrQueue("table:update", { id, data });
+  };
   const deleteTable = (id) => {
     if (tableHasActiveOrder(id)) { pushToast("Impossible de supprimer : commande en cours", "warn"); return false; }
     setTables((prev) => prev.filter((t) => t.id !== id));
+    emitOrQueue("table:delete", { id });
     return true;
   };
 
@@ -1207,18 +1223,51 @@ export default function App() {
   };
 
   // ── Actions Gestion : menus ────────────────────────────────
-  const addMenu    = (data) => setMenus((prev) => [...prev, { id: uid("menu"), groups: [], ...data }]);
-  const updateMenu = (id, data) => setMenus((prev) => prev.map((m) => (m.id === id ? { ...m, ...data } : m)));
-  const deleteMenu = (id) => setMenus((prev) => prev.filter((m) => m.id !== id));
+  const addMenu = (data) => {
+    const id = uid("menu");
+    setMenus((prev) => [...prev, { id, groups: [], ...data }]);
+    emitOrQueue("menu:create", { id, ...data });
+  };
+  const updateMenu = (id, data) => {
+    setMenus((prev) => prev.map((m) => (m.id === id ? { ...m, ...data } : m)));
+    emitOrQueue("menu:update", { id, data });
+  };
+  const deleteMenu = (id) => {
+    setMenus((prev) => prev.filter((m) => m.id !== id));
+    emitOrQueue("menu:delete", { id });
+  };
 
   // ── Actions Gestion : équipe & rôles ────────────────────────
-  const addStaff    = (data) => setStaff((prev) => [...prev, { id: uid("stf"), ...data }]);
-  const updateStaff = (id, data) => setStaff((prev) => prev.map((s) => (s.id === id ? { ...s, ...data } : s)));
-  const deleteStaff = (id) => setStaff((prev) => prev.filter((s) => s.id !== id));
+  // Le PIN part au serveur (haché en bcrypt) mais n'est jamais conservé dans l'état local
+  const addStaff = (data) => {
+    const id = uid("stf");
+    const { pin: _pin, ...publicData } = data;
+    setStaff((prev) => [...prev, { id, ...publicData }]);
+    emitOrQueue("staff:create", { id, ...data });
+  };
+  const updateStaff = (id, data) => {
+    const { pin: _pin, ...publicData } = data;
+    setStaff((prev) => prev.map((s) => (s.id === id ? { ...s, ...publicData } : s)));
+    emitOrQueue("staff:update", { id, data });
+  };
+  const deleteStaff = (id) => {
+    setStaff((prev) => prev.filter((s) => s.id !== id));
+    emitOrQueue("staff:delete", { id });
+  };
 
-  const addRole    = (data) => setRoles((prev) => [...prev, { id: uid("role"), isSystem: false, ...data }]);
-  const updateRole = (id, data) => setRoles((prev) => prev.map((r) => (r.id === id ? { ...r, ...data } : r)));
-  const deleteRole = (id) => setRoles((prev) => prev.filter((r) => r.id !== id));
+  const addRole = (data) => {
+    const id = uid("role");
+    setRoles((prev) => [...prev, { id, isSystem: false, ...data }]);
+    emitOrQueue("role:create", { id, ...data });
+  };
+  const updateRole = (id, data) => {
+    setRoles((prev) => prev.map((r) => (r.id === id ? { ...r, ...data } : r)));
+    emitOrQueue("role:update", { id, data });
+  };
+  const deleteRole = (id) => {
+    setRoles((prev) => prev.filter((r) => r.id !== id));
+    emitOrQueue("role:delete", { id });
+  };
 
   // ── Actions Gestion : stocks & fiches techniques (Phase 2) ──
   const handleAddStockMovement = (data) => {
@@ -1404,7 +1453,6 @@ export default function App() {
           tables={tables}
           orders={orders}
           reservations={reservations}
-          now={now}
           onOpen={openTable}
           onToggleAlert={toggleAlert}
           onOpenReservations={() => setIsReservationModalOpen(true)}
@@ -1416,7 +1464,6 @@ export default function App() {
         <OrderTaking
           table={activeTable}
           order={activeOrder}
-          now={now}
           products={combinedProducts}
           recipes={recipes}
           ingredients={ingredients}
@@ -1456,7 +1503,6 @@ export default function App() {
           setView={setCuisineView}
           tables={tables}
           orders={orders}
-          now={now}
           products={combinedProducts}
           config={config}
           onStart={startPrep}

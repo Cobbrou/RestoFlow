@@ -109,7 +109,7 @@ const INITIAL_ROLES = [
     isSystem: false,
     permissions: [
       "salle.view", "salle.order", "salle.send_kitchen", "salle.serve", "salle.reservations", "salle.alerts",
-      "caisse.checkout", "caisse.split", "caisse.history", "caisse.discount", "gestion.tables", "gestion.stocks", "dashboard.view",
+      "caisse.checkout", "caisse.split", "caisse.history", "caisse.discount", "caisse.close", "gestion.tables", "gestion.stocks", "dashboard.view",
     ],
   },
   {
@@ -137,7 +137,7 @@ const INITIAL_ROLES = [
     description: "Suivi des ventes, consultation des rapports financiers et historique complet des paiements.",
     color: "#6B5B95",
     isSystem: false,
-    permissions: ["caisse.history", "dashboard.view"],
+    permissions: ["caisse.history", "caisse.fec", "dashboard.view"],
   },
 ];
 

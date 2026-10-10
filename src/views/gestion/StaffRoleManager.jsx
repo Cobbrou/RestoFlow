@@ -6,8 +6,6 @@ import {
   Pencil,
   Trash2,
   KeyRound,
-  Eye,
-  EyeOff,
   Phone,
   Mail,
   SlidersHorizontal,
@@ -43,12 +41,6 @@ export default function StaffRoleManager({
   const [editingRole, setEditingRole] = useState(null);   // null | 'new' | roleObject
   const [filterRoleId, setFilterRoleId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showPins, setShowPins] = useState({}); // { [staffId]: boolean }
-
-  const togglePinVisibility = (id) => {
-    setShowPins((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
   // Filtrage du personnel
   const filteredStaff = useMemo(() => {
     return staff.filter((s) => {
@@ -215,7 +207,6 @@ export default function StaffRoleManager({
               {filteredStaff.map((member) => {
                 const role = roles.find((r) => r.id === member.roleId);
                 const roleColor = role?.color || "#5B5346";
-                const isPinVisible = Boolean(showPins[member.id]);
 
                 // Initiales
                 const initials = member.name
@@ -316,17 +307,9 @@ export default function StaffRoleManager({
                             <KeyRound size={12} className="text-[#8A8378]" />
                             <span className="text-[11px] text-[#8A8378]">Code PIN terminal :</span>
                             <span className="rf-mono font-bold tracking-widest text-[#2B2622] ml-1">
-                              {isPinVisible ? member.pin || "Non défini" : "••••"}
+                              ••••
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => togglePinVisibility(member.id)}
-                            className="rf-tap text-[11px] font-semibold text-[#3E7CB1] flex items-center gap-1"
-                          >
-                            {isPinVisible ? <EyeOff size={12} /> : <Eye size={12} />}
-                            {isPinVisible ? "Masquer" : "Afficher"}
-                          </button>
                         </div>
                       </div>
                     </div>
@@ -625,12 +608,14 @@ export default function StaffRoleManager({
 function StaffFormModal({ member, roles, onClose, onSave }) {
   const [name, setName] = useState(member?.name ?? "");
   const [roleId, setRoleId] = useState(member?.roleId ?? roles[0]?.id ?? "server");
-  const [pin, setPin] = useState(member?.pin ?? "");
+  const [pin, setPin] = useState("");
   const [email, setEmail] = useState(member?.email ?? "");
   const [phone, setPhone] = useState(member?.phone ?? "");
   const [active, setActive] = useState(member?.active ?? true);
 
-  const isValid = name.trim().length > 0 && roleId;
+  // PIN obligatoire à la création ; en modification, vide = inchangé
+  const pinOk = member ? pin === "" || /^\d{4,6}$/.test(pin) : /^\d{4,6}$/.test(pin);
+  const isValid = name.trim().length > 0 && roleId && pinOk;
 
   return (
     <Modal title={member ? `Modifier ${member.name}` : "Nouveau collaborateur"} onClose={onClose}>
@@ -655,7 +640,7 @@ function StaffFormModal({ member, roles, onClose, onSave }) {
           </select>
         </Field>
 
-        <Field label="Code PIN (4 chiffres)">
+        <Field label={member ? "Nouveau code PIN (vide = inchangé)" : "Code PIN (4 à 6 chiffres) *"}>
           <input
             type="text"
             inputMode="numeric"
@@ -715,7 +700,7 @@ function StaffFormModal({ member, roles, onClose, onSave }) {
             onSave({
               name: name.trim(),
               roleId,
-              pin: pin.trim(),
+              ...(pin ? { pin } : {}),
               email: email.trim(),
               phone: phone.trim(),
               active,
