@@ -316,3 +316,20 @@ export function heldToRelease(items = [], pacingEnabled = true) {
     })
     .map((i) => i.id);
 }
+
+/** Commande hors salle (emporter ; livraison à venir) */
+export const isOffPremise = (order) => !!order?.type && order.type !== "dine_in";
+
+/** Libellé d'une commande (copie de orderLabel, server/src/orders/orders.service.ts) : "Table 4" ou "Emporter #12 · Dupont" */
+export function orderLabel(order, tables = []) {
+  if (!isOffPremise(order)) {
+    const number = order?.table?.number ?? tables.find((t) => t.id === order?.tableId)?.number;
+    return `Table ${number ?? "?"}`;
+  }
+  const kind = order.type === "takeaway" ? "Emporter" : "Livraison";
+  return [`${kind} #${order.pickupNumber ?? "…"}`, order.customerName].filter(Boolean).join(" · ");
+}
+
+/** Heure de retrait "12:30" (ou null) */
+export const formatPickup = (ts) =>
+  ts ? new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : null;

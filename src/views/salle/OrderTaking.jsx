@@ -6,7 +6,7 @@ import {
   ArrowRightLeft, Merge, BellRing
 } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
-import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice, resolveOptions, resolveMenuOptions } from "../../utils/index.js";
+import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice, resolveOptions, resolveMenuOptions, isOffPremise, orderLabel, formatPickup } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
@@ -46,7 +46,19 @@ export default function OrderTaking({
   onMergeTable,
 }) {
   const now = useNow();
-  const { hasSuites, hasStocks, hasDiscounts } = useModules();
+  const { hasSuites: suitesModule, hasStocks, hasDiscounts } = useModules();
+  // Dernière commande connue : le libellé reste juste après l'encaissement (commande retirée, ticket affiché)
+  const lastOrderRef = useRef(order);
+  if (order) lastOrderRef.current = order;
+  const offPremise = isOffPremise(lastOrderRef.current);
+  const hasSuites = suitesModule && !offPremise; // Hors salle : pas de suites
+  const title = table ? `Table ${table.number}` : orderLabel(lastOrderRef.current);
+  const subtitle = [
+    order ? `Ouverte ${elapsed(order.createdAt, now)}` : "Nouvelle commande",
+    order?.pickupAt && `Retrait ${formatPickup(order.pickupAt)}`,
+    order?.channel === "phone" && "Téléphone",
+    order?.customerPhone,
+  ].filter(Boolean).join(" · ");
   const isHeadWaiterOrAdmin = currentStaff?.roleId === "head_waiter" || currentStaff?.roleId === "admin";
   const [activeCat, setActiveCat]     = useState(CATEGORIES[0].id);
   const [query, setQuery]             = useState("");
@@ -66,13 +78,14 @@ export default function OrderTaking({
 
   // 🪟 Axe 6 : Détection de clôture ou encaissement concurrent par un autre terminal
   const initialOrderIdRef = useRef(order?.id);
+  const checkedOutHereRef = useRef(false); // Encaissée sur ce terminal : on reste pour afficher le ticket
   useEffect(() => {
     // Si la commande initiale qui a ouvert cet écran n'existe plus ou est fermée
-    if (initialOrderIdRef.current && (!order || order.status === "closed")) {
-      onToast?.(`⚠️ La Table ${table?.number || ""} a été encaissée ou libérée sur un autre terminal`, "warn");
+    if (initialOrderIdRef.current && !checkedOutHereRef.current && (!order || order.status === "closed")) {
+      onToast?.(`⚠️ ${title} a été encaissée ou libérée sur un autre terminal`, "warn");
       onBackToPlan?.();
     }
-  }, [order, table?.number, onToast, onBackToPlan]);
+  }, [order, title, onToast, onBackToPlan]);
 
   const items        = order?.items || [];
   const draftItems   = items.filter((i) => i.status === "draft");
@@ -355,7 +368,7 @@ export default function OrderTaking({
 
         {allServedNoDraft ? (
           <button onClick={() => setPaying(true)} className="rf-tap w-full py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm" style={{ background: "#2B2622" }}>
-            <Receipt size={14} /> Encaisser & libérer la table
+            <Receipt size={14} /> {table ? "Encaisser & libérer la table" : "Encaisser"}
           </button>
         ) : sentItems.length > 0 && draftItems.length === 0 ? (
           <button onClick={() => setPaying(true)} className="rf-tap w-full py-2 rounded-xl font-semibold text-xs text-[#2B2622] border border-[#2B2622]/20 bg-black/5 hover:bg-black/10 flex items-center justify-center gap-1.5">
@@ -394,6 +407,7 @@ export default function OrderTaking({
           config={config}
           onCancel={() => setPaying(false)}
           onConfirm={(method, payments, meta) => {
+            checkedOutHereRef.current = true;
             const r = onCheckout(method, payments, meta);
             setPaying(false);
             setReceipt(r);
@@ -484,10 +498,10 @@ export default function OrderTaking({
         <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-black/10">
           <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5 shrink-0"><ArrowLeft size={16} /></button>
           <div className="min-w-0 flex-1">
-            <h2 className="rf-display text-base font-semibold text-[#2B2622] truncate">Table {table.number} · {table.seats} pers.</h2>
-            <p className="text-[11px] text-[#6B6355]">{order ? `Ouverte ${elapsed(order.createdAt, now)}` : "Nouvelle commande"}</p>
+            <h2 className="rf-display text-base font-semibold text-[#2B2622] truncate">{table ? `${title} · ${table.seats} pers.` : title}</h2>
+            <p className="text-[11px] text-[#6B6355]">{subtitle}</p>
           </div>
-          {order && (
+          {order && table && (
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
@@ -547,11 +561,11 @@ export default function OrderTaking({
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5"><ArrowLeft size={16} /></button>
           <div>
-            <h2 className="rf-display text-lg font-semibold text-[#2B2622]">Table {table.number} — {table.seats} personnes</h2>
-            <p className="text-xs text-[#6B6355]">{order ? `Ouverte ${elapsed(order.createdAt, now)}` : "Nouvelle commande"}</p>
+            <h2 className="rf-display text-lg font-semibold text-[#2B2622]">{table ? `${title} — ${table.seats} personnes` : title}</h2>
+            <p className="text-xs text-[#6B6355]">{subtitle}</p>
           </div>
         </div>
-        {order && (
+        {order && table && (
           <div className="flex items-center gap-2">
             <button
               type="button"

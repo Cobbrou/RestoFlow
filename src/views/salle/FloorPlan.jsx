@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { useNow } from "../../hooks/index.js";
-import { Users, Clock, Lock, CalendarClock, ArrowRightLeft } from "lucide-react";
-import { tableStatus, STATUS_META, orderTotal, elapsed } from "../../utils/index.js";
+import { Users, Clock, Lock, CalendarClock, ArrowRightLeft, ShoppingBag, Plus, Phone } from "lucide-react";
+import { tableStatus, STATUS_META, orderTotal, elapsed, isOffPremise, orderLabel, formatPickup } from "../../utils/index.js";
+import Modal from "../../components/Modal.jsx";
 import { useModules } from "../../hooks/useModules.js";
 
 /**
@@ -19,13 +21,15 @@ export default function FloorPlan({
   orders,
   reservations = [],
   onOpen,
+  onOpenOffPremise,
   onToggleAlert,
   onOpenReservations,
   onOpenTableAction,
   isMobile,
 }) {
   const now = useNow();
-  const { hasReservations } = useModules();
+  const { hasReservations, hasTakeaway } = useModules();
+  const takeaway = hasTakeaway && onOpenOffPremise && <TakeawayBar orders={orders} onOpen={onOpenOffPremise} />;
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayReservations = reservations.filter((r) => r.date === todayStr && r.status !== "cancelled");
 
@@ -47,6 +51,8 @@ export default function FloorPlan({
             </button>
           )}
         </div>
+
+        {takeaway}
 
         {/* Légende défilable */}
         <div className="flex gap-1.5 overflow-x-auto rf-scrollbar pb-3 -mx-3 px-3">
@@ -128,6 +134,8 @@ export default function FloorPlan({
           <Legend />
         </div>
       </div>
+
+      {takeaway}
 
       {/* Plateau */}
       <div
@@ -229,5 +237,98 @@ function Legend() {
         </span>
       ))}
     </div>
+  );
+}
+
+/* ── Vente à emporter : commandes hors salle ouvertes + création ── */
+function TakeawayBar({ orders, onOpen }) {
+  const [creating, setCreating] = useState(false);
+  const open = orders
+    .filter(isOffPremise)
+    .sort((a, b) => (a.pickupAt ?? Infinity) - (b.pickupAt ?? Infinity) || (a.pickupNumber ?? 0) - (b.pickupNumber ?? 0));
+
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto rf-scrollbar pb-3 mb-1">
+      <button
+        onClick={() => setCreating(true)}
+        className="rf-tap shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
+        style={{ background: "#0891B2" }}
+      >
+        <ShoppingBag size={14} /> <Plus size={12} /> Emporter
+      </button>
+      {open.map((o) => {
+        const ready = o.items.some((i) => i.status === "ready");
+        return (
+          <button
+            key={o.id}
+            onClick={() => onOpen(o)}
+            className={`rf-tap shrink-0 text-left px-3 py-1.5 rounded-xl border-2 bg-white ${ready ? "rf-pulse-ready" : ""}`}
+            style={{ borderColor: ready ? "#2E9E5B" : "#0891B240" }}
+          >
+            <span className="block text-xs font-bold text-[#2B2622] whitespace-nowrap">{orderLabel(o)}</span>
+            <span className="block text-[10px] text-[#6B6355] whitespace-nowrap">
+              {o.pickupAt ? `Retrait ${formatPickup(o.pickupAt)}` : "Dès que prêt"}
+              {o.channel === "phone" && " · Tél."}
+              {ready ? " · Prête" : ""}
+            </span>
+          </button>
+        );
+      })}
+      {creating && (
+        <NewTakeawayModal
+          onCancel={() => setCreating(false)}
+          onConfirm={(data) => { setCreating(false); onOpen(data); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function NewTakeawayModal({ onCancel, onConfirm }) {
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [pickupTime, setPickupTime] = useState(""); // "HH:mm", vide = dès que prêt
+  const [byPhone, setByPhone] = useState(false);
+
+  const submit = (e) => {
+    e.preventDefault();
+    let pickupAt = null;
+    if (pickupTime) {
+      const [h, m] = pickupTime.split(":").map(Number);
+      pickupAt = new Date().setHours(h, m, 0, 0);
+    }
+    onConfirm({ type: "takeaway", channel: byPhone ? "phone" : "pos", customerName, customerPhone, pickupAt });
+  };
+
+  const input = "w-full px-3 py-2 rounded-xl border border-black/15 bg-white text-sm";
+  return (
+    <Modal title="Nouvelle commande à emporter" onClose={onCancel}>
+      <form onSubmit={submit} className="space-y-3">
+        <label className="block text-xs font-semibold text-[#5B5346]">
+          Nom du client
+          <input className={input} value={customerName} onChange={(e) => setCustomerName(e.target.value)} maxLength={60} autoFocus />
+        </label>
+        <label className="block text-xs font-semibold text-[#5B5346]">
+          Heure de retrait (vide : dès que prête)
+          <input type="time" className={input} value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} />
+        </label>
+        <label className="flex items-center gap-2 text-xs font-semibold text-[#5B5346]">
+          <input type="checkbox" checked={byPhone} onChange={(e) => setByPhone(e.target.checked)} />
+          <Phone size={12} /> Commande prise par téléphone
+        </label>
+        {byPhone && (
+          <label className="block text-xs font-semibold text-[#5B5346]">
+            Téléphone
+            <input type="tel" className={input} value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} maxLength={30} />
+          </label>
+        )}
+        <div className="flex gap-2 pt-1">
+          <button type="button" onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-xs font-semibold bg-black/5">Annuler</button>
+          <button type="submit" className="rf-tap flex-1 py-2.5 rounded-xl text-xs font-bold text-white" style={{ background: "#0891B2" }}>
+            Prendre la commande
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

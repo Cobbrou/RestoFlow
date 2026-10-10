@@ -12,6 +12,7 @@ export const DEFAULT_MODULES_CONFIG = {
   enableAdvancedSplitModes: true,  // Modes de partage avancés (par article, montant proportionnel)
   enablePinAuth: true,             // Verrouillage PIN multi-serveurs
   enableTips: true,                // Saisie & gestion des pourboires au paiement
+  enableTakeaway: false,           // Vente à emporter (commandes hors salle, numéro d'appel)
 };
 
 /**
@@ -38,5 +39,6 @@ export function useModules() {
     hasAdvancedSplits: modules.enableAdvancedSplitModes ?? true,
     hasPinAuth: modules.enablePinAuth ?? true,
     hasTips: modules.enableTips ?? true,
+    hasTakeaway: modules.enableTakeaway ?? false,
   };
 }

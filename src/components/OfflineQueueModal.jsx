@@ -6,6 +6,7 @@ import { getSocket } from "../services/socket.js";
 
 const ACTION_LABELS = {
   "order:create_or_ensure": "Ouverture de commande",
+  "order:create_offpremise": "Commande à emporter",
   "order:add_item": "Ajout d'article",
   "order:change_qty": "Changement de quantité",
   "order:remove_item": "Suppression d'article",
