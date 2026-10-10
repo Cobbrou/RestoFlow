@@ -31,7 +31,7 @@ import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct, getProductEffectivePrice, deduplicateHistory } from "./utils/index.js";
 import { useBeep, useContainerWidth, useNow } from "./hooks/index.js";
 import { getSocket, setSocketToken, hasValidSessionToken, clearSessionToken } from "./services/socket.js";
-import { enqueueAction, flushQueue } from "./services/actionQueue.js";
+import { enqueueAction, flushQueue, hasPendingActions, newActionId } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
 import PwaInstallPrompt from "./components/PwaInstallPrompt.jsx";
 import {
@@ -472,24 +472,39 @@ export default function App() {
   }, [currentStaff, roles, role]);
 
   // Helper pour émettre avec fallback dans la file d'attente hors-ligne et réconciliation / rollback (Axe 3)
+  // Ordre strict : tant que la file n'est pas vide, toute nouvelle action passe derrière.
+  // Chaque action porte un clientActionId : un acquittement perdu => rejouée, et le serveur ignore le doublon.
   const emitOrQueue = (eventType, payload, onAck) => {
     const socket = getSocket();
-    if (socket && socket.connected) {
-      socket.emit(eventType, payload, (response) => {
-        if (response && response.ok === false) {
-          pushToast(response.error || "Une erreur est survenue sur le serveur", "warn");
-          if (onAck) onAck(response);
-          // Réconciliation automatique avec l'état réel de la base de données
-          socket.emit("sync:request", {}, (res) => {
-            if (res && res.state) syncHandlerRef.current?.(res.state);
-          });
-        } else if (onAck) {
-          onAck(response);
-        }
-      });
-    } else {
+    if (!socket?.connected || hasPendingActions()) {
       enqueueAction(eventType, payload);
+      if (socket?.connected && hasValidSessionToken()) flushQueue(socket);
+      return;
     }
+
+    const clientActionId = newActionId();
+    let settled = false;
+    const ackTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      enqueueAction(eventType, payload, clientActionId);
+    }, 5000);
+
+    socket.emit(eventType, { ...payload, clientActionId }, (response) => {
+      clearTimeout(ackTimer);
+      if (settled) return;
+      settled = true;
+      if (response && response.ok === false) {
+        pushToast(response.error || "Une erreur est survenue sur le serveur", "warn");
+        if (onAck) onAck(response);
+        // Réconciliation automatique avec l'état réel de la base de données
+        socket.emit("sync:request", {}, (res) => {
+          if (res && res.state) syncHandlerRef.current?.(res.state);
+        });
+      } else if (onAck) {
+        onAck(response);
+      }
+    });
   };
 
   const getActiveOrder = useCallback(
@@ -609,6 +624,11 @@ export default function App() {
     const order = ensureOrderForTable(tableId);
     const { course, courseStatus, station, cat } = getItemCourseAndStation(product);
     const effectivePrice = getProductEffectivePrice(product, config);
+    // Nouvelle ligne : son id est partagé avec le serveur (les actions hors-ligne suivantes le référencent)
+    const lineId = uid("it");
+    const mergesIntoExisting = order.items.some(
+      (i) => i.productId === product.id && i.status === "draft" && !i.notes && (i.course || course) === course && i.price === effectivePrice
+    );
 
     setOrders((prev) =>
       prev.map((o) => {
@@ -624,7 +644,7 @@ export default function App() {
           items: [
             ...o.items,
             {
-              id: uid("it"),
+              id: lineId,
               productId: product.id,
               name: product.name,
               price: effectivePrice,
@@ -643,6 +663,8 @@ export default function App() {
 
     emitOrQueue("order:add_item", {
       orderId: order.id,
+      tableId,
+      itemId: mergesIntoExisting ? undefined : lineId,
       product: { id: product.id, name: product.name, price: effectivePrice, cat, station, isMenu: false },
       course,
       courseStatus,
@@ -656,6 +678,7 @@ export default function App() {
     const course = "plat";
     const courseStatus = "held";
     const station = "kitchen";
+    const lineId = uid("it");
 
     setOrders((prev) =>
       prev.map((o) => {
@@ -665,7 +688,7 @@ export default function App() {
           items: [
             ...o.items,
             {
-              id: uid("it"),
+              id: lineId,
               productId: menuProduct.id,
               name: menuProduct.name,
               price: menuProduct.price,
@@ -686,6 +709,8 @@ export default function App() {
 
     emitOrQueue("order:add_item", {
       orderId: order.id,
+      tableId,
+      itemId: lineId,
       product: { id: menuProduct.id, name: menuProduct.name, price: menuProduct.price, cat: "menus", station: "kitchen", isMenu: true },
       composition,
       course,

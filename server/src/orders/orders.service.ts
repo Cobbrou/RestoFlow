@@ -75,10 +75,7 @@ export class OrdersService {
         table = await this.prisma.table.findUnique({ where: { number: num } });
       }
     }
-    if (!table) {
-      table = await this.prisma.table.findFirst();
-    }
-    if (!table) throw new NotFoundException("Aucune table trouvée");
+    if (!table) throw new NotFoundException("Table introuvable");
 
     const resolvedTableId = table.id;
 
@@ -120,25 +117,24 @@ export class OrdersService {
     courseStatus?: string;
     station?: string;
     addedAt?: number;
+    itemId?: string;
+    tableId?: string;
   }) {
-    let order = await this.prisma.order.findUnique({
-      where: { id: data.orderId },
-      include: { items: true },
-    });
+    // La commande doit exister (order:create_or_ensure précède toujours, file hors-ligne ordonnée).
+    // Table ouverte hors-ligne sur deux terminaux : la commande du terminal arrivé second n'existe pas,
+    // ses articles rejoignent la commande ouverte de la même table.
+    const order =
+      (await this.prisma.order.findUnique({ where: { id: data.orderId }, include: { items: true } })) ||
+      (data.tableId
+        ? await this.prisma.order.findFirst({ where: { tableId: data.tableId, status: "open" }, include: { items: true } })
+        : null);
+    if (!order || order.status !== "open") throw new NotFoundException("Commande introuvable ou déjà encaissée");
 
-    if (!order) {
-      const firstTable = await this.prisma.table.findFirst();
-      if (!firstTable) throw new NotFoundException("Commande introuvable");
-      order = await this.prisma.order.create({
-        data: {
-          id: data.orderId,
-          tableId: firstTable.id,
-          server: "Service",
-          status: "open",
-        },
-        include: { items: true },
-      });
-    }
+    // Identifiant de ligne choisi par le terminal : les actions hors-ligne suivantes (quantité, note) le référencent
+    const newItemId =
+      typeof data.itemId === "string" && /^[\w-]{3,64}$/.test(data.itemId)
+        ? data.itemId
+        : `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     // 🔒 Prix, nom et taux de TVA viennent toujours de la base, jamais du client
     const { dbProduct, name, price, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
@@ -181,7 +177,7 @@ export class OrdersService {
       } else {
         await this.prisma.orderItem.create({
           data: {
-            id: `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            id: newItemId,
             orderId: order.id,
             productId: data.product.id,
             name,
@@ -200,7 +196,7 @@ export class OrdersService {
     } else {
       await this.prisma.orderItem.create({
         data: {
-          id: `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: newItemId,
           orderId: order.id,
           productId: data.product.id,
           name,
@@ -219,7 +215,7 @@ export class OrdersService {
     }
 
     const updated = await this.prisma.order.findUnique({
-      where: { id: data.orderId },
+      where: { id: order.id },
       include: { items: true, table: true },
     });
     return this.formatOrder(updated);

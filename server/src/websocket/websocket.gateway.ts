@@ -8,7 +8,8 @@ import {
   MessageBody,
 } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
-import { Injectable, Logger, UseGuards, UsePipes, ValidationPipe } from "@nestjs/common";
+import { Injectable, Logger, UseGuards, UseInterceptors, ValidationPipe } from "@nestjs/common";
+import { ClientActionInterceptor } from "./client-action.interceptor";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthService } from "../auth/auth.service";
 import { OrdersService } from "../orders/orders.service";
@@ -40,6 +41,8 @@ import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto"
 })
 // 🔒 Toute action exige une session valide (sauf @Public), puis les permissions déclarées
 @UseGuards(WsAuthGuard, WsPermissionsGuard)
+// Idempotence : une action déjà appliquée (même clientActionId) n'est jamais rejouée
+@UseInterceptors(ClientActionInterceptor)
 @Injectable()
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()

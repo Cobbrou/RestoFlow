@@ -261,3 +261,10 @@ model RestaurantConfig {
   nf525Key         String?   @default("RESTOFLOW_NF525_SECRET_KEY")
   updatedAt        DateTime  @updatedAt
 }
+
+// Actions client déjà traitées (idempotence des rejeux hors-ligne et des ré-émissions après timeout)
+model ProcessedAction {
+  id        String   @id // clientActionId généré par le terminal
+  handler   String
+  createdAt DateTime @default(now())
+}
