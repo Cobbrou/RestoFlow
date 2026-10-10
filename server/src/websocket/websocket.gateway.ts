@@ -823,6 +823,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  // « 86 » : cuisine, responsable de salle (gestion des tables) ou gestion du catalogue
+  @RequirePermissions("cuisine.status", "gestion.tables", "gestion.products")
   @SubscribeMessage("catalog:toggle_product_available")
   async handleToggleProductAvailable(@ConnectedSocket() client: Socket, @MessageBody() data: { productId: string }) {
     try {
