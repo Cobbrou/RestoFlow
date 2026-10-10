@@ -30,6 +30,8 @@
    - [📦 Stocks, Ingrédients & Fiches Techniques](#6-stocks-ingrédients--fiches-techniques)
    - [👥 Équipe, Sécurité & Droits d'accès (RBAC)](#7-équipe-sécurité--droits-daccès-rbac)
    - [⚡ Synchronisation Temps Réel & Mode Déconnecté](#8-synchronisation-temps-réel--mode-déconnecté)
+   - [🏛️ Clôture de Caisse & Conformité Fiscale NF525](#9-clôture-de-caisse--conformité-fiscale-nf525)
+   - [🎛️ Architecture Modulaire & Pourboires (Tips)](#10-architecture-modulaire--pourboires-tips)
 3. [Stack Technique](#-stack-technique)
 4. [Prochaines Features & Roadmap](#-prochaines-features--roadmap)
    - [Jalons de la Roadmap (v1.0)](#jalons-de-la-roadmap-v10)
@@ -149,6 +151,37 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
 - **Authentification PIN Déconnectée** :
   - Hachage cryptographique SHA-256 local permettant aux serveurs de changer de profil et de déverrouiller la tablette même lors d'une coupure réseau prolongée.
 
+### 9. 🏛️ Clôture de Caisse & Conformité Fiscale NF525
+- **Rapports X en temps réel** : lecture intermédiaire instantanée sans rupture de session avec récapitulatif du CA Brut/Net, de la TVA ventilée et des modes de paiement.
+- **Clôture Journalière Définitive (Rapport Z)** :
+  - Scellement irréversible des encaissements de la session courante.
+  - Calcul et cumul du **Grand Total Perpétuel Inaltérable (GT)**.
+  - Saisie du fond de caisse et contrôle du comptage physique des espèces avec détection automatique des écarts.
+- **Chaînage Cryptographique NF525 / CGI art. 286** :
+  - Signature SHA-256 de chaque clôture et ticket avec intégration du hash précédent pour garantir l'inaltérabilité de la chaîne fiscale.
+  - Outil d'**audit d'intégrité en temps réel** dans le back-office pour vérifier la continuité mathématique de la chaîne.
+- **Export Comptable FEC (Fichier des Écritures Comptables)** :
+  - Génération normalisée des écritures de journal (comptes 706xx, 4457xx, 512xx, 531xx) parfaitement équilibrées (Débit = Crédit) prêtes pour l'expert-comptable.
+- **Duplicata thermique ESC/POS** de tout rapport Z ou X imprimable ou téléchargeable en un clic.
+
+### 10. 🎛️ Architecture Modulaire & Pourboires (Tips)
+- **Hub de Modularité "À la Carte" (`ModulesManager`)** :
+  - Activation / désactivation granulaire des modules secondaires selon les besoins opérationnels du restaurant :
+    - *Stocks & Ingrédients* (`enableStockManagement`)
+    - *Réservations en ligne* (`enableOnlineReservations`)
+    - *Cadencement des suites & réclames* (`enableCoursePacing`)
+    - *Dispatch KDS multi-postes bar/cuisine* (`enableMultiStationKds`)
+    - *Remises & codes promotionnels* (`enableDiscounts`)
+    - *Modes de split d'addition avancés* (`enableAdvancedSplitModes`)
+    - *Verrouillage PIN systématique* (`enablePinAuth`)
+    - *Gestion des pourboires* (`enableTips`)
+  - **Préréglages 1-clic** adaptés aux formats d'établissement : *Restaurant Gastronomique*, *Bar & Tapas*, *Food Truck / Fast-Casual*.
+  - Allègement automatique de l'interface et du DOM pour une expérience tactile fluide.
+- **Gestion des Pourboires (Tips)** :
+  - Sélecteur rapide au moment de l'encaissement (0%, 5%, 10%, 15% ou montant libre en €).
+  - Traçabilité séparée non assujettie à la TVA (reversée au personnel).
+  - Intégration sur le ticket thermique ESC/POS, l'historique de caisse et les rapports X/Z de clôture journalière.
+
 ---
 
 ## 🛠️ Stack Technique
@@ -190,14 +223,14 @@ Le module d'encaissement (`PaymentModal`) propose **4 modes de partage d'additio
 | **Phase 4 : Réservations, Salle Dynamique & Service** | 🟢 **Terminée** | Widget de réservation en ligne, **gestion des "Suites" & réclame** (envoi cadencé en cuisine), **fusion & transfert de tables**, et **dispatch multi-postes (KDS Bar vs KDS Cuisine)**. |
 | **Phase 5 : Sécurité PIN, Modularité & Impression TCP Raw** | 🟢 **Terminée** | Hachage cryptographique des PINs (bcrypt) & sessions signées HMAC, exclusion des PINs de `sync:init`, découpage modulaire NestJS (`OrdersService`, `BillingService`, `ConfigService`, `TablesService`, `StockService`, `PrinterService`), suppression du prop drilling via `RestoFlowContext`, code-splitting Vite (bundle initial réduit à 157 ko), et impression directe hardware TCP raw port 9100. |
 | **Phase 6 : Mode PWA & Offline Complet** | 🟢 **Terminée** | Service Worker (`vite-plugin-pwa`), persistance locale haute fidélité IndexedDB, validation du code PIN hors-ligne, file d'attente d'actions résiliente avec inspection manuelle (`OfflineQueueModal`), et fonctionnement 100% autonome garanti lors des coupures prolongées. |
-| **Phase 7 : Clôture de Caisse & Conformité Fiscale** | 🟡 **Prochaine étape** | Rapports Z et X journaliers certifiés, journal d'encaissement inaltérable chaîné (loi anti-fraude TVA / NF525), tarification Happy Hour programmée et export comptable (FEC). |
-| **Phase 8 : Modularité & Activation des Modules "À la Carte" (Feature Toggles)** | ⚪ **Planifiée (avant v1.0)** | Hub centralisé de configuration permettant d'activer/désactiver les fonctionnalités non primordiales selon le profil du restaurant (stocks, réservations en ligne, cadencement des suites, KDS bar/cuisine, remises...), allégement visuel dynamique de l'interface et persistance offline/serveur. |
+| **Phase 7 : Clôture de Caisse & Conformité Fiscale** | 🟢 **Terminée** | Rapports Z et X journaliers certifiés, journal d'encaissement inaltérable chaîné (loi anti-fraude TVA / NF525), signature SHA-256 avec chaînage du hash précédent, audit d'intégrité fiscal en temps réel et export comptable normalisé (FEC). |
+| **Phase 8 : Modularité & Activation des Modules "À la Carte" (Feature Toggles)** | 🟢 **Terminée** | Hub centralisé de configuration `ModulesManager` avec 3 préréglages 1-clic (Gastro, Bar & Tapas, Food Truck), feature flags réactifs (`useModules`), allégement dynamique de l'UI (stocks, réservations, suites, KDS multi-postes, remises, splits, PIN), persistance DB/IndexedDB et synchronisation WebSocket instantanée. |
 
 #### 🎛️ Détail de la Phase 8 : Modularité & Paramétrage "À la Carte" (Feature Flags)
 
 Tous les établissements n'ont pas les mêmes contraintes opérationnelles : un food truck, un bar à tapas ou un bistrot rapide cherchent une vélocité maximale sans inventaire complexe ni réservations, tandis qu'un restaurant gastronomique exploite l'intégralité des fiches techniques, des réservations en ligne et du cadencement de service.
 
-Cette phase introduit un **panneau de contrôle des modules activables à la demande** dans l'espace Configuration / Back-office :
+Cette phase a introduit un **panneau de contrôle des modules activables à la demande** dans l'espace Configuration / Back-office (`ModulesManager.jsx`) :
 
 - **📦 Gestion des Stocks & Ingrédients** (`enableStockManagement`) :
   - *Actif* : fiches techniques, calcul du food cost, décompte atomique à la commande, alertes et blocage automatique sur rupture.
@@ -220,18 +253,21 @@ Cette phase introduit un **panneau de contrôle des modules activables à la dem
 - **🔒 Authentification PIN Multi-Serveurs** (`enablePinAuth`) :
   - *Actif* : verrouillage par code PIN entre chaque action pour traçabilité multi-opérateurs.
   - *Inactif* : mode "Opérateur unique / Caisse rapide" sans demande de PIN récurrent pour les gérants seuls.
+- **💵 Gestion des Pourboires / Tips** (`enableTips`) :
+  - *Actif* : sélecteur de pourboire intelligent à l'encaissement (0%, 5%, 10%, 15%, libre €), ligne dédiée sur le ticket thermique, traçabilité en base et ventilation dans les rapports Z/X.
+  - *Inactif* : encaissement traditionnel sans sollicitation de pourboire.
 
 **Architecture technique :**
-- Schéma Prisma étendu avec un modèle `ModulesConfig` synchronisé en temps réel via WebSocket (`config:modules_update`).
-- Hook réactif `useModules()` côté client React pour masquer dynamiquement onglets, boutons, modales et menus sans alourdir le DOM.
-- Persistance locale dans IndexedDB (`restoflow_db`) pour garantir la conservation du paramétrage même lors d'une utilisation hors-ligne.
+- Schéma Prisma étendu avec le champ `modulesConfig` sur `RestaurantConfig` synchronisé en temps réel via WebSocket (`config:update_modules` ➔ `config:modules_updated`).
+- Hook réactif `useModules()` côté client React pour masquer dynamiquement onglets, boutons, modales et menus sans rechargement.
+- Persistance locale dans IndexedDB (`restoflow_db`) et `localStorage` pour garantir la conservation du paramétrage même lors d'une utilisation hors-ligne.
 
 ### 💡 Perspectives & Idées futures (Post-v1.0)
 
 - 📱 **Commande à table par QR Code** : Scan d'un QR code dynamique sur la table permettant aux clients d'accéder au menu digital, de passer commande et de payer en direct depuis leur smartphone.
 - 🖥️ **Borne de commande interactive (Kiosk)** : Interface client grand écran tactile pour la prise de commande et l'encaissement en autonomie complète.
 - 🛵 **Module de Livraison intégré** : Passerelle centralisée connectée aux plateformes de livraison (Uber Eats, Deliveroo) ou module dédié pour la livraison en propre avec suivi des livreurs.
-- 💵 **Gestion des Pourboires (Tips) & Répartition** : Saisie des pourboires sur TPE et calcul automatique de la répartition équitable en fin de service.
+- 📊 **Comptabilité & Paie avancée** : Répartition automatisée des pourboires déclarés sur la fiche de paie de chaque membre de l'équipe selon les heures travaillées.
 
 ---
 

@@ -9,6 +9,7 @@ export interface CheckoutInput {
   paymentMethod?: string;
   payments?: any[];
   serverName?: string;
+  tip?: number;
 }
 
 type TicketDraft = {
@@ -22,6 +23,7 @@ type TicketDraft = {
   vatDetails: string;
   paymentMethod: string;
   payments: string;
+  tip: number;
   type: "SALE" | "CREDIT_NOTE";
   refTicketNumber: string | null;
   reason: string | null;
@@ -156,6 +158,7 @@ export class BillingService {
             payments: JSON.stringify(
               parseJson(orig.payments, []).map((p: any) => ({ ...p, label: "Remboursement", amount: -p.amount }))
             ),
+            tip: -(orig.tip || 0),
             type: "CREDIT_NOTE",
             refTicketNumber: orig.ticketNumber,
             reason: motif,
@@ -235,6 +238,11 @@ export class BillingService {
     const finalTotal = toEuros(totalCents);
     const discountSnapshot = orderDiscount ? { ...orderDiscount, amount: toEuros(discountCents) } : null;
 
+    // Pourboire : hors CA soumis à TVA, mais encaissé avec les règlements
+    const tipValue = Number(data.tip ?? 0);
+    if (!Number.isFinite(tipValue) || tipValue < 0) throw new BadRequestException("Pourboire invalide");
+    const tipCents = toCents(tipValue);
+
     const paymentList =
       data.payments && data.payments.length > 0
         ? data.payments
@@ -242,7 +250,7 @@ export class BillingService {
             {
               id: `pay_${Date.now()}`,
               label: "Paiement unique",
-              amount: finalTotal,
+              amount: toEuros(totalCents + tipCents),
               method: data.paymentMethod || "carte",
               paidAt: Date.now(),
             },
@@ -253,9 +261,9 @@ export class BillingService {
       if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("Montant de paiement invalide");
       return sum + toCents(amount);
     }, 0);
-    if (paidCents !== totalCents) {
+    if (paidCents !== totalCents + tipCents) {
       throw new BadRequestException(
-        `Paiements (${toEuros(paidCents).toFixed(2)} €) différents du total (${finalTotal.toFixed(2)} €)`
+        `Paiements (${toEuros(paidCents).toFixed(2)} €) différents du total (${toEuros(totalCents + tipCents).toFixed(2)} €)`
       );
     }
 
@@ -273,6 +281,7 @@ export class BillingService {
       vatDetails: JSON.stringify(vatDetails),
       paymentMethod: finalMethod,
       payments: JSON.stringify(paymentList),
+      tip: toEuros(tipCents),
       type: "SALE",
       refTicketNumber: null,
       reason: null,

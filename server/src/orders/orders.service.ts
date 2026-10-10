@@ -144,11 +144,7 @@ export class OrdersService {
       cat === "boissons" ||
       data.product?.station === "bar" ||
       dbProduct?.station === "bar" ||
-      data.station === "bar" ||
-      data.product?.id?.startsWith("p18") ||
-      data.product?.id?.startsWith("p19") ||
-      data.product?.id?.startsWith("p20") ||
-      data.product?.id?.startsWith("p21");
+      data.station === "bar";
 
     const station = isBar ? "bar" : (data.station || data.product?.station || dbProduct?.station || "kitchen");
     let course = data.course;
@@ -250,6 +246,9 @@ export class OrdersService {
   async changeQty(orderId: string, itemId: string, delta: number) {
     const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
     if (!item) throw new NotFoundException("Article non trouvé");
+    if (item.status !== 'draft') {
+      throw new BadRequestException(`Impossible de modifier un article en statut "${item.status}". Seuls les articles brouillons peuvent être modifiés.`);
+    }
 
     const newQty = item.qty + delta;
     if (newQty <= 0) {
@@ -269,7 +268,12 @@ export class OrdersService {
   }
 
   async removeItem(orderId: string, itemId: string) {
-    await this.prisma.orderItem.deleteMany({ where: { id: itemId } });
+    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
+    if (!item) throw new NotFoundException('Article introuvable');
+    if (item.status !== 'draft') {
+      throw new BadRequestException(`Impossible de supprimer un article en statut "${item.status}". Seuls les articles brouillons peuvent être supprimés.`);
+    }
+    await this.prisma.orderItem.delete({ where: { id: itemId } });
     const updated = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, table: true },
@@ -295,11 +299,7 @@ export class OrdersService {
       include: { items: true, table: true },
     });
     if (!order) {
-      order = await this.prisma.order.findFirst({
-        where: { status: "open" },
-        include: { items: true, table: true },
-      });
-      if (!order) throw new NotFoundException("Commande introuvable");
+      throw new NotFoundException(`Commande introuvable : ${orderId}`);
     }
 
     const now = new Date();

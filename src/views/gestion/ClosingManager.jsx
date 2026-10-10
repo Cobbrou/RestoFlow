@@ -83,6 +83,7 @@ export default function ClosingManager({
     let totalGross = 0;
     let totalDiscounts = 0;
     let totalNet = 0;
+    let totalTips = 0;
     let totalHT = 0;
     let totalVAT = 0;
     const paymentsBreakdown = { carte: 0, especes: 0, autre: 0, partage: 0 };
@@ -90,6 +91,7 @@ export default function ClosingManager({
 
     for (const t of unclosedTickets) {
       totalNet += t.total || 0;
+      totalTips += t.tip || 0;
       totalGross += t.subtotal != null ? t.subtotal : t.total || 0;
       if (t.discount?.amount) totalDiscounts += t.discount.amount;
 
@@ -132,6 +134,7 @@ export default function ClosingManager({
       totalGross: Math.round(totalGross * 100) / 100,
       totalDiscounts: Math.round(totalDiscounts * 100) / 100,
       totalNet: Math.round(totalNet * 100) / 100,
+      totalTips: Math.round(totalTips * 100) / 100,
       totalHT: Math.round(totalHT * 100) / 100,
       totalVAT: Math.round(totalVAT * 100) / 100,
       averageTicket: unclosedTickets.length > 0 ? Math.round((totalNet / unclosedTickets.length) * 100) / 100 : 0,
@@ -341,7 +344,7 @@ export default function ClosingManager({
           {/* Cartes métriques */}
           {xReport && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="bg-white p-4 rounded-2xl border border-black/10 shadow-sm">
                   <span className="text-[11px] font-bold text-[#8A8378] uppercase">Chiffre d'Affaires Net</span>
                   <p className="rf-display text-2xl font-bold text-[#2B2622] mt-1">{money(xReport.totalNet)}</p>
@@ -361,6 +364,12 @@ export default function ClosingManager({
                 </div>
 
                 <div className="bg-white p-4 rounded-2xl border border-black/10 shadow-sm">
+                  <span className="text-[11px] font-bold text-[#8A8378] uppercase">Pourboires Staff</span>
+                  <p className="rf-display text-2xl font-bold text-[#3E7CB1] mt-1">{money(xReport.totalTips || 0)}</p>
+                  <span className="text-[11px] text-[#3E7CB1] font-semibold">Non assujetti TVA</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-black/10 shadow-sm col-span-2 md:col-span-1">
                   <span className="text-[11px] font-bold text-[#8A8378] uppercase">Tickets & Couverts</span>
                   <p className="rf-display text-2xl font-bold text-[#2B2622] mt-1">
                     {xReport.ticketsCount} <span className="text-sm font-normal text-[#8A8378]">tickets</span>
@@ -620,6 +629,12 @@ export default function ClosingManager({
 
                       <div className="flex items-center gap-3 text-xs text-[#6B6355] mt-1">
                         <span>{z.ticketsCount} tickets</span>
+                        {(z.totalTips > 0) && (
+                          <>
+                            <span>•</span>
+                            <span className="text-[#3E7CB1] font-semibold">Tips : {money(z.totalTips)}</span>
+                          </>
+                        )}
                         <span>•</span>
                         <span>Grand Total (GT) : {money(z.grandTotal)}</span>
                         {z.cashVariance != null && z.cashVariance !== 0 && (
@@ -950,7 +965,7 @@ export default function ClosingManager({
               <span className="font-bold text-[#2B2622]">Par {selectedZDetail.closedBy}</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
               <div className="p-3 rounded-xl bg-black/[0.03]">
                 <span className="text-[10px] font-bold text-[#8A8378] uppercase">CA Brut TTC</span>
                 <p className="rf-mono font-bold text-[#2B2622] text-sm mt-0.5">{money(selectedZDetail.totalGross)}</p>
@@ -966,6 +981,14 @@ export default function ClosingManager({
               <div className="p-3 rounded-xl bg-black/[0.03]">
                 <span className="text-[10px] font-bold text-[#8A8378] uppercase">TVA Collectée</span>
                 <p className="rf-mono font-bold text-[#2B2622] text-sm mt-0.5">{money(selectedZDetail.totalVAT)}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-black/[0.03]">
+                <span className="text-[10px] font-bold text-[#8A8378] uppercase">Pourboires Staff</span>
+                <p className="rf-mono font-bold text-[#3E7CB1] text-sm mt-0.5">{money(selectedZDetail.totalTips || 0)}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-black/[0.03]">
+                <span className="text-[10px] font-bold text-[#8A8378] uppercase">Tickets</span>
+                <p className="rf-mono font-bold text-[#2B2622] text-sm mt-0.5">{selectedZDetail.ticketsCount} reçus</p>
               </div>
             </div>
 

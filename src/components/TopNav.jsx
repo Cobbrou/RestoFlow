@@ -49,6 +49,7 @@ export default function TopNav({
       onClick={() => setSoundOn((s) => !s)}
       className={`rf-tap p-2 rounded-full ${dark ? "bg-white/5 text-[#F2ECDD]" : "bg-black/5 text-[#2B2622]"}`}
       title="Son des notifications"
+      aria-label={soundOn ? "Couper le son" : "Activer le son"}
     >
       {soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
     </button>
@@ -65,6 +66,7 @@ export default function TopNav({
           : "bg-[#C1440E] text-white shadow-sm"
       }`}
       title="Cliquer pour changer d'équipier / saisir code PIN"
+      aria-label="Changer d'équipier"
     >
       {currentStaff ? (
         <>
@@ -91,6 +93,7 @@ export default function TopNav({
         dark ? "bg-white/5 text-[#C9C2B0] hover:text-white" : "bg-black/5 text-[#6B6355] hover:text-[#2B2622]"
       }`}
       title="Verrouiller / Se déconnecter"
+      aria-label="Déconnexion"
     >
       <LogOut size={14} />
     </button>

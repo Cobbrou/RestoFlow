@@ -1,6 +1,7 @@
 import { useNow } from "../../hooks/index.js";
 import { Users, Clock, Lock, CalendarClock, ArrowRightLeft } from "lucide-react";
 import { tableStatus, STATUS_META, orderTotal, elapsed } from "../../utils/index.js";
+import { useModules } from "../../hooks/useModules.js";
 
 /**
  * FloorPlan — Plan de salle interactif.
@@ -24,6 +25,7 @@ export default function FloorPlan({
   isMobile,
 }) {
   const now = useNow();
+  const { hasReservations } = useModules();
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayReservations = reservations.filter((r) => r.date === todayStr && r.status !== "cancelled");
 
@@ -35,7 +37,7 @@ export default function FloorPlan({
             <h1 className="rf-display text-xl font-semibold text-[#2B2622]">Plan de salle</h1>
             <p className="text-xs text-[#6B6355]">Touchez une table pour ouvrir sa commande</p>
           </div>
-          {onOpenReservations && (
+          {hasReservations && onOpenReservations && (
             <button
               onClick={onOpenReservations}
               className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-black/15 bg-white text-xs font-bold text-[#5B5346] shadow-2xs"
@@ -71,7 +73,7 @@ export default function FloorPlan({
                 className={`rf-tap relative text-left rounded-2xl border-2 bg-white p-3 min-h-[104px] flex flex-col ${status === "alert" ? "rf-flash-alert" : ""} ${status === "ready" ? "rf-pulse-ready" : ""}`}
                 style={{ borderColor: meta.color }}
               >
-                {t.reserved && (
+                {hasReservations && t.reserved && (
                   <span className="absolute -top-2 -right-2 flex items-center gap-0.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full shadow" style={{ background: "#5B5346", color: "#FAF6EE" }}>
                     <Lock size={8} /> RÉSERVÉE
                   </span>
@@ -83,7 +85,7 @@ export default function FloorPlan({
                 <span className="text-[11px] text-[#8A8378] flex items-center gap-1 mt-1">
                   <Users size={11} />{t.seats} pers.
                 </span>
-                {t.reserved && t.reservationTime && (
+                {hasReservations && t.reserved && t.reservationTime && (
                   <span className="text-[10px] text-[#5B5346] flex items-center gap-1">
                     <CalendarClock size={10} />
                     {t.reservationName || "Réservation"} · {t.reservationTime}
@@ -114,7 +116,7 @@ export default function FloorPlan({
           <p className="text-sm text-[#6B6355]">Sélectionnez une table pour prendre ou consulter une commande</p>
         </div>
         <div className="flex items-center gap-3">
-          {onOpenReservations && (
+          {hasReservations && onOpenReservations && (
             <button
               onClick={onOpenReservations}
               className="rf-tap flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-black/15 bg-white hover:bg-black/5 text-xs font-bold text-[#5B5346] shadow-2xs"
@@ -145,7 +147,7 @@ export default function FloorPlan({
               key={t.id}
               onClick={() => onOpen(t)}
               onContextMenu={(e) => { e.preventDefault(); onToggleAlert(t.id); }}
-              title={t.reserved
+              title={hasReservations && t.reserved
                 ? `Réservée${t.reservationName ? " — " + t.reservationName : ""}${t.reservationTime ? " à " + t.reservationTime : ""}`
                 : "Clic droit : signaler / lever une alerte"}
               className={`rf-tap absolute flex flex-col items-center justify-center border-2 shadow-md ${status === "alert" ? "rf-flash-alert" : ""} ${status === "ready" ? "rf-pulse-ready" : ""}`}
@@ -169,7 +171,7 @@ export default function FloorPlan({
               </span>
 
               {/* Badge réservation */}
-              {t.reserved && (
+              {hasReservations && t.reserved && (
                 <span className="absolute -top-2 -left-2 flex items-center gap-0.5 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full shadow whitespace-nowrap" style={{ background: "#5B5346", color: "#FAF6EE" }}>
                   <Lock size={8} /> RÉSERVÉE
                 </span>

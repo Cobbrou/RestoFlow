@@ -1,7 +1,7 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray } from "class-validator";
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, Min } from "class-validator";
 
 /**
- * Seuls la commande et les règlements sont fournis par le client :
+ * Seuls la commande, les règlements et le pourboire sont fournis par le client :
  * sous-total, remise, TVA, total et numéro de ticket sont calculés par le serveur.
  */
 export class CheckoutDto {
@@ -16,4 +16,10 @@ export class CheckoutDto {
   @IsOptional()
   @IsArray()
   payments?: any[];
+
+  // Pourboire : hors CA soumis à TVA
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  tip?: number;
 }

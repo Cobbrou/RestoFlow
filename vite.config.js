@@ -77,9 +77,9 @@ export default defineConfig({
       },
     },
   },
-  // Ignore le build compilé du serveur (doublon CommonJS des specs)
+  // Les tests serveur (et leur build compilé) tournent dans server/
   test: {
-    exclude: ['**/node_modules/**', 'server/dist/**'],
+    exclude: ['**/node_modules/**', '**/server/**'],
   },
   build: {
     chunkSizeWarningLimit: 600,

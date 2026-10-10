@@ -562,6 +562,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         historyRecord.items
           .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E`)
           .join("\n") +
+        (historyRecord.tip > 0 ? `\nPourboire: ${Number(historyRecord.tip).toFixed(2)}E` : "") +
         `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01\x1b\x70\x00\x19\xfa`;
       await this.printerService.sendRaw(caissePrinter.ip, caissePrinter.port || 9100, Buffer.from(rawText, "latin1"));
     }
@@ -569,10 +570,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Impression Matérielle Directe (Axe 4) ───────────────────────────
 
+  // Anti-SSRF : seules les IP d'imprimantes déclarées dans la configuration sont joignables
+  private async assertKnownPrinterIp(ip: string) {
+    const cfg = await this.configService.getConfig();
+    const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
+    if (!allowedIps.includes(ip)) {
+      throw new Error(`IP ${ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.`);
+    }
+  }
+
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("printer:test")
   async handlePrinterTest(@MessageBody() data: { ip: string; port?: number }) {
     try {
+      await this.assertKnownPrinterIp(data.ip);
       const res = await this.printerService.testPrinter(data.ip, data.port || 9100);
       return res;
     } catch (err: any) {
@@ -584,6 +595,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage("printer:send_raw")
   async handlePrinterSendRaw(@MessageBody() data: { ip: string; port?: number; buffer: number[] | string }) {
     try {
+      await this.assertKnownPrinterIp(data.ip);
       const buffer = Array.isArray(data.buffer)
         ? Buffer.from(data.buffer)
         : Buffer.from(data.buffer, "base64");
@@ -610,6 +622,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.server.emit("config:updated", updated);
       await this.journal.log("CONFIG_UPDATE", { staffId: client.data.user.staffId, name: client.data.user.name }, { fields: Object.keys(data || {}) });
       return { ok: true, config: updated };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("caisse.settings")
+  @SubscribeMessage("config:update_modules")
+  async handleUpdateModules(@ConnectedSocket() client: Socket, @MessageBody() data: { modules: any }) {
+    try {
+      const updated = await this.configService.updateModulesConfig(data.modules);
+      this.server.emit("config:modules_updated", updated.modulesConfig);
+      this.server.emit("config:updated", updated);
+      await this.journal.log("CONFIG_UPDATE", { staffId: client.data.user.staffId, name: client.data.user.name }, { fields: ["modulesConfig"] });
+      return { ok: true, modulesConfig: updated.modulesConfig };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

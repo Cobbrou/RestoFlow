@@ -113,9 +113,11 @@ export class ClosingService {
     const vatMap: Record<number, { ht: number; vat: number; ttc: number }> = {};
     const itemSalesMap: Record<string, { name: string; qty: number; total: number; cat?: string }> = {};
     const serverSalesMap: Record<string, { tickets: number; total: number }> = {};
+    let totalTips = 0;
 
     for (const ticket of unclosedTickets) {
       totalNet += ticket.total;
+      totalTips += Number((ticket as any).tip || 0);
       const sub = ticket.subtotal != null ? ticket.subtotal : ticket.total;
       totalGross += sub;
 
@@ -192,7 +194,14 @@ export class ClosingService {
       serverSalesMap[srv].tickets += 1;
       serverSalesMap[srv].total += ticket.total;
 
-      coversCount += 2; // Estimation moyenne par ticket ou tableNumber
+      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
+      try {
+        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
+        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
+        coversCount += mainItems.length > 0 ? mainItems.length : 1;
+      } catch {
+        coversCount += 1;
+      }
     }
 
     const vatBreakdown = Object.keys(vatMap).map((k) => ({
@@ -222,6 +231,7 @@ export class ClosingService {
       totalNet: Math.round(totalNet * 100) / 100,
       totalHT: Math.round(totalHT * 100) / 100,
       totalVAT: Math.round(totalVAT * 100) / 100,
+      totalTips: Math.round(totalTips * 100) / 100,
       averageTicket,
       paymentsBreakdown: {
         carte: Math.round((paymentsBreakdown.carte || 0) * 100) / 100,
@@ -275,6 +285,7 @@ export class ClosingService {
     let totalHT = 0;
     let totalVAT = 0;
     let coversCount = 0;
+    let totalTips = 0;
 
     const paymentsBreakdown: Record<string, number> = {
       carte: 0,
@@ -286,6 +297,7 @@ export class ClosingService {
 
     for (const ticket of unclosedTickets) {
       totalNet += ticket.total;
+      totalTips += Number((ticket as any).tip || 0);
       const sub = ticket.subtotal != null ? ticket.subtotal : ticket.total;
       totalGross += sub;
 
@@ -335,7 +347,14 @@ export class ClosingService {
         paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
       }
 
-      coversCount += 2;
+      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
+      try {
+        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
+        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
+        coversCount += mainItems.length > 0 ? mainItems.length : 1;
+      } catch {
+        coversCount += 1;
+      }
     }
 
     const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -344,6 +363,7 @@ export class ClosingService {
     const finalNet = round2(totalNet);
     const finalHT = round2(totalHT);
     const finalVAT = round2(totalVAT);
+    const finalTips = round2(totalTips);
     const grandTotal = round2(grandTotalBefore + finalNet);
 
     const vatBreakdown = Object.keys(vatMap).map((k) => ({
@@ -397,6 +417,7 @@ export class ClosingService {
           totalNet: finalNet,
           totalHT: finalHT,
           totalVAT: finalVAT,
+          totalTips: finalTips,
           ticketsCount: unclosedTickets.length,
           coversCount,
           paymentsBreakdown: JSON.stringify(paymentsBreakdown),

@@ -58,6 +58,16 @@ export class ConfigService {
         accountCash: "530000",
         accountOther: "580000",
       },
+      modulesConfig: cfg.modulesConfig ? JSON.parse(cfg.modulesConfig) : {
+        enableStockManagement: true,
+        enableOnlineReservations: true,
+        enableCoursePacing: true,
+        enableMultiStationKds: true,
+        enableDiscounts: true,
+        enableAdvancedSplitModes: true,
+        enablePinAuth: true,
+        enableTips: true,
+      },
     };
   }
 
@@ -122,6 +132,13 @@ export class ConfigService {
           : JSON.stringify(data.fecExportConfig);
     }
 
+    if (data.modulesConfig !== undefined) {
+      updatePayload.modulesConfig =
+        typeof data.modulesConfig === "string"
+          ? data.modulesConfig
+          : JSON.stringify(data.modulesConfig);
+    }
+
     const updated = await this.prisma.restaurantConfig.upsert({
       where: { id: "default" },
       create: {
@@ -137,6 +154,11 @@ export class ConfigService {
       promoCodes: JSON.parse(updated.promoCodes || "[]"),
       happyHourConfig: updated.happyHourConfig ? JSON.parse(updated.happyHourConfig) : null,
       fecExportConfig: updated.fecExportConfig ? JSON.parse(updated.fecExportConfig) : null,
+      modulesConfig: updated.modulesConfig ? JSON.parse(updated.modulesConfig) : null,
     };
+  }
+
+  async updateModulesConfig(modules: any) {
+    return this.updateConfig({ modulesConfig: modules });
   }
 }

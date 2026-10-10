@@ -11,6 +11,7 @@ import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
+import { useModules } from "../../hooks/useModules.js";
 
 const TableActionModal = lazy(() => import("../../components/TableActionModal.jsx"));
 
@@ -44,6 +45,7 @@ export default function OrderTaking({
   onMergeTable,
 }) {
   const now = useNow();
+  const { hasSuites, hasStocks, hasDiscounts } = useModules();
   const isHeadWaiterOrAdmin = currentStaff?.roleId === "head_waiter" || currentStaff?.roleId === "admin";
   const [activeCat, setActiveCat]     = useState(CATEGORIES[0].id);
   const [query, setQuery]             = useState("");
@@ -126,8 +128,8 @@ export default function OrderTaking({
   };
 
   const handleProductTap = (p) => {
-    const portions = getPortionsAvailable(p);
-    const outOfStock = !isAvailable(p) || portions === 0;
+    const portions = hasStocks ? getPortionsAvailable(p) : null;
+    const outOfStock = !isAvailable(p) || (hasStocks && portions === 0);
 
     if (outOfStock) {
       if (isHeadWaiterOrAdmin) {
@@ -198,7 +200,7 @@ export default function OrderTaking({
             key={p.id}
             p={p}
             isMobile={isMobile}
-            portionsLeft={getPortionsAvailable(p)}
+            portionsLeft={hasStocks ? getPortionsAvailable(p) : null}
             config={config}
             now={now}
             canManageAvailability={isHeadWaiterOrAdmin}
@@ -221,7 +223,7 @@ export default function OrderTaking({
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wide text-[#8A8378] mb-1.5">Déjà envoyé</p>
             <div className="space-y-1.5">
-              {sentItems.map((it) => <SentLine key={it.id} item={it} products={products} />)}
+              {sentItems.map((it) => <SentLine key={it.id} item={it} products={products} hasSuites={hasSuites} />)}
             </div>
           </div>
         )}
@@ -240,6 +242,7 @@ export default function OrderTaking({
                 item={it}
                 isMobile={isMobile}
                 products={products}
+                hasSuites={hasSuites}
                 noteOpen={noteFor === it.id}
                 onToggleNote={() => setNoteFor(noteFor === it.id ? null : it.id)}
                 onQty={(d) => onQty(it.id, d)}
@@ -275,7 +278,7 @@ export default function OrderTaking({
         </div>
 
         {/* Phase 4 : Gestion des Réclames de Suites */}
-        {sentItems.filter((i) => i.course === "plat" && i.courseStatus === "held").length > 0 && (
+        {hasSuites && sentItems.filter((i) => i.course === "plat" && i.courseStatus === "held").length > 0 && (
           <button
             onClick={() => onCallCourse?.("plat")}
             className="rf-tap w-full py-2.5 rounded-xl font-bold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm bg-[#D9A441] hover:bg-[#c29135]"
@@ -285,7 +288,7 @@ export default function OrderTaking({
           </button>
         )}
 
-        {sentItems.filter((i) => i.course === "dessert" && i.courseStatus === "held").length > 0 && (
+        {hasSuites && sentItems.filter((i) => i.course === "dessert" && i.courseStatus === "held").length > 0 && (
           <button
             onClick={() => onCallCourse?.("dessert")}
             className="rf-tap w-full py-2.5 rounded-xl font-bold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm bg-[#B5793A] hover:bg-[#9e672e]"
@@ -296,7 +299,7 @@ export default function OrderTaking({
         )}
 
         {/* Bouton Remise & Codes Promo */}
-        {items.length > 0 && (
+        {hasDiscounts && items.length > 0 && (
           <button
             onClick={() => setDiscountModalOpen(true)}
             className="rf-tap w-full py-1.5 px-3 rounded-xl border border-black/15 bg-black/[.02] hover:bg-black/5 text-xs font-semibold text-[#5B5346] flex items-center justify-center gap-1.5"
@@ -654,7 +657,7 @@ function ProductCard({ p, isMobile, onTap, portionsLeft, config, now, canManageA
   );
 }
 
-function DraftItemRow({ item, isMobile, products, noteOpen, onToggleNote, onQty, onRemove, onNote, onChangeCourse }) {
+function DraftItemRow({ item, isMobile, products, hasSuites, noteOpen, onToggleNote, onQty, onRemove, onNote, onChangeCourse }) {
   const isAllergy = noteIndicatesAllergy(item.notes);
   const product = products?.find((p) => p.id === item.productId);
   const course = item.course || "direct";
@@ -665,22 +668,24 @@ function DraftItemRow({ item, isMobile, products, noteOpen, onToggleNote, onQty,
       {isAllergy && <AllergyBadge item={item} product={product} />}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          <button
-            type="button"
-            onClick={() => {
-              const nextIdx = (COURSE_CYCLE.indexOf(course) + 1) % COURSE_CYCLE.length;
-              onChangeCourse?.(COURSE_CYCLE[nextIdx]);
-            }}
-            title="Cliquer pour cadencer (Entrée / Plat / Dessert / Boisson / Direct)"
-            className="text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 border border-black/10 hover:border-black/30 transition-colors shadow-2xs"
-            style={{
-              background: courseMeta.color + "18",
-              color: courseMeta.color,
-            }}
-          >
-            <span>{courseMeta.emoji}</span>
-            <span>{courseMeta.label}</span>
-          </button>
+          {hasSuites && (
+            <button
+              type="button"
+              onClick={() => {
+                const nextIdx = (COURSE_CYCLE.indexOf(course) + 1) % COURSE_CYCLE.length;
+                onChangeCourse?.(COURSE_CYCLE[nextIdx]);
+              }}
+              title="Cliquer pour cadencer (Entrée / Plat / Dessert / Boisson / Direct)"
+              className="text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 border border-black/10 hover:border-black/30 transition-colors shadow-2xs"
+              style={{
+                background: courseMeta.color + "18",
+                color: courseMeta.color,
+              }}
+            >
+              <span>{courseMeta.emoji}</span>
+              <span>{courseMeta.label}</span>
+            </button>
+          )}
           <span className="text-sm font-semibold text-[#2B2622] truncate">{item.qty} × {item.name}</span>
         </div>
         <button onClick={onRemove} className="text-[#B5451B] shrink-0 p-0.5"><X size={isMobile ? 16 : 14} /></button>
@@ -721,7 +726,7 @@ function DraftItemRow({ item, isMobile, products, noteOpen, onToggleNote, onQty,
   );
 }
 
-function SentLine({ item, products }) {
+function SentLine({ item, products, hasSuites }) {
   const statusMap = {
     new:       { l: "envoyé", c: "#D9A441" },
     preparing: { l: "en préparation", c: "#3E7CB1" },
@@ -740,7 +745,7 @@ function SentLine({ item, products }) {
       <div className="flex items-center justify-between text-xs">
         <span className="flex items-center gap-1.5 text-[#5B5346] min-w-0">
           {icon}
-          {item.course && item.course !== "direct" && courseMeta && (
+          {hasSuites && item.course && item.course !== "direct" && courseMeta && (
             <span
               className="text-[9px] px-1.5 py-0.2 rounded-full font-bold shrink-0"
               style={{
@@ -754,12 +759,12 @@ function SentLine({ item, products }) {
           <span className="truncate">{item.qty} × {item.name}{item.notes && !isAllergy ? ` (${item.notes})` : ""}</span>
         </span>
         <div className="flex items-center gap-1.5 shrink-0 ml-2">
-          {item.courseStatus === "held" && item.status !== "served" && item.status !== "ready" && (
+          {hasSuites && item.courseStatus === "held" && item.status !== "served" && item.status !== "ready" && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 animate-pulse">
               ⏸️ À réclamer
             </span>
           )}
-          {item.courseStatus === "called" && item.status !== "served" && item.status !== "ready" && (
+          {hasSuites && item.courseStatus === "called" && item.status !== "served" && item.status !== "ready" && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700">
               🔔 Réclamé
             </span>
