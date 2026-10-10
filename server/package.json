@@ -12,7 +12,8 @@
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:backup": "node --env-file=.env prisma/backup.js",
-    "db:seed": "ts-node prisma/seed.ts"
+    "db:seed": "ts-node prisma/seed.ts",
+    "db:seed:vierge": "ts-node prisma/seed.ts --vierge"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

@@ -34,8 +34,12 @@ Créez la base :
 ```bash
 mkdir -p /opt/restoflow/data
 npm run db:migrate
-npm run db:seed        # données de démo : remplacez ensuite PINs, carte et équipe dans Gestion
+npm run db:seed:vierge # rôles + compte « Gérant » (PIN affiché), sans données de démo
 ```
+
+Puis, connecté en Gérant : changez le PIN (Équipe & Rôles), renseignez les mentions légales (Caisse & Imprimantes), créez les tables, et importez la carte depuis un CSV (Produits > Importer CSV, modèle téléchargeable).
+
+> `npm run db:seed` charge à la place une démo complète (carte, équipe, tickets fictifs) : à réserver aux essais, jamais en production.
 
 > Pour reprendre une base existante créée avant les migrations (`db push`), lancez une seule fois `npx prisma migrate resolve --applied 0_init` au lieu de `db:migrate`.
 

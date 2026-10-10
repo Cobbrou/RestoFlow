@@ -134,7 +134,7 @@ cd server
 npm install
 cp .env.example .env   # puis renseigner JWT_SECRET
 npm run db:migrate     # crée la base SQLite locale
-npm run db:seed        # charge les données de démonstration
+npm run db:seed        # charge les données de démonstration (ou db:seed:vierge pour un vrai restaurant)
 npm run start:dev      # http://localhost:3000
 ```
 
