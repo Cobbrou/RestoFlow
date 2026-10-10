@@ -123,6 +123,7 @@ export default function PinPadModal({
       onClose={mandatory ? () => {} : onClose}
       title={selectedStaff ? `Bonjour ${selectedStaff.name.split(" ")[0]}` : title}
       width={400}
+      opaque
     >
       <div className="flex flex-col items-center p-2">
         {/* Étape 1 : Choix de l'utilisateur si non sélectionné */}
@@ -262,11 +263,6 @@ export default function PinPadModal({
               >
                 <Delete size={20} />
               </button>
-            </div>
-
-            {/* Info PIN démo */}
-            <div className="mt-3 p-1.5 bg-black/5 rounded-xl text-[10px] text-[#6B6355] text-center w-full">
-              💡 Code PIN de <strong>{selectedStaff.name.split(" ")[0]}</strong> : <code>{selectedStaff.pin}</code>
             </div>
           </div>
         )}
