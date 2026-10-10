@@ -22,6 +22,23 @@ export function heldToRelease(
     .map((i) => i.id);
 }
 
+/**
+ * Modes de service hors salle et module qui les active. La livraison (plateformes, site) s'ajoutera ici
+ * avec son propre module ; les canaux externes créeront leurs commandes via createOffPremise.
+ */
+export const OFF_PREMISE_MODULES: Record<string, string> = { takeaway: "enableTakeaway" };
+// Canaux saisis depuis la caisse ; "online" et les plateformes arriveront par leurs propres intégrations
+const POS_CHANNELS = ["pos", "phone"];
+
+export const isOffPremise = (order: { type?: string | null }) => !!order.type && order.type !== "dine_in";
+
+/** Libellé d'une commande pour les bons, toasts et tickets : "Table 4" ou "Emporter #12 · Dupont" */
+export function orderLabel(order: any): string {
+  if (!isOffPremise(order)) return `Table ${order.table?.number ?? "?"}`;
+  const kind = order.type === "takeaway" ? "Emporter" : "Livraison";
+  return [`${kind} #${order.pickupNumber ?? "?"}`, order.customerName].filter(Boolean).join(" · ");
+}
+
 // Tolérance sur l'horodatage client d'un ajout rejoué depuis la file hors-ligne
 const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
 
@@ -39,6 +56,13 @@ export class OrdersService {
       sentAt: order.sentAt ? new Date(order.sentAt).getTime() : null,
       status: order.status,
       discount: order.discount ? (typeof order.discount === "string" ? JSON.parse(order.discount) : order.discount) : null,
+      type: order.type || "dine_in",
+      channel: order.channel || "pos",
+      customerName: order.customerName ?? null,
+      customerPhone: order.customerPhone ?? null,
+      pickupAt: order.pickupAt ? new Date(order.pickupAt).getTime() : null,
+      pickupNumber: order.pickupNumber ?? null,
+      externalRef: order.externalRef ?? null,
       table: order.table ? {
         id: order.table.id,
         number: order.table.number,
@@ -130,6 +154,63 @@ export class OrdersService {
     return this.formatOrder(order);
   }
 
+  /**
+   * Commande hors salle (emporter ; demain téléphone, site, plateformes). Rejouée hors-ligne avec le même
+   * orderId : renvoie la commande existante. Refusée si le module du mode de service est coupé.
+   */
+  async createOffPremise(data: {
+    orderId?: string;
+    type: string;
+    channel?: string;
+    server?: string;
+    customerName?: string;
+    customerPhone?: string;
+    pickupAt?: number | string | null;
+  }) {
+    const moduleKey = OFF_PREMISE_MODULES[data?.type];
+    if (!moduleKey) throw new BadRequestException("Mode de service inconnu");
+    const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
+    const modules = cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {};
+    if (!modules[moduleKey]) throw new BadRequestException("Module désactivé dans la configuration");
+
+    const channel = data.channel || "pos";
+    if (!POS_CHANNELS.includes(channel)) throw new BadRequestException("Canal de commande invalide");
+
+    if (data.orderId) {
+      const existing = await this.prisma.order.findUnique({ where: { id: data.orderId }, include: { items: true, table: true } });
+      if (existing) return this.formatOrder(existing);
+    }
+
+    const pickupAt = data.pickupAt ? new Date(data.pickupAt) : null;
+    if (pickupAt && isNaN(pickupAt.getTime())) throw new BadRequestException("Heure de retrait invalide");
+    const text = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
+
+    // Numéro d'appel remis à 1 chaque jour
+    // ponytail: deux créations simultanées peuvent obtenir le même numéro (affichage seul), compteur atomique si gênant
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const last = await this.prisma.order.aggregate({
+      where: { createdAt: { gte: startOfDay }, pickupNumber: { not: null } },
+      _max: { pickupNumber: true },
+    });
+
+    const order = await this.prisma.order.create({
+      data: {
+        id: data.orderId || `ord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: data.type,
+        channel,
+        server: data.server || "Service",
+        status: "open",
+        customerName: text(data.customerName, 60),
+        customerPhone: text(data.customerPhone, 30),
+        pickupAt,
+        pickupNumber: (last._max.pickupNumber ?? 0) + 1,
+      },
+      include: { items: true, table: true },
+    });
+    return this.formatOrder(order);
+  }
+
   async addItem(data: {
     orderId: string;
     product: { id: string; name: string; price: number; isMenu?: boolean; cat?: string; station?: string };
@@ -189,7 +270,9 @@ export class OrdersService {
       else if (cat === "desserts") course = "dessert";
       else course = "plat";
     }
-    const courseStatus = data.courseStatus || (course === "entree" || course === "boisson" || course === "direct" ? "direct" : "held");
+    let courseStatus = data.courseStatus || (course === "entree" || course === "boisson" || course === "direct" ? "direct" : "held");
+    // Hors salle : tout part ensemble, pas de suites à réclamer
+    if (isOffPremise(order)) course = courseStatus = "direct";
 
     if (!data.product.isMenu) {
       const existing = order.items.find(
@@ -258,8 +341,8 @@ export class OrdersService {
           status: "draft",
           isMenu: true,
           composition: data.composition ? JSON.stringify(data.composition) : null,
-          course: data.course || "plat",
-          courseStatus: data.courseStatus || "held",
+          course: isOffPremise(order) ? "direct" : data.course || "plat",
+          courseStatus: isOffPremise(order) ? "direct" : data.courseStatus || "held",
           station: "kitchen",
         },
       });
@@ -364,7 +447,7 @@ export class OrdersService {
       where: { id: orderId },
       include: { items: true, table: true },
     });
-    return { order: this.formatOrder(updated), item, voidQty, tableNumber: item.order.table?.number };
+    return { order: this.formatOrder(updated), item, voidQty, tableNumber: item.order.table?.number, label: orderLabel(item.order) };
   }
 
   async setNote(orderId: string, itemId: string, note: string) {
