@@ -1,0 +1,22 @@
+# RestoFlow derrière Caddy : HTTPS local + front statique + proxy API/WebSocket.
+# Variables : RESTOFLOW_HOST (ex : 192.168.1.10 ou caisse.local), RESTOFLOW_DIST (dossier dist/ du client).
+{$RESTOFLOW_HOST} {
+	# Certificat signé par l'autorité locale de Caddy (à installer sur chaque tablette, voir DEPLOIEMENT.md)
+	tls internal
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle /socket.io/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle {
+		root * {$RESTOFLOW_DIST}
+		encode gzip
+		# Le service worker et index.html ne doivent jamais rester en cache, sinon les mises à jour n'arrivent pas
+		@nocache path /sw.js /index.html /
+		header @nocache Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -36,7 +36,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'OrderHistory'"
     );
     if (tables.length === 0) {
-      throw new Error("Base de données vide ou non initialisée : lancez `npm run db:push` puis `npm run db:seed` dans server/");
+      throw new Error("Base de données vide ou non initialisée : lancez `npm run db:migrate` puis `npm run db:seed` dans server/");
     }
     for (const sql of Object.values(NF525_TRIGGERS)) {
       await this.$executeRawUnsafe(sql);

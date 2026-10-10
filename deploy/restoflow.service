@@ -1,0 +1,16 @@
+# Service systemd du serveur RestoFlow (Linux) : /etc/systemd/system/restoflow.service
+[Unit]
+Description=RestoFlow server
+After=network.target
+
+[Service]
+User=restoflow
+WorkingDirectory=/opt/restoflow/server
+ExecStartPre=/usr/bin/npx prisma migrate deploy
+ExecStart=/usr/bin/node --env-file=.env dist/src/main.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
