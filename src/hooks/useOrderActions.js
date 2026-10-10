@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { uid } from "../data/seed.js";
-import { getProductEffectivePrice, resolveOptions, heldToRelease } from "../utils/index.js";
+import { getProductEffectivePrice, resolveOptions, resolveMenuOptions, heldToRelease } from "../utils/index.js";
 import { getSocket } from "../services/socket.js";
 
 /**
@@ -124,6 +124,7 @@ export function useOrderActions(store, {
     const courseStatus = "held";
     const station = "kitchen";
     const lineId = uid("it");
+    const { label: options, extra } = resolveMenuOptions(composition, store.products);
 
     setOrders((prev) =>
       prev.map((o) => {
@@ -136,10 +137,11 @@ export function useOrderActions(store, {
               id: lineId,
               productId: menuProduct.id,
               name: menuProduct.name,
-              price: menuProduct.price,
+              price: Math.round((menuProduct.price + extra) * 100) / 100,
               vatRate: 10,
               qty: 1,
               notes: "",
+              options,
               status: "draft",
               isMenu: true,
               composition,

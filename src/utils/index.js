@@ -252,6 +252,22 @@ export function resolveOptions(groups = [], picks = []) {
   return { label: parts.join(" · "), extra: extraCents / 100 };
 }
 
+/** Options des composants d'un menu (composition[g].options[i] ↔ productIds[i]), même libellé que le serveur */
+export function resolveMenuOptions(composition = [], products = []) {
+  const parts = [];
+  let extraCents = 0;
+  for (const g of composition) {
+    (g.productIds || []).forEach((id, i) => {
+      const p = products.find((x) => x.id === id);
+      if (!p) return;
+      const r = resolveOptions(p.options, g.options?.[i]);
+      extraCents += Math.round(r.extra * 100);
+      if (r.label) parts.push(`${p.name} : ${r.label}`);
+    });
+  }
+  return { label: parts.join(" | "), extra: extraCents / 100 };
+}
+
 /**
  * Saisie back-office, un groupe par ligne :
  *   Cuisson* : Bleu, Saignant, À point

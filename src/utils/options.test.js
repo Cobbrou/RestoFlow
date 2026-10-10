@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseOptionsText, formatOptionsText, resolveOptions } from "./index.js";
+import { parseOptionsText, formatOptionsText, resolveOptions, resolveMenuOptions } from "./index.js";
 
 const text = "Cuisson* : Bleu, Saignant, À point\nSuppléments (max 2) : Bacon +2, Œuf +1,5 €, Cheddar";
 
@@ -23,6 +23,16 @@ describe("options produit (saisie back-office)", () => {
       { group: "Suppléments", choice: "Bacon" },
     ]);
     expect(r).toEqual({ label: "Saignant · Bacon (+2.00€) · Œuf (+1.50€)", extra: 3.5 });
+  });
+
+  it("menu : options par composant, supplément cumulé", () => {
+    const products = [{ id: "b", name: "Burger", options: parseOptionsText(text) }, { id: "f", name: "Frites" }];
+    const r = resolveMenuOptions(
+      [{ title: "Plat", productIds: ["b"], options: [[{ group: "Cuisson", choice: "Bleu" }, { group: "Suppléments", choice: "Bacon" }]] },
+       { title: "Accompagnement", productIds: ["f"], options: [[]] }],
+      products
+    );
+    expect(r).toEqual({ label: "Burger : Bleu · Bacon (+2.00€)", extra: 2 });
   });
 });
 

@@ -227,16 +227,34 @@ export class OrdersService {
         });
       }
     } else {
+      // Options des composants (cuisson du burger…) : composition[g].options[i] = picks de productIds[i]
+      const parts: string[] = [];
+      let extraCents = 0;
+      for (const g of Array.isArray(data.composition) ? data.composition : []) {
+        const ids: string[] = Array.isArray(g?.productIds) ? g.productIds : [];
+        for (const [i, pid] of ids.entries()) {
+          const p = await this.prisma.product.findUnique({ where: { id: pid }, select: { name: true, options: true } });
+          if (!p) continue;
+          try {
+            const r = resolveOptions(normalizeOptionGroups(JSON.parse(p.options || "[]")), g.options?.[i]);
+            extraCents += r.extraCents;
+            if (r.label) parts.push(`${p.name} : ${r.label}`);
+          } catch (e: any) {
+            throw new BadRequestException(`${p.name} — ${e.message}`);
+          }
+        }
+      }
       await this.prisma.orderItem.create({
         data: {
           id: newItemId,
           orderId: order.id,
           productId: data.product.id,
           name,
-          price,
+          price: toEuros(toCents(price) + extraCents),
           vatRate,
           qty: 1,
           notes: "",
+          options: parts.join(" | ") || null,
           status: "draft",
           isMenu: true,
           composition: data.composition ? JSON.stringify(data.composition) : null,

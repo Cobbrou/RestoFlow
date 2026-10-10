@@ -96,7 +96,7 @@ export function generateCustomerReceiptText(receipt = {}, config = {}, width = 4
     const name = it.name || "Article";
     const lineTotal = money((it.price || 0) * qty);
     lines.push(formatRow(`${qty} x ${name}`, lineTotal, width));
-    for (const opt of it.options ? it.options.split(" · ") : []) {
+    for (const opt of it.options ? it.options.split(/ [·|] /) : []) {
       lines.push(formatRow(`    ${opt}`, "", width));
     }
     if (qty > 1) {
@@ -198,7 +198,7 @@ export function generateKitchenTicketText(order, table, width = 42) {
   } else {
     for (const it of kitchenItems) {
       lines.push(formatRow(`[ ] ${it.qty} x ${it.name.toUpperCase()}`, "", width));
-      for (const opt of it.options ? it.options.split(" · ") : []) {
+      for (const opt of it.options ? it.options.split(/ [·|] /) : []) {
         lines.push(formatRow(`    >> ${opt.toUpperCase()}`, "", width));
       }
       if (it.notes) {
@@ -247,7 +247,7 @@ export function generateBarTicketText(order, table, width = 42) {
   } else {
     for (const it of barItems) {
       lines.push(formatRow(`[ ] ${it.qty} x ${it.name}`, "", width));
-      for (const opt of it.options ? it.options.split(" · ") : []) {
+      for (const opt of it.options ? it.options.split(/ [·|] /) : []) {
         lines.push(formatRow(`    > ${opt}`, "", width));
       }
       if (it.notes) {
