@@ -20,6 +20,8 @@ import { PrinterService } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
+import { JournalService } from "../journal/journal.service";
+import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { WsAuthGuard, authenticateSocket } from "../auth/guards/ws-auth.guard";
 import { Public } from "../auth/decorators/public.decorator";
@@ -56,7 +58,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     private printerService: PrinterService,
     private recipesService: RecipesService,
     private closingService: ClosingService,
-    private catalogService: CatalogService
+    private catalogService: CatalogService,
+    private journal: JournalService
   ) {}
 
   async handleConnection(client: Socket) {
@@ -185,21 +188,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       permissions: JSON.parse(r.permissions || "[]"),
     }));
 
-    const parsedHistory = rawHistory.map((h) => ({
-      id: h.id,
-      orderId: h.orderId,
-      ticketNumber: h.ticketNumber,
-      tableNumber: h.tableNumber,
-      server: h.server,
-      items: JSON.parse(h.items || "[]"),
-      subtotal: h.subtotal ?? h.total,
-      total: h.total,
-      discount: h.discount ? JSON.parse(h.discount) : null,
-      vatDetails: h.vatDetails ? JSON.parse(h.vatDetails) : null,
-      paymentMethod: h.paymentMethod,
-      payments: JSON.parse(h.payments || "[]"),
-      createdAt: h.createdAt.getTime(),
-    }));
+    const parsedHistory = rawHistory.map(toClientHistory);
 
     const parsedIngredients = rawIngredients.map((ing) => ({
       ...ing,
@@ -550,11 +539,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.discount")
   @SubscribeMessage("order:discount:apply")
-  async handleApplyDiscount(@MessageBody() data: { orderId: string; discount: any }) {
+  async handleApplyDiscount(@ConnectedSocket() client: Socket, @MessageBody() data: { orderId: string; discount: any }) {
     try {
       const res = await this.billingService.applyDiscount(data.orderId, data.discount);
       const formatted = this.ordersService.formatOrder(res.order);
       this.server.emit("order:updated", formatted);
+      await this.journal.log("DISCOUNT_APPLY", { staffId: client.data.user.staffId, name: client.data.user.name }, { orderId: data.orderId, discount: formatted.discount });
       return { ok: true, order: formatted };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -563,11 +553,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.discount")
   @SubscribeMessage("order:discount:remove")
-  async handleRemoveDiscount(@MessageBody() data: { orderId: string }) {
+  async handleRemoveDiscount(@ConnectedSocket() client: Socket, @MessageBody() data: { orderId: string }) {
     try {
       const res = await this.billingService.removeDiscount(data.orderId);
       const formatted = this.ordersService.formatOrder(res.order);
       this.server.emit("order:updated", formatted);
+      await this.journal.log("DISCOUNT_REMOVE", { staffId: client.data.user.staffId, name: client.data.user.name }, { orderId: data.orderId });
       return { ok: true, order: formatted };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -651,10 +642,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("config:update")
-  async handleUpdateConfig(@MessageBody() data: any) {
+  async handleUpdateConfig(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
       const updated = await this.configService.updateConfig(data);
       this.server.emit("config:updated", updated);
+      await this.journal.log("CONFIG_UPDATE", { staffId: client.data.user.staffId, name: client.data.user.name }, { fields: Object.keys(data || {}) });
       return { ok: true, config: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -1005,6 +997,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       // Diffusion temps réel de la nouvelle clôture Z à tous les postes connectés
       this.server.emit("closing:new_z", zReport);
+      await this.journal.log("Z_CLOSING", { staffId: client.data.user.staffId, name: client.data.user.name }, { reportNumber: zReport.reportNumber, totalNet: zReport.totalNet });
 
       // Recharger l'état de la config et de l'historique
       const updatedConfig = await this.configService.getConfig();
@@ -1029,9 +1022,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:verify_chain")
-  async handleVerifyFiscalChain() {
+  async handleVerifyFiscalChain(@ConnectedSocket() client: Socket) {
     try {
       const audit = await this.closingService.verifyFiscalChainIntegrity();
+      await this.journal.log("AUDIT_RUN", { staffId: client.data.user.staffId, name: client.data.user.name }, { status: audit.status, errors: audit.errors.length });
       return { ok: true, audit };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -1040,10 +1034,43 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("closing:get_fec")
-  async handleGetFecExport(@MessageBody() data?: any) {
+  async handleGetFecExport(@ConnectedSocket() client: Socket, @MessageBody() data?: any) {
     try {
       const fec = await this.closingService.generateFecExport(data || {});
+      if (data?.download) {
+        await this.journal.log("FEC_EXPORT", { staffId: client.data.user.staffId, name: client.data.user.name }, { fileName: fec.fileName, startDate: data.startDate, endDate: data.endDate });
+      }
       return { ok: true, fec };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  // ── Avoirs & Journal des événements (NF525) ─────────────────────────
+
+  @RequirePermissions("caisse.settings")
+  @SubscribeMessage("history:refund")
+  async handleRefund(@ConnectedSocket() client: Socket, @MessageBody() data: { historyId: string; reason: string }) {
+    try {
+      const creditNote = await this.billingService.refundTicket(data?.historyId, data?.reason, client.data.user.name);
+      this.server.emit("history:new_entry", creditNote);
+      await this.journal.log("CREDIT_NOTE", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+        ticketNumber: creditNote.ticketNumber,
+        refTicketNumber: creditNote.refTicketNumber,
+        total: creditNote.total,
+        reason: creditNote.reason,
+      });
+      return { ok: true, history: creditNote };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("caisse.settings")
+  @SubscribeMessage("journal:list")
+  async handleJournalList(@MessageBody() data?: { limit?: number }) {
+    try {
+      return { ok: true, events: await this.journal.list(Math.min(Number(data?.limit) || 200, 1000)) };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

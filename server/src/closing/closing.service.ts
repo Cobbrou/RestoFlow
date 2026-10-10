@@ -2,6 +2,8 @@ import { Injectable, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConfigService } from "../config/config.service";
 import * as crypto from "crypto";
+import { GENESIS_TICKET, signTicket } from "../billing/fiscal";
+import { JournalService } from "../journal/journal.service";
 
 export interface ZClosingInput {
   closedBy: string;
@@ -20,7 +22,8 @@ export interface FecExportOptions {
 export class ClosingService {
   constructor(
     private prisma: PrismaService,
-    private configService: ConfigService
+    private configService: ConfigService,
+    private journal: JournalService
   ) {}
 
   /**
@@ -28,37 +31,6 @@ export class ClosingService {
    */
   private async getNf525Key(): Promise<string> {
     return this.configService.getNf525Key();
-  }
-
-  /**
-   * Calcul du hash d'intégrité SHA-256 pour un ticket de vente
-   */
-  calculateTicketSignature(
-    ticket: {
-      ticketNumber?: string | null;
-      sequenceNumber: number;
-      createdAt: Date | string;
-      total: number;
-      subtotal?: number | null;
-      vatDetails?: string | null;
-      paymentMethod: string;
-      payments: string;
-      previousHash?: string | null;
-    },
-    secretKey: string
-  ): string {
-    const isoDate = new Date(ticket.createdAt).toISOString();
-    const payload = [
-      ticket.sequenceNumber,
-      ticket.ticketNumber || "",
-      isoDate,
-      Number(ticket.total).toFixed(2),
-      Number(ticket.subtotal || ticket.total).toFixed(2),
-      ticket.paymentMethod || "",
-      ticket.previousHash || "GENESIS_TICKET_RESTOFLOW",
-    ].join("|");
-
-    return crypto.createHmac("sha256", secretKey).update(payload).digest("hex");
   }
 
   /**
@@ -486,49 +458,35 @@ export class ClosingService {
     const secretKey = await this.getNf525Key();
     const errors: string[] = [];
 
-    // 1. Vérification de la chaîne des tickets OrderHistory
+    // 1. Vérification de la chaîne des tickets OrderHistory (ordre de séquence, sans trou, tous signés)
     const allTickets = await this.prisma.orderHistory.findMany({
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ sequenceNumber: "asc" }, { createdAt: "asc" }],
     });
 
-    let previousTicketHash = "GENESIS_TICKET_RESTOFLOW";
+    let previousTicketHash = GENESIS_TICKET;
     let ticketsVerified = 0;
+    let expectedSeq = 1;
 
-    for (let i = 0; i < allTickets.length; i++) {
-      const ticket = allTickets[i];
-      if (ticket.sequenceNumber != null && ticket.signature) {
-        // Vérification du chaînage
-        if (ticket.previousHash && ticket.previousHash !== previousTicketHash) {
-          errors.push(
-            `Rupture de chaînage ticket #${ticket.ticketNumber || ticket.id} : previousHash invalide (${ticket.previousHash.slice(0, 8)} vs attendu ${previousTicketHash.slice(0, 8)})`
-          );
-        }
-
-        // Vérification recalcul signature
-        const expectedSig = this.calculateTicketSignature(
-          {
-            ticketNumber: ticket.ticketNumber,
-            sequenceNumber: ticket.sequenceNumber,
-            createdAt: ticket.createdAt,
-            total: ticket.total,
-            subtotal: ticket.subtotal,
-            vatDetails: ticket.vatDetails,
-            paymentMethod: ticket.paymentMethod,
-            payments: ticket.payments,
-            previousHash: ticket.previousHash,
-          },
-          secretKey
-        );
-
-        if (expectedSig !== ticket.signature) {
-          errors.push(
-            `Altération détectée sur le ticket #${ticket.ticketNumber || ticket.id} : signature cryptographique compromise`
-          );
-        }
-
-        previousTicketHash = ticket.signature;
-        ticketsVerified++;
+    for (const ticket of allTickets) {
+      const label = ticket.ticketNumber || ticket.id;
+      if (ticket.sequenceNumber == null || !ticket.signature) {
+        errors.push(`Ticket #${label} hors chaîne fiscale (non numéroté ou non signé)`);
+        continue;
       }
+      if (ticket.sequenceNumber !== expectedSeq) {
+        errors.push(`Trou dans la séquence des tickets : n°${expectedSeq} attendu, n°${ticket.sequenceNumber} trouvé`);
+      }
+      expectedSeq = ticket.sequenceNumber + 1;
+
+      if (ticket.previousHash !== previousTicketHash) {
+        errors.push(`Rupture de chaînage ticket #${label} : previousHash invalide`);
+      }
+      if (signTicket(ticket as any, secretKey) !== ticket.signature) {
+        errors.push(`Altération détectée sur le ticket #${label} : signature cryptographique compromise`);
+      }
+
+      previousTicketHash = ticket.signature;
+      ticketsVerified++;
     }
 
     // 2. Vérification de la chaîne des rapports DailyClosing
@@ -583,6 +541,10 @@ export class ClosingService {
       closingsVerified++;
     }
 
+    // 3. Journal des événements techniques (JET)
+    const jet = await this.journal.verify();
+    errors.push(...jet.errors);
+
     const isValid = errors.length === 0;
 
     return {
@@ -590,6 +552,7 @@ export class ClosingService {
       status: isValid ? "CONFORME_NF525" : "ANOMALIE_DETECTEE",
       ticketsVerified,
       closingsVerified,
+      eventsVerified: jet.eventsVerified,
       totalTickets: allTickets.length,
       totalClosings: allClosings.length,
       lastClosingHash: allClosings.length > 0 ? allClosings[allClosings.length - 1].signature : null,
@@ -604,226 +567,139 @@ export class ClosingService {
    */
   async generateFecExport(options: FecExportOptions = {}) {
     const cfg = await this.configService.getConfig();
-    let accounts = {
+    // getConfig() renvoie déjà fecExportConfig désérialisé
+    const accounts = {
       journalCode: "VT",
+      accountVente55: "706500",
       accountVente10: "706000",
       accountVente20: "707000",
+      accountVat55: "445705",
       accountVat10: "445710",
       accountVat20: "445720",
       accountCard: "512000",
       accountCash: "530000",
       accountOther: "580000",
+      ...cfg.fecExportConfig,
     };
 
-    if (cfg.fecExportConfig) {
-      try {
-        accounts = { ...accounts, ...JSON.parse(cfg.fecExportConfig) };
-      } catch {}
-    }
-
+    // Dates "AAAA-MM-JJ" interprétées en heure locale ; la date de fin est incluse en entier
+    const dayStart = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(`${d}T00:00:00`) : new Date(d));
     const whereClause: any = {};
-
     if (options.closingId) {
       whereClause.closedInZId = options.closingId;
     } else if (options.startDate || options.endDate) {
       whereClause.createdAt = {};
-      if (options.startDate) whereClause.createdAt.gte = new Date(options.startDate);
-      if (options.endDate) whereClause.createdAt.lte = new Date(options.endDate);
+      if (options.startDate) whereClause.createdAt.gte = dayStart(options.startDate);
+      if (options.endDate) {
+        const end = dayStart(options.endDate);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(options.endDate)) end.setDate(end.getDate() + 1);
+        whereClause.createdAt.lt = end;
+      }
     }
 
     const tickets = await this.prisma.orderHistory.findMany({
       where: whereClause,
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ sequenceNumber: "asc" }, { createdAt: "asc" }],
     });
 
-    const lines: string[] = [];
-    // Entête réglementaire 18 colonnes
-    const header = [
-      "JournalCode",
-      "JournalLib",
-      "EcritureNum",
-      "EcritureDate",
-      "CompteNum",
-      "CompteLib",
-      "CompAuxNum",
-      "CompAuxLib",
-      "PieceRef",
-      "PieceDate",
-      "EcritureLib",
-      "Debit",
-      "Credit",
-      "EcritureLet",
-      "DateLet",
-      "ValidDate",
-      "Montantdevise",
-      "Idevise",
-    ].join("|");
-
-    lines.push(header);
-
-    let ecritureIndex = 1;
-    let totalDebitSum = 0;
-    let totalCreditSum = 0;
-
-    const formatAmount = (num: number) => num.toFixed(2).replace(".", ",");
     const formatDate = (date: Date) => {
       const d = new Date(date);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      return `${y}${m}${day}`;
+      return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
     };
+    const formatCents = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+    const cents = (n: any) => Math.round((Number(n) || 0) * 100);
 
-    for (const ticket of tickets) {
-      const ecritureNum = `ECR${String(ecritureIndex).padStart(6, "0")}`;
-      const ecritureDate = formatDate(ticket.createdAt);
-      const pieceRef = ticket.ticketNumber || `FAC-${ticket.id.slice(-6).toUpperCase()}`;
-      const pieceDate = ecritureDate;
-      const validDate = ecritureDate;
+    const rateAccounts = (rate: number) =>
+      rate === 20
+        ? { vente: accounts.accountVente20, tva: accounts.accountVat20, lib: "Ventes de boissons alcoolisées (20%)" }
+        : rate === 5.5
+          ? { vente: accounts.accountVente55, tva: accounts.accountVat55, lib: "Ventes à emporter (5,5%)" }
+          : { vente: accounts.accountVente10, tva: accounts.accountVat10, lib: `Prestations restauration (${rate}%)` };
 
-      // 1. Débit des comptes de règlement (trésorerie / créances)
-      let paymentsList: any[] = [];
+    const lines: string[] = [
+      [
+        "JournalCode", "JournalLib", "EcritureNum", "EcritureDate", "CompteNum", "CompteLib", "CompAuxNum",
+        "CompAuxLib", "PieceRef", "PieceDate", "EcritureLib", "Debit", "Credit", "EcritureLet", "DateLet",
+        "ValidDate", "Montantdevise", "Idevise",
+      ].join("|"),
+    ];
+
+    let totalDebitCents = 0;
+    let totalCreditCents = 0;
+    let unbalancedEntries = 0;
+
+    tickets.forEach((ticket, idx) => {
+      const ecritureNum = `ECR${String(idx + 1).padStart(6, "0")}`;
+      const date = formatDate(ticket.createdAt);
+      const pieceRef = ticket.ticketNumber || ticket.id;
+      const isCreditNote = ticket.type === "CREDIT_NOTE";
+
+      // Montants signés : débit si positif ; un avoir (négatif) inverse le sens
+      const entries: { compte: string; lib: string; texte: string; debit: number }[] = [];
+
+      let payments: any[] = [];
       try {
-        paymentsList = ticket.payments ? JSON.parse(ticket.payments) : [];
+        payments = ticket.payments ? JSON.parse(ticket.payments) : [];
       } catch {}
-
-      if (paymentsList.length === 0) {
-        paymentsList = [{ method: ticket.paymentMethod || "carte", amount: ticket.total }];
+      if (payments.length === 0) payments = [{ method: ticket.paymentMethod, amount: ticket.total }];
+      for (const p of payments) {
+        const amount = cents(p.amount);
+        if (amount === 0) continue;
+        const [compte, lib] =
+          p.method === "especes"
+            ? [accounts.accountCash, "Caisse Espèces"]
+            : p.method === "carte"
+              ? [accounts.accountCard, "Banque Carte Bancaire"]
+              : [accounts.accountOther, "Autres règlements"];
+        entries.push({ compte, lib, texte: `${isCreditNote ? "Remboursement" : "Encaissement"} ${pieceRef} (${p.method})`, debit: amount });
       }
 
-      for (const p of paymentsList) {
-        const amt = Number(p.amount || 0);
-        if (amt <= 0) continue;
+      let rates: any[] = [];
+      try {
+        rates = ticket.vatDetails ? JSON.parse(ticket.vatDetails)?.rates || [] : [];
+      } catch {}
+      if (rates.length === 0) {
+        // Ticket antérieur à la ventilation TVA : 10 % par défaut
+        const ttc = cents(ticket.total);
+        const ht = Math.round((ttc * 100) / 110);
+        rates = [{ rate: 10, ht: ht / 100, vat: (ttc - ht) / 100 }];
+      }
+      for (const r of rates) {
+        const rate = Number(r.rate);
+        const acc = rateAccounts(rate);
+        if (cents(r.ht) !== 0) entries.push({ compte: acc.vente, lib: acc.lib, texte: `${isCreditNote ? "Avoir" : "Vente"} ${pieceRef} HT (${rate}%)`, debit: -cents(r.ht) });
+        if (cents(r.vat) !== 0) entries.push({ compte: acc.tva, lib: `TVA collectée (${rate}%)`, texte: `TVA ${pieceRef} (${rate}%)`, debit: -cents(r.vat) });
+      }
 
-        let compteNum = accounts.accountCard;
-        let compteLib = "Banque Carte Bancaire";
-
-        if (p.method === "especes") {
-          compteNum = accounts.accountCash;
-          compteLib = "Caisse Espèces";
-        } else if (p.method === "autre") {
-          compteNum = accounts.accountOther;
-          compteLib = "Autres règlements";
-        }
-
+      let entryDebit = 0;
+      let entryCredit = 0;
+      for (const e of entries) {
+        const debit = e.debit > 0 ? e.debit : 0;
+        const credit = e.debit < 0 ? -e.debit : 0;
+        entryDebit += debit;
+        entryCredit += credit;
         lines.push(
           [
-            accounts.journalCode,
-            "Journal des Ventes",
-            ecritureNum,
-            ecritureDate,
-            compteNum,
-            compteLib,
-            "",
-            "",
-            pieceRef,
-            pieceDate,
-            `Encaissement ${pieceRef} (${p.method})`,
-            formatAmount(amt),
-            "0,00",
-            "",
-            "",
-            validDate,
-            "",
-            "",
+            accounts.journalCode, "Journal des Ventes", ecritureNum, date, e.compte, e.lib, "", "", pieceRef, date,
+            e.texte, formatCents(debit), formatCents(credit), "", "", date, "", "",
           ].join("|")
         );
-
-        totalDebitSum += amt;
       }
+      if (entryDebit !== entryCredit) unbalancedEntries++;
+      totalDebitCents += entryDebit;
+      totalCreditCents += entryCredit;
+    });
 
-      // 2. Crédit des comptes de TVA et Produit HT
-      let vatRates: any[] = [];
-      try {
-        const vatData = ticket.vatDetails ? JSON.parse(ticket.vatDetails) : null;
-        vatRates = vatData?.rates || [];
-      } catch {}
-
-      if (vatRates.length === 0) {
-        // Ventilation par défaut : 10%
-        const ht = Math.round((ticket.total / 1.1) * 100) / 100;
-        const vat = Math.round((ticket.total - ht) * 100) / 100;
-        vatRates = [{ rate: 10, ht, vat, ttc: ticket.total }];
-      }
-
-      for (const vr of vatRates) {
-        const rate = Number(vr.rate);
-        const ht = Number(vr.ht || 0);
-        const vat = Number(vr.vat || 0);
-
-        // Compte Vente HT (706000 pour 10% nourriture, 707000 pour 20% alcools)
-        const compteVente = rate === 20 ? accounts.accountVente20 : accounts.accountVente10;
-        const libVente = rate === 20 ? "Ventes de boissons alcools (20%)" : "Prestations restauration (10%)";
-
-        if (ht > 0) {
-          lines.push(
-            [
-              accounts.journalCode,
-              "Journal des Ventes",
-              ecritureNum,
-              ecritureDate,
-              compteVente,
-              libVente,
-              "",
-              "",
-              pieceRef,
-              pieceDate,
-              `Vente ${pieceRef} HT (${rate}%)`,
-              "0,00",
-              formatAmount(ht),
-              "",
-              "",
-              validDate,
-              "",
-              "",
-            ].join("|")
-          );
-          totalCreditSum += ht;
-        }
-
-        // Compte TVA collectée
-        const compteTva = rate === 20 ? accounts.accountVat20 : accounts.accountVat10;
-        const libTva = `TVA collectée (${rate}%)`;
-
-        if (vat > 0) {
-          lines.push(
-            [
-              accounts.journalCode,
-              "Journal des Ventes",
-              ecritureNum,
-              ecritureDate,
-              compteTva,
-              libTva,
-              "",
-              "",
-              pieceRef,
-              pieceDate,
-              `TVA ${pieceRef} (${rate}%)`,
-              "0,00",
-              formatAmount(vat),
-              "",
-              "",
-              validDate,
-              "",
-              "",
-            ].join("|")
-          );
-          totalCreditSum += vat;
-        }
-      }
-
-      ecritureIndex++;
-    }
-
-    const cleanSiret = (cfg.siret || "98765432100012").replace(/\s+/g, "");
-    const todayStr = formatDate(new Date());
-    const fileName = `${cleanSiret}FEC${todayStr}.txt`;
+    // Nom réglementaire : SIREN (9 premiers chiffres du SIRET) + "FEC" + date de clôture de la période
+    const siren = String(cfg.siret || "").replace(/\D/g, "").slice(0, 9) || "000000000";
+    const periodEnd = options.endDate ? dayStart(options.endDate) : new Date();
 
     return {
-      fileName,
-      totalDebit: Math.round(totalDebitSum * 100) / 100,
-      totalCredit: Math.round(totalCreditSum * 100) / 100,
-      isBalanced: Math.abs(totalDebitSum - totalCreditSum) < 0.05,
+      fileName: `${siren}FEC${formatDate(periodEnd)}.txt`,
+      totalDebit: totalDebitCents / 100,
+      totalCredit: totalCreditCents / 100,
+      isBalanced: totalDebitCents === totalCreditCents && unbalancedEntries === 0,
+      unbalancedEntries,
       recordsCount: lines.length - 1,
       ticketsCount: tickets.length,
       content: lines.join("\r\n"),

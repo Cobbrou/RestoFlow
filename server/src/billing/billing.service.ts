@@ -1,14 +1,44 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import * as crypto from "crypto";
 import { computeDiscountCents, computeVatBreakdown, toCents, toEuros } from "./pricing";
+import { GENESIS_TICKET, signTicket } from "./fiscal";
 
 export interface CheckoutInput {
   orderId: string;
   paymentMethod?: string;
   payments?: any[];
   serverName?: string;
+}
+
+type TicketDraft = {
+  orderId: string;
+  tableNumber: number | null;
+  server: string;
+  items: string;
+  subtotal: number;
+  total: number;
+  discount: string | null;
+  vatDetails: string;
+  paymentMethod: string;
+  payments: string;
+  type: "SALE" | "CREDIT_NOTE";
+  refTicketNumber: string | null;
+  reason: string | null;
+};
+
+const parseJson = (v: string | null, fallback: any = null) => (v ? JSON.parse(v) : fallback);
+
+/** Format d'un ticket envoyé aux clients (history:new_entry, sync:init) */
+export function toClientHistory(h: any) {
+  return {
+    ...h,
+    items: parseJson(h.items, []),
+    discount: parseJson(h.discount),
+    vatDetails: parseJson(h.vatDetails),
+    payments: parseJson(h.payments, []),
+    createdAt: new Date(h.createdAt).getTime(),
+  };
 }
 
 @Injectable()
@@ -76,19 +106,110 @@ export class BillingService {
   }
 
   async processCheckout(data: CheckoutInput) {
-    // Collision de numéro de séquence entre deux encaissements simultanés : on rejoue la transaction
+    return this.withSequenceRetry(
+      () => this.prisma.$transaction((tx) => this.checkoutInTransaction(tx, data)),
+      "Cette commande a déjà été encaissée"
+    );
+  }
+
+  /**
+   * Avoir NF525 : annule un ticket par un ticket aux montants négatifs, signé dans la même chaîne.
+   * Le ticket d'origine n'est jamais modifié. Un seul avoir (total) par ticket.
+   */
+  async refundTicket(historyId: string, reason: string, actorName: string) {
+    const motif = (reason || "").trim();
+    if (motif.length < 3) throw new BadRequestException("Motif d'annulation obligatoire");
+
+    return this.withSequenceRetry(
+      () =>
+        this.prisma.$transaction(async (tx) => {
+          const orig = await tx.orderHistory.findUnique({ where: { id: historyId } });
+          if (!orig) throw new NotFoundException("Ticket introuvable");
+          if (orig.type !== "SALE") throw new BadRequestException("Un avoir ne peut pas être annulé");
+
+          const neg = (n: any) => (typeof n === "number" ? -n : n);
+          const vat = parseJson(orig.vatDetails);
+          const discount = parseJson(orig.discount);
+          const record = await this.appendTicket(tx, {
+            orderId: `refund:${orig.orderId}`,
+            tableNumber: orig.tableNumber,
+            server: actorName,
+            items: JSON.stringify(parseJson(orig.items, []).map((i: any) => ({ ...i, qty: -i.qty }))),
+            subtotal: -(orig.subtotal ?? orig.total),
+            total: -orig.total,
+            discount: discount ? JSON.stringify({ ...discount, amount: neg(discount.amount) }) : null,
+            vatDetails: JSON.stringify(
+              vat
+                ? {
+                    ...Object.fromEntries(Object.entries(vat).map(([k, v]) => [k, neg(v)])),
+                    rates: (vat.rates || []).map((r: any) => ({
+                      ...r,
+                      rawTtc: -r.rawTtc,
+                      ttc: -r.ttc,
+                      ht: -r.ht,
+                      vat: -r.vat,
+                    })),
+                  }
+                : null
+            ),
+            paymentMethod: orig.paymentMethod,
+            payments: JSON.stringify(
+              parseJson(orig.payments, []).map((p: any) => ({ ...p, label: "Remboursement", amount: -p.amount }))
+            ),
+            type: "CREDIT_NOTE",
+            refTicketNumber: orig.ticketNumber,
+            reason: motif,
+          });
+          return toClientHistory(record);
+        }),
+      "Ce ticket a déjà fait l'objet d'un avoir"
+    );
+  }
+
+  /** Rejoue en cas de collision de séquence (deux tickets simultanés) ; un doublon d'orderId = opération déjà faite */
+  private async withSequenceRetry<T>(fn: () => Promise<T>, duplicateMessage: string): Promise<T> {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.prisma.$transaction((tx) => this.checkoutInTransaction(tx, data));
+        return await fn();
       } catch (err: any) {
         const target = String(err?.meta?.target || "");
-        if (err?.code === "P2002" && target.includes("orderId")) {
-          throw new ConflictException("Cette commande a déjà été encaissée");
-        }
+        if (err?.code === "P2002" && target.includes("orderId")) throw new ConflictException(duplicateMessage);
         const seqCollision = err?.code === "P2002" && /sequenceNumber|ticketNumber/.test(target);
         if (!seqCollision || attempt >= 3) throw err;
       }
     }
+  }
+
+  /**
+   * Ajoute un ticket (vente ou avoir) à la chaîne NF525 : séquence, numéro de pièce,
+   * chaînage et signature sont attribués ici et nulle part ailleurs.
+   */
+  private async appendTicket(tx: Prisma.TransactionClient, draft: TicketDraft) {
+    const last = await tx.orderHistory.findFirst({
+      where: { sequenceNumber: { not: null } },
+      orderBy: { sequenceNumber: "desc" },
+    });
+    const sequenceNumber = (last?.sequenceNumber || 0) + 1;
+    const createdAt = new Date();
+    const prefix = draft.type === "CREDIT_NOTE" ? "AV" : "FAC";
+    const fields = {
+      ...draft,
+      sequenceNumber,
+      ticketNumber: `${prefix}-${createdAt.getFullYear()}-${String(sequenceNumber).padStart(4, "0")}`,
+      createdAt,
+      previousHash: last?.signature || GENESIS_TICKET,
+    };
+
+    const cfg = await tx.restaurantConfig.findUnique({ where: { id: "default" } });
+    if (!cfg?.nf525Key) throw new Error("Clé NF525 absente de la configuration");
+
+    return tx.orderHistory.create({
+      data: {
+        id: `hist_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        ...fields,
+        signature: signTicket(fields, cfg.nf525Key),
+      },
+    });
   }
 
   private async checkoutInTransaction(tx: Prisma.TransactionClient, data: CheckoutInput) {
@@ -113,7 +234,6 @@ export class BillingService {
     const subtotal = toEuros(subtotalCents);
     const finalTotal = toEuros(totalCents);
     const discountSnapshot = orderDiscount ? { ...orderDiscount, amount: toEuros(discountCents) } : null;
-    const paidAt = new Date();
 
     const paymentList =
       data.payments && data.payments.length > 0
@@ -124,7 +244,7 @@ export class BillingService {
               label: "Paiement unique",
               amount: finalTotal,
               method: data.paymentMethod || "carte",
-              paidAt: paidAt.getTime(),
+              paidAt: Date.now(),
             },
           ];
 
@@ -142,50 +262,20 @@ export class BillingService {
     const finalMethod =
       data.paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
-    // Chaînage cryptographique NF525 : séquence et numéro de ticket attribués par le serveur uniquement
-    const lastHistory = await tx.orderHistory.findFirst({
-      where: { sequenceNumber: { not: null } },
-      orderBy: { sequenceNumber: "desc" },
-    });
-    const nextSeq = (lastHistory?.sequenceNumber || 0) + 1;
-    const previousHash = lastHistory?.signature || "GENESIS_TICKET_RESTOFLOW";
-    const ticketNumber = `FAC-${paidAt.getFullYear()}-${String(nextSeq).padStart(4, "0")}`;
-
-    const cfg = await tx.restaurantConfig.findUnique({ where: { id: "default" } });
-    if (!cfg?.nf525Key) throw new Error("Clé NF525 absente de la configuration");
-    const secretKey = cfg.nf525Key;
-
-    const signaturePayload = [
-      nextSeq,
-      ticketNumber,
-      paidAt.toISOString(),
-      finalTotal.toFixed(2),
-      subtotal.toFixed(2),
-      finalMethod,
-      previousHash,
-    ].join("|");
-    const signature = crypto.createHmac("sha256", secretKey).update(signaturePayload).digest("hex");
-
-    // Création de l'enregistrement historique immutable
-    const historyRecord = await tx.orderHistory.create({
-      data: {
-        id: `hist_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        orderId: order.id,
-        ticketNumber,
-        tableNumber: order.table?.number,
-        server: data.serverName || order.server,
-        items: JSON.stringify(paidItems),
-        subtotal,
-        total: finalTotal,
-        discount: discountSnapshot ? JSON.stringify(discountSnapshot) : null,
-        vatDetails: JSON.stringify(vatDetails),
-        paymentMethod: finalMethod,
-        payments: JSON.stringify(paymentList),
-        sequenceNumber: nextSeq,
-        previousHash,
-        signature,
-        createdAt: paidAt,
-      },
+    const historyRecord = await this.appendTicket(tx, {
+      orderId: order.id,
+      tableNumber: order.table?.number ?? null,
+      server: data.serverName || order.server,
+      items: JSON.stringify(paidItems),
+      subtotal,
+      total: finalTotal,
+      discount: discountSnapshot ? JSON.stringify(discountSnapshot) : null,
+      vatDetails: JSON.stringify(vatDetails),
+      paymentMethod: finalMethod,
+      payments: JSON.stringify(paymentList),
+      type: "SALE",
+      refTicketNumber: null,
+      reason: null,
     });
 
     // Réinitialisation de la table
@@ -201,28 +291,9 @@ export class BillingService {
       },
     });
 
-    const parsedHistory = {
-      id: historyRecord.id,
-      orderId: historyRecord.orderId,
-      ticketNumber: historyRecord.ticketNumber,
-      tableNumber: historyRecord.tableNumber,
-      server: historyRecord.server,
-      items: paidItems,
-      subtotal,
-      total: finalTotal,
-      discount: discountSnapshot,
-      vatDetails,
-      paymentMethod: historyRecord.paymentMethod,
-      payments: paymentList,
-      sequenceNumber: historyRecord.sequenceNumber,
-      previousHash: historyRecord.previousHash,
-      signature: historyRecord.signature,
-      createdAt: paidAt.getTime(),
-    };
-
     return {
       orderId: order.id,
-      history: parsedHistory,
+      history: toClientHistory(historyRecord),
       table: updatedTable,
     };
   }

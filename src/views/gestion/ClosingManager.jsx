@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { money } from "../../utils/index.js";
 import { generateXReportText, generateZReportText } from "../../utils/escpos.js";
-import { generateFecString, triggerFileDownload, DEFAULT_FEC_ACCOUNTS } from "../../utils/fec.js";
+import { triggerFileDownload } from "../../utils/fec.js";
 import { getSocket } from "../../services/socket.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 
@@ -54,14 +54,6 @@ export default function ClosingManager({
   const [fecPeriod, setFecPeriod] = useState("all"); // "all" | "today" | "month" | "custom"
   const [fecStartDate, setFecStartDate] = useState("");
   const [fecEndDate, setFecEndDate] = useState("");
-  const fecAccounts = useMemo(() => {
-    try {
-      return config?.fecExportConfig ? { ...DEFAULT_FEC_ACCOUNTS, ...config.fecExportConfig } : DEFAULT_FEC_ACCOUNTS;
-    } catch {
-      return DEFAULT_FEC_ACCOUNTS;
-    }
-  }, [config?.fecExportConfig]);
-
   // Recherche dans l'historique des Z
   const [zSearch, setZSearch] = useState("");
 
@@ -222,35 +214,38 @@ export default function ClosingManager({
     }
   };
 
-  // Filtrage des tickets pour l'export FEC
-  const filteredTicketsForFec = useMemo(() => {
-    let list = [...history];
-    if (fecPeriod === "today") {
-      const todayStr = new Date().toDateString();
-      list = list.filter((t) => new Date(t.createdAt).toDateString() === todayStr);
-    } else if (fecPeriod === "month") {
-      const now = new Date();
-      list = list.filter((t) => {
-        const d = new Date(t.createdAt);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      });
-    } else if (fecPeriod === "custom") {
-      if (fecStartDate) {
-        const start = new Date(fecStartDate).getTime();
-        list = list.filter((t) => new Date(t.createdAt).getTime() >= start);
-      }
-      if (fecEndDate) {
-        const end = new Date(fecEndDate).getTime() + 86400000;
-        list = list.filter((t) => new Date(t.createdAt).getTime() <= end);
-      }
-    }
-    return list;
-  }, [history, fecPeriod, fecStartDate, fecEndDate]);
+  // Export FEC généré par le serveur sur l'historique complet (pas seulement les tickets chargés en local)
+  const fecRange = useMemo(() => {
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const now = new Date();
+    if (fecPeriod === "today") return { startDate: iso(now), endDate: iso(now) };
+    if (fecPeriod === "month") return { startDate: iso(new Date(now.getFullYear(), now.getMonth(), 1)), endDate: iso(now) };
+    if (fecPeriod === "custom") return { startDate: fecStartDate || undefined, endDate: fecEndDate || undefined };
+    return {};
+  }, [fecPeriod, fecStartDate, fecEndDate]);
 
-  // Données de prévisualisation FEC
-  const fecPreview = useMemo(() => {
-    return generateFecString(filteredTicketsForFec, config, fecAccounts);
-  }, [filteredTicketsForFec, config, fecAccounts]);
+  const EMPTY_FEC = { content: "", fileName: "FEC.txt", totalDebit: 0, totalCredit: 0, isBalanced: false, recordsCount: 0 };
+  const [fecPreview, setFecPreview] = useState(EMPTY_FEC);
+
+  useEffect(() => {
+    if (subTab !== "fec_export") return;
+    if (!socket?.connected) {
+      setFecPreview({ ...EMPTY_FEC, content: "Export FEC indisponible hors-ligne : seul le serveur détient l'historique complet." });
+      return;
+    }
+    socket.emit("closing:get_fec", fecRange, (res) => {
+      setFecPreview(res?.ok ? res.fec : { ...EMPTY_FEC, content: res?.error || "Erreur de génération du FEC" });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subTab, fecRange, history.length]);
+
+  // Téléchargement : regénéré à l'instant et tracé dans le journal des événements (JET)
+  const downloadFec = () => {
+    socket.emit("closing:get_fec", { ...fecRange, download: true }, (res) => {
+      if (res?.ok) triggerFileDownload(res.fec.content, res.fec.fileName);
+      else pushToast?.(res?.error || "Erreur de génération du FEC", "warn");
+    });
+  };
 
   // Filtrage des Z archivés
   const filteredClosings = useMemo(() => {
@@ -772,7 +767,8 @@ export default function ClosingManager({
               </div>
 
               <button
-                onClick={() => triggerFileDownload(fecPreview.content, fecPreview.fileName)}
+                onClick={downloadFec}
+                disabled={!fecPreview.recordsCount}
                 className="rf-tap flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-sm"
                 style={{ background: "#C1440E" }}
               >

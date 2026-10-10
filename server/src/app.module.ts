@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { PrismaModule } from "./prisma/prisma.module";
+import { JournalModule } from "./journal/journal.module";
 import { WebsocketModule } from "./websocket/websocket.module";
 import { AuthModule } from "./auth/auth.module";
 import { TablesModule } from "./tables/tables.module";
@@ -16,6 +17,7 @@ import { ClosingModule } from "./closing/closing.module";
 @Module({
   imports: [
     PrismaModule,
+    JournalModule,
     WebsocketModule,
     AuthModule,
     TablesModule,

@@ -1,5 +1,6 @@
 import { Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { JournalService } from "../journal/journal.service";
 import * as bcrypt from "bcryptjs";
 import * as crypto from "crypto";
 
@@ -28,7 +29,10 @@ const pinFailures = new Map<string, { count: number; lockedUntil: number }>();
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private journal: JournalService
+  ) {}
 
   generateToken(staff: { id: string; name: string; roleId: string; permissions: string[] }): string {
     const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
@@ -73,6 +77,7 @@ export class AuthService {
     const failure = pinFailures.get(staffId);
     if (failure && failure.lockedUntil > Date.now()) {
       const minutes = Math.ceil((failure.lockedUntil - Date.now()) / 60000);
+      await this.journal.log("AUTH_LOCKED", { staffId }, { minutes });
       throw new UnauthorizedException(`Trop de tentatives. Réessayez dans ${minutes} min`);
     }
 
@@ -90,9 +95,11 @@ export class AuthService {
         count: count >= MAX_PIN_ATTEMPTS ? 0 : count,
         lockedUntil: count >= MAX_PIN_ATTEMPTS ? Date.now() + PIN_LOCK_MS : 0,
       });
+      await this.journal.log("AUTH_FAIL", { staffId, name: staff.name }, { attempt: count });
       throw new UnauthorizedException("Code PIN incorrect");
     }
     pinFailures.delete(staffId);
+    await this.journal.log("AUTH_OK", { staffId, name: staff.name }, { roleId: staff.roleId });
 
     const permissions: string[] = JSON.parse(staff.role.permissions || "[]");
     const safeStaff = {

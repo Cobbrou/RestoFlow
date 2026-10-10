@@ -13,6 +13,7 @@ import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
 import { useRestoFlow } from "../../context/RestoFlowContext.jsx";
+import { getSocket } from "../../services/socket.js";
 
 /**
  * Gestion — Back-office avec 9 sous-vues :
@@ -101,7 +102,14 @@ export default function Gestion(props) {
       {view === "menus"         && <MenuManager {...merged} />}
       {view === "stocks"        && <StockManager {...merged} />}
       {view === "recettes"      && <RecipeManager {...merged} />}
-      {view === "historique"    && <HistoryManager history={merged.history || []} config={merged.config} />}
+      {view === "historique"    && (
+        <HistoryManager
+          history={merged.history || []}
+          config={merged.config}
+          pushToast={merged.pushToast}
+          canRefund={hasPermission(currentStaff, roles?.find((r) => r.id === currentStaff?.roleId), "caisse.settings")}
+        />
+      )}
       {view === "clotures"      && <ClosingManager {...merged} />}
       {view === "caisse_params" && <CaisseSettingsManager config={merged.config} onUpdateConfig={merged.onUpdateConfig} pushToast={merged.pushToast} />}
       {view === "equipe"        && <StaffRoleManager {...merged} />}
@@ -779,8 +787,10 @@ function MenuForm({ menu, products, onCancel, onSave }) {
 const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, autre: Wallet, partage: Users };
 const METHOD_LABELS = { carte: "Carte",    especes: "Espèces", autre: "Autre",  partage: "Partagé" };
 
-function HistoryManager({ history, config }) {
+function HistoryManager({ history, config, pushToast, canRefund }) {
   const [search,               setSearch]               = useState("");
+  const [refundReason,         setRefundReason]         = useState("");
+  const [refundBusy,           setRefundBusy]           = useState(false);
   const [methodFilter,         setMethodFilter]         = useState(null);
   const [detailId,             setDetailId]             = useState(null);
   const [thermalPreviewDetail, setThermalPreviewDetail] = useState(null);
@@ -798,6 +808,33 @@ function HistoryManager({ history, config }) {
 
   const totalCA = filtered.reduce((s, h) => s + h.total, 0);
   const detail  = detailId ? deduped.find((h) => h.id === detailId) : null;
+  // Tickets déjà annulés par un avoir
+  const refundedTickets = useMemo(
+    () => new Set(deduped.filter((h) => h.type === "CREDIT_NOTE").map((h) => h.refTicketNumber)),
+    [deduped]
+  );
+  const canRefundDetail =
+    canRefund && detail && detail.type !== "CREDIT_NOTE" && detail.signature && !refundedTickets.has(detail.ticketNumber);
+
+  // Avoir NF525 : le ticket d'origine reste intact, un ticket négatif signé l'annule
+  const emitRefund = () => {
+    const socket = getSocket();
+    if (!socket?.connected) {
+      pushToast?.("Avoir impossible hors-ligne : reconnectez la caisse au serveur", "warn");
+      return;
+    }
+    setRefundBusy(true);
+    socket.emit("history:refund", { historyId: detail.id, reason: refundReason }, (res) => {
+      setRefundBusy(false);
+      if (res?.ok) {
+        pushToast?.(`Avoir ${res.history.ticketNumber} émis (annule ${detail.ticketNumber})`, "server");
+        setRefundReason("");
+        setDetailId(res.history.id);
+      } else {
+        pushToast?.(res?.error || "Échec de l'émission de l'avoir", "warn");
+      }
+    });
+  };
 
   return (
     <div>
@@ -851,6 +888,12 @@ function HistoryManager({ history, config }) {
                       {h.tableNumber ? `Table ${h.tableNumber}` : "—"}
                     </span>
                     {h.server && <span className="text-[11px] text-[#8A8378]">· {h.server}</span>}
+                    {h.type === "CREDIT_NOTE" && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: "#C1361B15", color: "#C1361B" }}>AVOIR</span>
+                    )}
+                    {refundedTickets.has(h.ticketNumber) && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "#2B262212", color: "#8A8378" }}>Annulé</span>
+                    )}
                     <span className="text-[10px] text-[#9A917E] ml-auto shrink-0">
                       {date.toLocaleDateString("fr-FR")} {date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                     </span>
@@ -889,9 +932,15 @@ function HistoryManager({ history, config }) {
               </div>
               <div className="rf-mono text-[11px] space-y-0.5 mb-2">
                 <div className="flex justify-between font-bold text-[#2B2622]">
-                  <span>Facture N°</span>
+                  <span>{detail.type === "CREDIT_NOTE" ? "Avoir N°" : "Facture N°"}</span>
                   <span>{detail.ticketNumber || `FAC-${new Date(detail.createdAt).getFullYear()}-${(detail.orderId || detail.id).slice(-4).toUpperCase()}`}</span>
                 </div>
+                {detail.type === "CREDIT_NOTE" && (
+                  <>
+                    <div className="flex justify-between font-bold text-[#C1361B]"><span>Annule</span><span>{detail.refTicketNumber}</span></div>
+                    <div className="flex justify-between gap-3"><span>Motif</span><span className="text-right">{detail.reason}</span></div>
+                  </>
+                )}
                 {detail.tableNumber && <div className="flex justify-between"><span>Table</span><span>{detail.tableNumber}</span></div>}
                 <div className="flex justify-between"><span>Commande</span><span>#{(detail.orderId || detail.id).slice(-4).toUpperCase()}</span></div>
                 <div className="flex justify-between"><span>Date</span><span>{new Date(detail.createdAt).toLocaleDateString("fr-FR")}</span></div>
@@ -947,6 +996,27 @@ function HistoryManager({ history, config }) {
               )}
               <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>
             </div>
+            {canRefundDetail && (
+              <div className="px-5 pb-3">
+                <p className="text-xs font-bold text-[#2B2622] mb-1.5">Annuler ce ticket par un avoir</p>
+                <div className="flex gap-2">
+                  <input
+                    value={refundReason}
+                    onChange={(e) => setRefundReason(e.target.value)}
+                    placeholder="Motif obligatoire (ex : erreur d'encaissement)"
+                    className="flex-1 text-sm px-3 py-2 rounded-lg border border-black/15 outline-none"
+                  />
+                  <button
+                    onClick={emitRefund}
+                    disabled={refundBusy || refundReason.trim().length < 3}
+                    className="rf-tap px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                    style={{ background: "#C1361B" }}
+                  >
+                    Émettre l'avoir
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="px-5 pb-5 flex gap-2">
               <button onClick={() => setDetailId(null)} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Fermer</button>
               <button

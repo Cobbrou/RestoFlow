@@ -192,6 +192,22 @@ model OrderHistory {
   previousHash   String?  // Hash du ticket précédent (chaînage)
   signature      String?  // Hash SHA-256 de ce ticket
   closedInZId    String?  // Référence au rapport Z dans lequel ce ticket a été clôturé
+  type           String   @default("SALE") // "SALE" | "CREDIT_NOTE" (avoir, montants négatifs)
+  refTicketNumber String? // Ticket d'origine annulé par cet avoir
+  reason         String?  // Motif obligatoire d'un avoir
+  createdAt      DateTime @default(now())
+}
+
+// Journal des événements techniques (JET, NF525) : append-only, chaîné et signé
+model EventLog {
+  id             String   @id
+  sequenceNumber Int      @unique
+  type           String   // ex: "AUTH_OK", "AUTH_FAIL", "Z_CLOSING", "CREDIT_NOTE", "CONFIG_UPDATE"
+  staffId        String?
+  staffName      String?
+  details        String   // JSON
+  previousHash   String
+  signature      String
   createdAt      DateTime @default(now())
 }
 
