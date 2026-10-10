@@ -221,7 +221,9 @@ export default function App() {
     }
   };
 
+  // La session serveur est liée au socket : oublier le jeton et reconnecter sans lui la révoque
   const handleLogout = () => {
+    setSocketToken(null);
     setCurrentStaff(null);
     try {
       localStorage.removeItem("rf_active_staff");
