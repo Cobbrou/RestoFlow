@@ -100,6 +100,7 @@ export default function App() {
   const [cuisineView, setCuisineView] = useState("board");     // board | table
   const [gestionView, setGestionView] = useState("tables");    // tables | produits | menus | historique | equipe
   const [activeTableId, setActiveTableId] = useState(null);
+  const [activeOrderId, setActiveOrderId] = useState(null); // Commande hors salle ouverte (emporter)
 
   // ── Horloge + sons + toasts ───────────────────────────────
   const [toasts, setToasts]   = useState([]);
@@ -162,7 +163,7 @@ export default function App() {
   const management = useManagementActions(store, { emit, pushToast, currentStaff });
 
   const {
-    getActiveOrder, ensureOrderForTable, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem, voidItem,
+    getActiveOrder, ensureOrderForTable, createOffPremiseOrder, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem, voidItem,
     setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder,
     toggleAlert, startPrep, markReady, handleCallCourse, handleChangeItemCourse, handleTransferTable,
     handleMergeTable, handleCreateReservation, handleUpdateReservationStatus, handleAssignReservationTable,
@@ -187,6 +188,19 @@ export default function App() {
 
     setActiveTableId(table.id);
     ensureOrderForTable(table.id);
+    setServerView("commande");
+  };
+
+  // Commande hors salle : existante (bandeau du plan) ou nouvelle (formulaire Emporter)
+  const openOffPremise = (orderOrData) => {
+    const currentRoleObj = roles.find((r) => r.id === currentStaff?.roleId);
+    if (!currentStaff || !hasPermission(currentStaff, currentRoleObj, "salle.order")) {
+      pushToast("Accès refusé : vous n'avez pas l'autorisation de prendre des commandes", "warn");
+      return;
+    }
+    const order = orderOrData.id ? orderOrData : createOffPremiseOrder(orderOrData);
+    setActiveTableId(null);
+    setActiveOrderId(order.id);
     setServerView("commande");
   };
 
@@ -249,7 +263,11 @@ export default function App() {
 
   // ── Rendu ──────────────────────────────────────────────────
   const activeTable = tables.find((t) => t.id === activeTableId);
-  const activeOrder = activeTable ? getActiveOrder(activeTable.id) : null;
+  const activeOrder = activeTable
+    ? getActiveOrder(activeTable.id)
+    : orders.find((o) => o.id === activeOrderId) || null;
+  // Cible des ajouts : la table (commande créée à la volée) ou la commande hors salle
+  const orderTarget = activeTable ? activeTable.id : activeOrder;
 
   const handleSetRole = (r) => {
     const currentRoleObj = roles.find((roleItem) => roleItem.id === currentStaff?.roleId);
@@ -333,6 +351,7 @@ export default function App() {
             orders={orders}
             reservations={reservations}
             onOpen={openTable}
+            onOpenOffPremise={openOffPremise}
             onToggleAlert={toggleAlert}
             onOpenReservations={() => setIsReservationModalOpen(true)}
             onOpenTableAction={(mode, table) => setTableActionModal({ mode, sourceTable: table })}
@@ -340,7 +359,8 @@ export default function App() {
           />
         </ErrorBoundary>
       )}
-      {role === "serveur" && serverView === "commande" && activeTable && (
+      {/* Hors salle : l'écran reste monté une fois la commande encaissée, le temps d'afficher le ticket */}
+      {role === "serveur" && serverView === "commande" && (activeTable || activeOrderId) && (
         <ErrorBoundary label="Prise de commande">
           <OrderTaking
             table={activeTable}
@@ -356,8 +376,8 @@ export default function App() {
             roles={roles}
             onToggleProductAvailable={management.onToggleProductAvailable}
             onBack={() => setServerView("plan")}
-            onAdd={(p, optionPicks) => addProductToOrder(activeTable.id, p, optionPicks)}
-            onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(activeTable.id, menuProduct, composition)}
+            onAdd={(p, optionPicks) => addProductToOrder(orderTarget, p, optionPicks)}
+            onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(orderTarget, menuProduct, composition)}
             onQty={(itemId, d) => changeQty(activeOrder.id, itemId, d)}
             onRemove={(itemId) => removeItem(activeOrder.id, itemId)}
             onVoid={(itemId, qty, reason, done) => voidItem(activeOrder.id, itemId, qty, reason, done)}

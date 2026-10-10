@@ -19,6 +19,7 @@ import {
   generateTpeReceiptText,
   buildEscPosBinary,
 } from "../utils/escpos.js";
+import { isOffPremise, orderLabel } from "../utils/index.js";
 import { getSocket } from "../services/socket.js";
 
 /**
@@ -54,10 +55,12 @@ export default function ThermalReceiptPreview({
     discount: receipt?.discount || null,
   };
 
-  const activeTable = table || {
+  // Hors salle : aucune table, le libellé (Emporter #12…) la remplace
+  const offPremise = isOffPremise(order) || !!receipt?.orderLabel;
+  const activeTable = table || (offPremise ? null : {
     number: receipt?.tableNumber ?? (activeOrder.tableId ? String(activeOrder.tableId).replace(/\D/g, "") : 1),
     seats: 2,
-  };
+  });
 
   // Données prêtes pour le ticket de caisse (facture) même si la commande est en cours
   const customerReceiptData = useMemo(() => {
@@ -76,7 +79,8 @@ export default function ThermalReceiptPreview({
 
     return {
       ...activeOrder,
-      tableNumber: activeTable?.number ?? 1,
+      tableNumber: activeTable?.number ?? null,
+      orderLabel: offPremise ? orderLabel(activeOrder) : null,
       subtotal,
       total,
       tip: tipAmount,

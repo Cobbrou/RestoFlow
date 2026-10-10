@@ -7,7 +7,7 @@
  *  - Reçu bancaire TPE (carte bancaire)
  */
 
-import { money } from "./index.js";
+import { money, isOffPremise, orderLabel, formatPickup } from "./index.js";
 import { calculateVatBreakdown } from "./vat.js";
 
 // Constantes ESC/POS standards
@@ -83,7 +83,7 @@ export function generateCustomerReceiptText(receipt = {}, config = {}, width = 4
   lines.push(formatRow(`Date : ${dateObj.toLocaleDateString("fr-FR")}`, `${dateObj.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`, width));
 
   const tableDisplay = receipt.tableNumber ?? (receipt.table?.number || (receipt.tableId ? String(receipt.tableId).replace(/\D/g, "") : "Comptoir"));
-  lines.push(formatRow(`Table : ${tableDisplay}`, `Serveur : ${receipt.server || "Service"}`, width));
+  lines.push(formatRow(receipt.orderLabel || `Table : ${tableDisplay}`, `Serveur : ${receipt.server || "Service"}`, width));
   lines.push(formatSeparator("-", width));
 
   // Articles
@@ -181,10 +181,11 @@ export function generateKitchenTicketText(order, table, width = 42) {
 
   lines.push(formatSeparator("*", width));
   lines.push(formatCenter("--- BON CUISINE ---", width));
-  lines.push(formatCenter(`TABLE ${table?.number ?? order.tableId ?? "—"}`, width));
+  lines.push(formatCenter(isOffPremise(order) ? orderLabel(order).toUpperCase() : `TABLE ${table?.number ?? order.tableId ?? "—"}`, width));
+  if (order.pickupAt) lines.push(formatCenter(`RETRAIT ${formatPickup(order.pickupAt)}`, width));
   lines.push(formatSeparator("*", width));
 
-  lines.push(formatRow(`Heure : ${dateObj.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`, `Couverts : ${table?.seats ?? 2}`, width));
+  lines.push(formatRow(`Heure : ${dateObj.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`, table ? `Couverts : ${table.seats ?? 2}` : "", width));
   lines.push(formatRow(`Commande : #${(order.id || "").slice(-4).toUpperCase()}`, `Serveur : ${order.server || "Salle"}`, width));
   lines.push(formatSeparator("=", width));
 
@@ -232,7 +233,8 @@ export function generateBarTicketText(order, table, width = 42) {
 
   lines.push(formatSeparator("~", width));
   lines.push(formatCenter("--- BON BAR ---", width));
-  lines.push(formatCenter(`TABLE ${table?.number ?? order.tableId ?? "—"}`, width));
+  lines.push(formatCenter(isOffPremise(order) ? orderLabel(order).toUpperCase() : `TABLE ${table?.number ?? order.tableId ?? "—"}`, width));
+  if (order.pickupAt) lines.push(formatCenter(`RETRAIT ${formatPickup(order.pickupAt)}`, width));
   lines.push(formatSeparator("~", width));
 
   lines.push(formatRow(`Heure : ${dateObj.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`, `Serveur : ${order.server || "Salle"}`, width));

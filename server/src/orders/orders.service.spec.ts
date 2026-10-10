@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BadRequestException } from "@nestjs/common";
-import { OrdersService, heldToRelease } from "./orders.service";
+import { OrdersService, heldToRelease, orderLabel } from "./orders.service";
 
 describe("OrdersService.voidItem", () => {
   let service: OrdersService;
@@ -67,5 +67,48 @@ describe("heldToRelease (cadencement à l'envoi)", () => {
 
   it("cadencement désactivé : rien n'attend", () => {
     expect(heldToRelease([it_("e", "entree"), it_("p", "plat"), it_("d", "dessert")], false)).toEqual(["p", "d"]);
+  });
+});
+
+describe("OrdersService.createOffPremise (emporter)", () => {
+  let service: OrdersService;
+  let prisma: any;
+  const modules = (m: object) => ({ modulesConfig: JSON.stringify(m) });
+
+  beforeEach(() => {
+    prisma = {
+      restaurantConfig: { findUnique: vi.fn().mockResolvedValue(modules({ enableTakeaway: true })) },
+      order: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        aggregate: vi.fn().mockResolvedValue({ _max: { pickupNumber: 11 } }),
+        create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...data, items: [] })),
+      },
+    };
+    service = new OrdersService(prisma);
+  });
+
+  it("crée une commande sans table avec le numéro d'appel suivant", async () => {
+    const order = await service.createOffPremise({ orderId: "ord_x", type: "takeaway", channel: "phone", customerName: " Dupont " });
+    expect(order).toMatchObject({ id: "ord_x", tableId: undefined, type: "takeaway", channel: "phone", customerName: "Dupont", pickupNumber: 12 });
+    expect(orderLabel(order)).toBe("Emporter #12 · Dupont");
+  });
+
+  it("refuse si le module est coupé, le mode inconnu ou le canal non saisissable en caisse", async () => {
+    await expect(service.createOffPremise({ type: "delivery" })).rejects.toThrow(BadRequestException);
+    await expect(service.createOffPremise({ type: "takeaway", channel: "ubereats" })).rejects.toThrow(BadRequestException);
+    prisma.restaurantConfig.findUnique.mockResolvedValue(modules({ enableTakeaway: false }));
+    await expect(service.createOffPremise({ type: "takeaway" })).rejects.toThrow(BadRequestException);
+    expect(prisma.order.create).not.toHaveBeenCalled();
+  });
+
+  it("rejeu hors-ligne : renvoie la commande existante sans en créer une seconde", async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: "ord_x", type: "takeaway", pickupNumber: 3, items: [] });
+    const order = await service.createOffPremise({ orderId: "ord_x", type: "takeaway" });
+    expect(order.pickupNumber).toBe(3);
+    expect(prisma.order.create).not.toHaveBeenCalled();
+  });
+
+  it("libellé : la salle garde « Table N »", () => {
+    expect(orderLabel({ type: "dine_in", table: { number: 4 } })).toBe("Table 4");
   });
 });

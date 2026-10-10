@@ -1,6 +1,6 @@
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
@@ -130,8 +130,8 @@ model Menu {
 
 model Order {
   id        String      @id
-  tableId   String
-  table     Table       @relation(fields: [tableId], references: [id])
+  tableId   String?     // Absent hors salle (emporter, livraison)
+  table     Table?      @relation(fields: [tableId], references: [id], onDelete: Restrict)
   serverId  String?
   serverRef Staff?      @relation(fields: [serverId], references: [id])
   server    String      // Cached server display name (e.g. "Léa")
@@ -139,7 +139,18 @@ model Order {
   createdAt DateTime    @default(now())
   sentAt    DateTime?
   discount  String?     // JSON string { type: "percent"|"fixed", value: number, reason?: string, code?: string, amount: number }
+  // Mode de service : "dine_in" | "takeaway" | "delivery" (livraison : module futur)
+  type          String    @default("dine_in")
+  // Canal de prise de commande : "pos" (caisse) | "phone" | "online" | plateformes ("ubereats", "deliveroo"…)
+  channel       String    @default("pos")
+  customerName  String?
+  customerPhone String?
+  pickupAt      DateTime? // Heure de retrait / livraison souhaitée
+  pickupNumber  Int?      // Numéro d'appel du jour, attribué par le serveur
+  externalRef   String?   // Identifiant de la commande chez le canal externe (plateforme, site)
   items     OrderItem[]
+
+  @@unique([channel, externalRef]) // Une commande externe n'est importée qu'une fois
 }
 
 model OrderItem {
@@ -182,6 +193,9 @@ model OrderHistory {
   orderId        String   @unique // Une commande ne peut être encaissée qu'une fois
   ticketNumber   String?  @unique // e.g. "FAC-2026-0001", attribué par le serveur
   tableNumber    Int?
+  orderType      String   @default("dine_in") // Mode de service de la commande (ventilation sur place / emporter)
+  channel        String   @default("pos")
+  orderLabel     String?  // Libellé hors salle figé, ex. "Emporter #12 · Dupont"
   server         String
   items          String   // JSON snapshot of paid items
   total          Float

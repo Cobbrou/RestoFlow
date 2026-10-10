@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { orderLabel } from "../orders/orders.service";
 
 export interface StockMovementInput {
   ingredientId: string;
@@ -402,7 +403,7 @@ export class StockService {
             unitCost: current.costPerUnit,
             orderId: order.id,
             staffId: order.serverId || null,
-            reason: `Commande Table ${order.table?.number || "?"} : ${deduction.reasons.join(", ")}`,
+            reason: `Commande ${orderLabel(order)} : ${deduction.reasons.join(", ")}`,
           },
         });
 
@@ -483,7 +484,7 @@ export class StockService {
     item: { productId: string; name: string; qty: number; isMenu: boolean; composition: string | null },
     qty: number,
     orderId: string,
-    tableNumber: number | undefined,
+    label: string,
     staffId: string | null,
     reason: string
   ) {
@@ -507,7 +508,7 @@ export class StockService {
             unitCost: current.costPerUnit,
             orderId,
             staffId,
-            reason: `Annulation Table ${tableNumber ?? "?"} : ${need.reasons.join(", ")} (${reason})`,
+            reason: `Annulation ${label} : ${need.reasons.join(", ")} (${reason})`,
           },
         });
       }

@@ -9,7 +9,7 @@ import {
   AlertCircle,
   Sparkles,
 } from "lucide-react";
-import { money } from "../../utils/index.js";
+import { money, isOffPremise, orderLabel } from "../../utils/index.js";
 
 /**
  * DiscountModal — Modale d'application de remises et codes promotionnels
@@ -125,7 +125,7 @@ export default function DiscountModal({
                 Remise & Codes Promo
               </h3>
               <p className="text-xs text-[#8A8378]">
-                Table {order?.tableId ? order.tableId.replace("tbl_", "") : "—"} · Sous-total :{" "}
+                {isOffPremise(order) ? orderLabel(order) : `Table ${order?.tableId ? order.tableId.replace("tbl_", "") : "—"}`} · Sous-total :{" "}
                 <strong className="text-[#2B2622]">{money(subtotal)}</strong>
               </p>
             </div>

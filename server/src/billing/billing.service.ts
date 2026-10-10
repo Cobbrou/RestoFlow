@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { computeDiscountCents, computeVatBreakdown, toCents, toEuros } from "./pricing";
 import { GENESIS_TICKET, signTicket } from "./fiscal";
+import { isOffPremise, orderLabel } from "../orders/orders.service";
 
 export interface CheckoutInput {
   orderId: string;
@@ -15,6 +16,9 @@ export interface CheckoutInput {
 type TicketDraft = {
   orderId: string;
   tableNumber: number | null;
+  orderType: string;
+  channel: string;
+  orderLabel: string | null;
   server: string;
   items: string;
   subtotal: number;
@@ -135,6 +139,9 @@ export class BillingService {
           const record = await this.appendTicket(tx, {
             orderId: `refund:${orig.orderId}`,
             tableNumber: orig.tableNumber,
+            orderType: orig.orderType,
+            channel: orig.channel,
+            orderLabel: orig.orderLabel,
             server: actorName,
             items: JSON.stringify(parseJson(orig.items, []).map((i: any) => ({ ...i, qty: -i.qty }))),
             subtotal: -(orig.subtotal ?? orig.total),
@@ -273,6 +280,9 @@ export class BillingService {
     const historyRecord = await this.appendTicket(tx, {
       orderId: order.id,
       tableNumber: order.table?.number ?? null,
+      orderType: order.type,
+      channel: order.channel,
+      orderLabel: isOffPremise(order) ? orderLabel(order) : null,
       server: data.serverName || order.server,
       items: JSON.stringify(paidItems),
       subtotal,
@@ -287,18 +297,20 @@ export class BillingService {
       reason: null,
     });
 
-    // Réinitialisation de la table
-    const updatedTable = await tx.table.update({
-      where: { id: order.tableId },
-      data: {
-        alert: false,
-        reserved: false,
-        reservationName: null,
-        reservationPeople: null,
-        reservationTime: null,
-        reservationNote: null,
-      },
-    });
+    // Réinitialisation de la table (aucune pour une commande hors salle)
+    const updatedTable = order.tableId
+      ? await tx.table.update({
+          where: { id: order.tableId },
+          data: {
+            alert: false,
+            reserved: false,
+            reservationName: null,
+            reservationPeople: null,
+            reservationTime: null,
+            reservationNote: null,
+          },
+        })
+      : null;
 
     return {
       orderId: order.id,

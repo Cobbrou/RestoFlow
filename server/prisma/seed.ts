@@ -280,7 +280,96 @@ const RECIPES_SEED = [
   { productId: "p21", ingredientId: "ing_25", quantity: 8, unit: "g", isCritical: true, notes: "Extraction expresso" },
 ];
 
+const DEFAULT_PRINTERS = [
+  { id: "prn_caisse", name: "Imprimante Caisse", type: "caisse", width: "80mm", status: "online", autoCut: true, openDrawer: true },
+  { id: "prn_cuisine", name: "Imprimante Cuisine", type: "cuisine", width: "80mm", status: "online", autoCut: true, beep: true },
+  { id: "prn_bar", name: "Imprimante Bar", type: "bar", width: "58mm", status: "online", autoCut: true, beep: false },
+];
+
+// Tout sauf les données fiscales (tickets, Z, JET), qui ont leurs propres verrous NF525
+async function clearOperationalData() {
+  await prisma.restaurantConfig.deleteMany({});
+  await prisma.stockMovement.deleteMany({});
+  await prisma.recipeItem.deleteMany({});
+  await prisma.ingredient.deleteMany({});
+  await prisma.orderItem.deleteMany({});
+  await prisma.order.deleteMany({});
+  await prisma.staff.deleteMany({});
+  await prisma.role.deleteMany({});
+  await prisma.product.deleteMany({});
+  await prisma.menu.deleteMany({});
+  await prisma.category.deleteMany({});
+  await prisma.reservation.deleteMany({});
+  await prisma.table.deleteMany({});
+}
+
+async function createCategoriesAndRoles() {
+  for (const cat of CATEGORIES) {
+    await prisma.category.create({ data: cat });
+  }
+  for (const r of INITIAL_ROLES) {
+    await prisma.role.create({
+      data: {
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        color: r.color,
+        isSystem: r.isSystem,
+        permissions: JSON.stringify(r.permissions),
+      },
+    });
+  }
+}
+
+// Mise en service réelle : rôles et catégories, un seul compte gérant, aucune donnée factice.
+// Refuse de toucher une base qui a déjà une activité fiscale (tickets, Z ou journal).
+async function seedVierge() {
+  const [tickets, closings, events] = await Promise.all([
+    prisma.orderHistory.count(),
+    prisma.dailyClosing.count(),
+    prisma.eventLog.count(),
+  ]);
+  if (tickets + closings + events > 0) {
+    throw new Error(
+      "Base déjà utilisée (tickets, clôtures ou journal présents) : démarrage vierge refusé. " +
+        "Pour repartir de zéro, supprimez le fichier de base puis relancez db:migrate et db:seed:vierge."
+    );
+  }
+
+  await clearOperationalData();
+  await prisma.restaurantConfig.create({
+    data: {
+      nf525Key,
+      id: "default",
+      name: "Mon restaurant",
+      legalName: "",
+      siret: "",
+      vatNumber: "",
+      address: "",
+      city: "",
+      phone: "",
+      email: "",
+      website: "",
+      footerNote: "Merci de votre visite !",
+      printers: JSON.stringify(DEFAULT_PRINTERS),
+      promoCodes: "[]",
+    },
+  });
+  await createCategoriesAndRoles();
+
+  const pin = String(crypto.randomInt(0, 10000)).padStart(4, "0");
+  await prisma.staff.create({
+    data: { id: "stf_admin", name: "Gérant", roleId: "admin", pin: bcrypt.hashSync(pin, 10), active: true, avatarBg: "#C1440E" },
+  });
+
+  console.log("Base vierge prête.");
+  console.log(`Compte « Gérant » créé avec le PIN ${pin} : changez-le dans Gestion > Équipe & Rôles.`);
+  console.log("Ensuite : informations légales (Caisse & Imprimantes), tables, puis import CSV de la carte (Produits).");
+}
+
 async function main() {
+  if (process.argv.includes("--vierge")) return seedVierge();
+
   console.log("Seeding RestoFlow Database...");
 
   // Base de démonstration : on lève les verrous NF525 (recréés au démarrage du serveur) pour tout réinitialiser
@@ -297,22 +386,8 @@ async function main() {
   }
   await prisma.eventLog.deleteMany({});
   await prisma.dailyClosing.deleteMany({});
-
-  // Clear existing data in correct dependency order
-  await prisma.restaurantConfig.deleteMany({});
-  await prisma.stockMovement.deleteMany({});
-  await prisma.recipeItem.deleteMany({});
-  await prisma.ingredient.deleteMany({});
-  await prisma.orderItem.deleteMany({});
-  await prisma.order.deleteMany({});
   await prisma.orderHistory.deleteMany({});
-  await prisma.staff.deleteMany({});
-  await prisma.role.deleteMany({});
-  await prisma.product.deleteMany({});
-  await prisma.menu.deleteMany({});
-  await prisma.category.deleteMany({});
-  await prisma.reservation.deleteMany({});
-  await prisma.table.deleteMany({});
+  await clearOperationalData();
 
   // 0. Configuration Restaurant & Imprimantes (Phase 3)
   await prisma.restaurantConfig.create({
@@ -331,11 +406,7 @@ async function main() {
       footerNote: "Merci de votre visite ! Service & taxes compris.",
       currency: "EUR",
       tpeAutoPrint: true,
-      printers: JSON.stringify([
-        { id: "prn_caisse", name: "Imprimante Caisse", type: "caisse", width: "80mm", status: "online", autoCut: true, openDrawer: true },
-        { id: "prn_cuisine", name: "Imprimante Cuisine", type: "cuisine", width: "80mm", status: "online", autoCut: true, beep: true },
-        { id: "prn_bar", name: "Imprimante Bar", type: "bar", width: "58mm", status: "online", autoCut: true, beep: false },
-      ]),
+      printers: JSON.stringify(DEFAULT_PRINTERS),
       promoCodes: JSON.stringify([
         { code: "HAPPYHOUR", label: "Happy Hour (-15%)", type: "percent", value: 15, active: true },
         { code: "STAFF", label: "Tarif Équipe (-20%)", type: "percent", value: 20, active: true },
@@ -346,10 +417,8 @@ async function main() {
     },
   });
 
-  // 1. Categories
-  for (const cat of CATEGORIES) {
-    await prisma.category.create({ data: cat });
-  }
+  // 1. Catégories & rôles
+  await createCategoriesAndRoles();
 
   // 2. Products
   for (const p of PRODUCTS_SEED) {
@@ -413,20 +482,6 @@ async function main() {
       data: {
         id: `rc_${rc.productId}_${rc.ingredientId}`,
         ...rc,
-      },
-    });
-  }
-
-  // 4. Roles
-  for (const r of INITIAL_ROLES) {
-    await prisma.role.create({
-      data: {
-        id: r.id,
-        name: r.name,
-        description: r.description,
-        color: r.color,
-        isSystem: r.isSystem,
-        permissions: JSON.stringify(r.permissions),
       },
     });
   }

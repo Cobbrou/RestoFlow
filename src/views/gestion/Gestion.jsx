@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
-import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer } from "lucide-react";
+import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer, Upload } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
+import { productsFromCsv, CSV_TEMPLATE } from "../../utils/catalogImport.js";
 import { isAvailable, money, deduplicateHistory, parseOptionsText, formatOptionsText } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
@@ -279,8 +280,9 @@ function TableForm({ table, defaultNumber, onCancel, onSave }) {
    PRODUITS
 ══════════════════════════════════════════════════════════════ */
 
-function ProductManager({ products, ingredients, recipes, onAddProduct, onUpdateProduct, onDeleteProduct }) {
+function ProductManager({ products, ingredients, recipes, onAddProduct, onImportProducts, onUpdateProduct, onDeleteProduct }) {
   const [editing,   setEditing]   = useState(null);
+  const [importing, setImporting] = useState(false);
   const [filterCat, setFilterCat] = useState(null);
   const realCats = CATEGORIES.filter((c) => c.id !== "menus");
   const shown = filterCat ? products.filter((p) => p.cat === filterCat) : products;
@@ -326,11 +328,17 @@ function ProductManager({ products, ingredients, recipes, onAddProduct, onUpdate
             );
           })}
         </div>
-        <button onClick={() => setEditing("new")}
-          className="rf-tap flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white shrink-0"
-          style={{ background: "#C1440E" }}>
-          <Plus size={15} /> Ajouter un produit
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => setImporting(true)}
+            className="rf-tap flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-black/5 text-[#2B2622]">
+            <Upload size={15} /> Importer CSV
+          </button>
+          <button onClick={() => setEditing("new")}
+            className="rf-tap flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white"
+            style={{ background: "#C1440E" }}>
+            <Plus size={15} /> Ajouter un produit
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -403,7 +411,86 @@ function ProductManager({ products, ingredients, recipes, onAddProduct, onUpdate
           }}
         />
       )}
+
+      {importing && (
+        <ProductImport
+          categories={realCats}
+          products={products}
+          onCancel={() => setImporting(false)}
+          onImport={(list) => { onImportProducts(list); setImporting(false); }}
+        />
+      )}
     </div>
+  );
+}
+
+function ProductImport({ categories, products, onCancel, onImport }) {
+  const [result, setResult] = useState(null);
+  const valid = result?.rows?.filter((r) => r.product) ?? [];
+  const rejected = result?.rows?.filter((r) => r.error) ?? [];
+
+  const readFile = async (file) => {
+    if (!file) return;
+    setResult(productsFromCsv(await file.text(), categories, products));
+  };
+
+  const downloadTemplate = () => {
+    // BOM : Excel lit l'UTF-8 (accents, emoji) au lieu de l'ANSI
+    const url = URL.createObjectURL(new Blob(["﻿" + CSV_TEMPLATE], { type: "text/csv;charset=utf-8" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: "modele-carte-restoflow.csv" });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  return (
+    <Modal title="Importer la carte (CSV)" onClose={onCancel} wide>
+      <p className="text-xs text-[#6B6355]">
+        Une ligne par produit. Colonnes obligatoires : <strong>categorie</strong>, <strong>nom</strong>, <strong>prix</strong>.
+        Facultatives : description, tva (2,1 / 5,5 / 10 / 20), poste (cuisine / bar), allergenes (séparés par des virgules), emoji.
+        Catégories acceptées : {categories.map((c) => c.name).join(", ")}.
+        Les options (cuisson, suppléments) et les menus se complètent ensuite à la main.
+      </p>
+      <div className="flex gap-2 items-center flex-wrap">
+        <input type="file" accept=".csv,text/csv" onChange={(e) => readFile(e.target.files?.[0])} className="text-sm" />
+        <button type="button" onClick={downloadTemplate} className="rf-tap text-xs font-semibold text-[#3E7CB1]">
+          Télécharger le modèle
+        </button>
+      </div>
+
+      {result?.error && <p className="text-sm font-semibold text-[#C1361B]">{result.error}</p>}
+
+      {result?.rows && (
+        <div className="max-h-72 overflow-auto rounded-xl border border-black/10">
+          <table className="w-full text-xs">
+            <tbody>
+              {result.rows.map((r) => (
+                <tr key={r.line} className="border-b border-black/5">
+                  <td className="px-2 py-1 text-[#8A8378]">L{r.line}</td>
+                  <td className="px-2 py-1 font-semibold text-[#2B2622]">{r.product?.emoji} {r.name}</td>
+                  {r.product ? (
+                    <>
+                      <td className="px-2 py-1">{categories.find((c) => c.id === r.product.cat)?.name}</td>
+                      <td className="px-2 py-1 text-right font-bold">{money(r.product.price)}</td>
+                    </>
+                  ) : (
+                    <td colSpan={2} className="px-2 py-1 text-[#C1361B]">{r.error}</td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-2">
+        <button onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
+        <button disabled={valid.length === 0} onClick={() => onImport(valid.map((r) => r.product))}
+          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+          style={{ background: "#C1440E" }}>
+          Importer {valid.length} produit{valid.length > 1 ? "s" : ""}{rejected.length > 0 && ` (${rejected.length} ignoré${rejected.length > 1 ? "s" : ""})`}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

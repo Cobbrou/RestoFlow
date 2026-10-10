@@ -13,6 +13,7 @@ import {
   UtensilsCrossed,
   Truck,
   Beer,
+  ShoppingBag,
 } from "lucide-react";
 import { DEFAULT_MODULES_CONFIG } from "../../hooks/useModules.js";
 
@@ -53,6 +54,7 @@ export default function ModulesManager({
         enableAdvancedSplitModes: true,
         enablePinAuth: true,
         enableTips: true,
+        enableTakeaway: true,
       };
     } else if (presetName === "bar") {
       presetConfig = {
@@ -64,6 +66,7 @@ export default function ModulesManager({
         enableAdvancedSplitModes: true,
         enablePinAuth: true,
         enableTips: true,
+        enableTakeaway: false,
       };
     } else if (presetName === "fast") {
       presetConfig = {
@@ -75,6 +78,7 @@ export default function ModulesManager({
         enableAdvancedSplitModes: false,
         enablePinAuth: false,
         enableTips: true,
+        enableTakeaway: true,
       };
     }
 
@@ -161,6 +165,15 @@ export default function ModulesManager({
       badge: "Fidélisation Équipe",
       color: "#DB2777",
       impactWhenDisabled: "Désactive l'étape de sélection de pourboire lors des encaissements.",
+    },
+    {
+      key: "enableTakeaway",
+      title: "Vente à Emporter",
+      subtitle: "Commandes hors salle (comptoir ou téléphone) avec numéro d'appel, nom du client et heure de retrait",
+      icon: ShoppingBag,
+      badge: "Comptoir & Emporter",
+      color: "#0891B2",
+      impactWhenDisabled: "Masque le bouton 'Emporter' : la prise de commande se fait uniquement à table.",
     },
   ];
 

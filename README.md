@@ -133,8 +133,8 @@ Trois préréglages en un clic : **Restaurant gastronomique**, **Bar & tapas**, 
 cd server
 npm install
 cp .env.example .env   # puis renseigner JWT_SECRET
-npm run db:push        # crée la base SQLite locale
-npm run db:seed        # charge les données de démonstration
+npm run db:migrate     # crée la base SQLite locale
+npm run db:seed        # charge les données de démonstration (ou db:seed:vierge pour un vrai restaurant)
 npm run start:dev      # http://localhost:3000
 ```
 
@@ -168,6 +168,10 @@ npm run dev            # http://localhost:5173
 | `npm test` | Tests du client (Vitest) |
 | `cd server && npm test` | Tests du serveur (Vitest) |
 | `cd server && npm run build` | Build du serveur |
+| `cd server && npm run db:migrate:dev` | Nouvelle migration après une modification du schéma |
+| `cd server && npm run db:backup` | Sauvegarde vérifiée de la base |
+
+> Mise en service sur place (HTTPS, services, sauvegardes) : voir [deploy/DEPLOIEMENT.md](deploy/DEPLOIEMENT.md).
 
 ---
 
@@ -180,6 +184,9 @@ Variables du serveur (`server/.env`) :
 | `JWT_SECRET` | Secret de signature des sessions. **Obligatoire en production** (`openssl rand -hex 32`). | — |
 | `CORS_ORIGIN` | Origines autorisées, séparées par des virgules | `http://localhost:5173` |
 | `PORT` | Port du serveur | `3000` |
+| `DATABASE_URL` | Fichier SQLite (relatif à `prisma/`) | `file:./dev.db` |
+| `BACKUP_DIR` | Dossier des sauvegardes | `./backups` |
+| `BACKUP_KEEP` | Nombre de sauvegardes conservées | `30` |
 
 ---
 

@@ -19,7 +19,7 @@ import {
   Wifi,
   HeartHandshake,
 } from "lucide-react";
-import { money } from "../../utils/index.js";
+import { money, orderLabel } from "../../utils/index.js";
 import TpeModal from "../../components/TpeModal.jsx";
 import { calculateVatBreakdown } from "../../utils/vat.js";
 import { useModules } from "../../hooks/useModules.js";
@@ -344,16 +344,16 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
               className="w-10 h-10 rounded-2xl flex items-center justify-center font-black text-lg shadow-sm"
               style={{ background: "#C1440E14", color: "#C1440E" }}
             >
-              {table.number}
+              {table ? table.number : (order.pickupNumber ?? "…")}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="rf-display text-lg font-bold text-[#2B2622]">
-                  Encaissement · Table {table.number}
+                  Encaissement · {orderLabel(order, table ? [table] : [])}
                 </h3>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-black/5 text-[#6B6355] font-semibold">
+                {table && <span className="text-xs px-2 py-0.5 rounded-full bg-black/5 text-[#6B6355] font-semibold">
                   {table.seats} couverts
-                </span>
+                </span>}
               </div>
               <p className="text-xs text-[#8A8378]">
                 {items.length} article(s) commandé(s) · Total net : <strong className="text-[#2B2622]">{money(total)}</strong>
@@ -1186,7 +1186,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                 {isFullyPaid ? (
                   <>
                     <CheckCircle2 size={15} />
-                    <span>Clôturer & libérer la table ({payments.length} part{payments.length > 1 ? "s" : ""})</span>
+                    <span>{table ? "Clôturer & libérer la table" : "Clôturer"} ({payments.length} part{payments.length > 1 ? "s" : ""})</span>
                   </>
                 ) : (
                   <>

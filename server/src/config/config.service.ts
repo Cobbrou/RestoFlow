@@ -67,6 +67,7 @@ export class ConfigService {
         enableAdvancedSplitModes: true,
         enablePinAuth: true,
         enableTips: true,
+        enableTakeaway: false,
       },
     };
   }

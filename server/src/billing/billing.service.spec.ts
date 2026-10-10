@@ -108,6 +108,31 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       );
     });
 
+    it("encaisse une commande à emporter sans table et fige son libellé sur le ticket", async () => {
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: "order_emp",
+        tableId: null,
+        table: null,
+        type: "takeaway",
+        channel: "phone",
+        pickupNumber: 12,
+        customerName: "Dupont",
+        server: "Alice",
+        items: [{ id: "it1", name: "Burger", price: 15, qty: 1, status: "ready", vatRate: 10 }],
+      });
+
+      const result = await billingService.processCheckout({ orderId: "order_emp", paymentMethod: "carte" });
+
+      expect(result.table).toBeNull();
+      expect(mockPrisma.table.update).not.toHaveBeenCalled();
+      expect(result.history).toMatchObject({
+        tableNumber: null,
+        orderType: "takeaway",
+        channel: "phone",
+        orderLabel: "Emporter #12 · Dupont",
+      });
+    });
+
     const order = {
       id: "order_9",
       tableId: "t1",

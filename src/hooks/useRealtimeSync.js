@@ -43,20 +43,20 @@ export function useRealtimeSync(store, { pushToast, beep, soundOn, onAuthRequire
         });
       },
 
-      "kitchen:new_ticket": ({ tableNumber, server }) => {
-        pushToast(`🔔 Nouvelle commande — Table ${tableNumber} (${server})`, "kitchen");
+      "kitchen:new_ticket": ({ tableNumber, label, server }) => {
+        pushToast(`🔔 Nouvelle commande — ${label || `Table ${tableNumber}`} (${server})`, "kitchen");
         ring(760);
       },
-      "server:order_ready": ({ tableNumber }) => {
-        pushToast(`🔔 Commande de la Table ${tableNumber} prête !`, "server");
+      "server:order_ready": ({ tableNumber, label }) => {
+        pushToast(`🔔 Commande ${label || `Table ${tableNumber}`} prête !`, "server");
         ring(980);
       },
       "catalog:product_86": ({ name, available, by }) => {
         pushToast(available ? `✅ ${name} de nouveau disponible` : `⛔ 86 — ${name} en rupture${by ? ` (${by})` : ""}`, available ? "server" : "warn");
         if (!available) ring(440);
       },
-      "kitchen:call_course": ({ tableNumber, courseLabel, course, server }) => {
-        pushToast(`🔔 Table ${tableNumber} — Réclame : ${courseLabel ? courseLabel.toUpperCase() : course} (${server})`, "kitchen");
+      "kitchen:call_course": ({ tableNumber, label, courseLabel, course, server }) => {
+        pushToast(`🔔 ${label || `Table ${tableNumber}`} — Réclame : ${courseLabel ? courseLabel.toUpperCase() : course} (${server})`, "kitchen");
         ring(840);
       },
 

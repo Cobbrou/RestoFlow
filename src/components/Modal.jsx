@@ -10,7 +10,7 @@ import { useEffect, useRef } from "react";
  *  - wide     : si true, max-width = 2xl (au lieu de md)
  *  - children : contenu du corps
  */
-export default function Modal({ isOpen = true, title, onClose, children, wide, "aria-label": ariaLabel }) {
+export default function Modal({ isOpen = true, title, onClose, children, wide, opaque, "aria-label": ariaLabel }) {
   const modalRef = useRef(null);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export default function Modal({ isOpen = true, title, onClose, children, wide, "
   if (!isOpen) return null;
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6"
+      className={`fixed inset-0 ${opaque ? "bg-[#14110D]" : "bg-black/50"} flex items-center justify-center z-50 p-6`}
       onClick={onClose}
     >
       <div

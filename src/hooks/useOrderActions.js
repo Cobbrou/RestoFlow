@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { uid } from "../data/seed.js";
-import { getProductEffectivePrice, resolveOptions, resolveMenuOptions, heldToRelease } from "../utils/index.js";
+import { getProductEffectivePrice, resolveOptions, resolveMenuOptions, heldToRelease, isOffPremise, orderLabel } from "../utils/index.js";
 import { getSocket } from "../services/socket.js";
 
 /**
@@ -42,7 +42,31 @@ export function useOrderActions(store, {
     [getActiveOrder, currentStaff]
   );
 
-  const getItemCourseAndStation = (product) => {
+  /**
+   * Commande hors salle (emporter) : créée localement puis par le serveur, qui attribue le numéro d'appel.
+   * Même identifiant des deux côtés : le rejeu hors-ligne ne crée pas de doublon.
+   */
+  const createOffPremiseOrder = ({ type = "takeaway", channel = "pos", customerName = "", customerPhone = "", pickupAt = null }) => {
+    const serverName = currentStaff ? currentStaff.name.split(" ")[0] : "Service";
+    const order = {
+      id: uid("ord"),
+      tableId: null,
+      type,
+      channel,
+      customerName: customerName.trim() || null,
+      customerPhone: customerPhone.trim() || null,
+      pickupAt,
+      pickupNumber: null,
+      server: serverName,
+      createdAt: Date.now(),
+      items: [],
+    };
+    setOrders((prev) => [...prev, order]);
+    emit("order:create_offpremise", { orderId: order.id, type, channel, server: serverName, customerName, customerPhone, pickupAt });
+    return order;
+  };
+
+  const getItemCourseAndStation = (product, order) => {
     const cat = product?.cat || "";
     const isBar =
       cat === "boissons" ||
@@ -58,14 +82,20 @@ export function useOrderActions(store, {
     } else {
       course = "plat";
     }
-    const courseStatus = (course === "entree" || course === "boisson" || course === "direct") ? "direct" : "held";
+    let courseStatus = (course === "entree" || course === "boisson" || course === "direct") ? "direct" : "held";
+    // Hors salle : tout part ensemble, pas de suites à réclamer
+    if (isOffPremise(order)) course = courseStatus = "direct";
     return { course, courseStatus, station, cat };
   };
 
+  // target : id de table, ou commande hors salle déjà créée (createOffPremiseOrder)
+  const resolveTarget = (target) =>
+    typeof target === "string" ? { order: ensureOrderForTable(target), tableId: target } : { order: target, tableId: undefined };
+
   // optionPicks : [{ group, choice }] (cuisson, suppléments), revalidés et facturés par le serveur
-  const addProductToOrder = (tableId, product, optionPicks = []) => {
-    const order = ensureOrderForTable(tableId);
-    const { course, courseStatus, station, cat } = getItemCourseAndStation(product);
+  const addProductToOrder = (target, product, optionPicks = []) => {
+    const { order, tableId } = resolveTarget(target);
+    const { course, courseStatus, station, cat } = getItemCourseAndStation(product, order);
     const { label: options, extra } = resolveOptions(product.options, optionPicks);
     const effectivePrice = Math.round((getProductEffectivePrice(product, config) + extra) * 100) / 100;
     const sameLine = (i) =>
@@ -118,10 +148,10 @@ export function useOrderActions(store, {
     });
   };
 
-  const addComposedMenuToOrder = (tableId, menuProduct, composition) => {
-    const order = ensureOrderForTable(tableId);
-    const course = "plat";
-    const courseStatus = "held";
+  const addComposedMenuToOrder = (target, menuProduct, composition) => {
+    const { order, tableId } = resolveTarget(target);
+    const course = isOffPremise(order) ? "direct" : "plat";
+    const courseStatus = isOffPremise(order) ? "direct" : "held";
     const station = "kitchen";
     const lineId = uid("it");
     const { label: options, extra } = resolveMenuOptions(composition, store.products);
@@ -283,6 +313,8 @@ export function useOrderActions(store, {
       ticketNumber,
       orderId:       order.id,
       tableNumber:   table?.number,
+      orderType:     order.type || "dine_in",
+      orderLabel:    isOffPremise(order) ? orderLabel(order) : null,
       server:        serverName,
       items:         paidItems,
       subtotal,
@@ -309,6 +341,8 @@ export function useOrderActions(store, {
         total,
         tip: Number(meta?.tip || 0),
         tableNumber: table?.number,
+        orderType: order.type || "dine_in",
+        orderLabel: isOffPremise(order) ? orderLabel(order) : null,
         paymentMethod: finalMethod,
         payments: paymentList,
         orderId: order.id,
@@ -368,12 +402,11 @@ export function useOrderActions(store, {
   };
 
   const markReady = (orderId, station = "all") => {
-    let tableNum = null;
+    const current = orders.find((o) => o.id === orderId);
+    const label = current ? orderLabel(current, tables) : null;
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== orderId) return o;
-        const t = tables.find((tt) => tt.id === o.tableId);
-        tableNum = t?.number;
         return {
           ...o,
           items: o.items.map((i) => {
@@ -389,9 +422,9 @@ export function useOrderActions(store, {
         };
       })
     );
-    if (tableNum) {
+    if (label) {
       const stationSuffix = station === "bar" ? " (Bar)" : station === "kitchen" ? " (Cuisine)" : "";
-      pushToast(`🔔 Commande de la Table ${tableNum} prête${stationSuffix}`, "server");
+      pushToast(`🔔 Commande ${label} prête${stationSuffix}`, "server");
       if (soundOn) beep(980);
     }
     emit("order:mark_ready", { orderId, station });
@@ -546,6 +579,7 @@ export function useOrderActions(store, {
   return {
     getActiveOrder,
     ensureOrderForTable,
+    createOffPremiseOrder,
     addProductToOrder,
     addComposedMenuToOrder,
     changeQty,

@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   tableStatus, STATUS_META, orderKitchenStatus,
-  kitchenStartTs, timerLevel, TIMER_LEVELS, formatTimer, noteIndicatesAllergy, isAvailable
+  kitchenStartTs, timerLevel, TIMER_LEVELS, formatTimer, noteIndicatesAllergy, isAvailable, orderLabel, formatPickup
 } from "../../utils/index.js";
 import { AllergyBadge } from "../salle/OrderTaking.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
@@ -452,7 +452,10 @@ function KitchenTicket({
       )}
 
       <div className="rf-mono flex items-center justify-between mb-1">
-        <span className="font-bold text-sm">TABLE {table?.number ?? "?"}</span>
+        <span className="font-bold text-sm">
+          {orderLabel(order, table ? [table] : []).toUpperCase()}
+          {order.pickupAt && <span className="ml-1.5 px-1 rounded bg-black/80 text-white text-[11px]">⏰ {formatPickup(order.pickupAt)}</span>}
+        </span>
         <div className="flex items-center gap-2">
           {onPrint && (
             <button

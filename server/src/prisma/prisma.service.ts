@@ -3,7 +3,7 @@ import { PrismaClient } from "@prisma/client";
 
 // Colonnes d'un ticket figées dès sa création (seul closedInZId peut être renseigné, une fois, par le Z)
 const FROZEN_TICKET_COLUMNS =
-  "id, orderId, ticketNumber, tableNumber, server, items, total, subtotal, discount, vatDetails, paymentMethod, " +
+  "id, orderId, ticketNumber, tableNumber, orderType, channel, orderLabel, server, items, total, subtotal, discount, vatDetails, paymentMethod, " +
   "payments, sequenceNumber, previousHash, signature, type, refTicketNumber, reason, createdAt";
 
 /**
@@ -36,7 +36,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'OrderHistory'"
     );
     if (tables.length === 0) {
-      throw new Error("Base de données vide ou non initialisée : lancez `npm run db:push` puis `npm run db:seed` dans server/");
+      throw new Error("Base de données vide ou non initialisée : lancez `npm run db:migrate` puis `npm run db:seed` dans server/");
     }
     for (const sql of Object.values(NF525_TRIGGERS)) {
       await this.$executeRawUnsafe(sql);
