@@ -577,10 +577,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("caisse.checkout")
   @SubscribeMessage("order:checkout")
   async handleCheckout(
+    @ConnectedSocket() client: Socket,
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CheckoutDto
   ) {
     try {
-      const res = await this.billingService.processCheckout(data);
+      const res = await this.billingService.processCheckout({ ...data, serverName: client.data.user.name });
 
       this.server.emit("order:closed", { orderId: res.orderId });
       this.server.emit("table:updated", res.table);

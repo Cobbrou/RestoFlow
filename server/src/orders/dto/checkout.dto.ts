@@ -1,5 +1,9 @@
-import { IsString, IsNotEmpty, IsNumber, IsOptional, IsArray, Min } from "class-validator";
+import { IsString, IsNotEmpty, IsOptional, IsArray } from "class-validator";
 
+/**
+ * Seuls la commande et les règlements sont fournis par le client :
+ * sous-total, remise, TVA, total et numéro de ticket sont calculés par le serveur.
+ */
 export class CheckoutDto {
   @IsString()
   @IsNotEmpty()
@@ -12,28 +16,4 @@ export class CheckoutDto {
   @IsOptional()
   @IsArray()
   payments?: any[];
-
-  @IsOptional()
-  @IsString()
-  serverName?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  subtotal?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  total?: number;
-
-  @IsOptional()
-  discount?: any;
-
-  @IsOptional()
-  vatDetails?: any;
-
-  @IsOptional()
-  @IsString()
-  ticketNumber?: string;
 }

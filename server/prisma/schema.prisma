@@ -156,6 +156,7 @@ model OrderItem {
   course      String   @default("direct") // "direct" | "entree" | "plat" | "dessert" | "boisson"
   courseStatus String  @default("direct") // "direct" | "held" | "called"
   station     String   @default("kitchen") // "kitchen" | "bar"
+  vatRate     Float    @default(10) // Taux figé à l'ajout, copié du produit (NF525 : ventilation TVA)
 }
 
 model Reservation {
@@ -176,8 +177,8 @@ model Reservation {
 
 model OrderHistory {
   id             String   @id
-  orderId        String
-  ticketNumber   String?  // e.g. "FAC-2026-0001"
+  orderId        String   @unique // Une commande ne peut être encaissée qu'une fois
+  ticketNumber   String?  @unique // e.g. "FAC-2026-0001", attribué par le serveur
   tableNumber    Int?
   server         String
   items          String   // JSON snapshot of paid items
@@ -187,7 +188,7 @@ model OrderHistory {
   vatDetails     String?  // JSON snapshot of VAT breakdown [{ rate, ht, vat, ttc }]
   paymentMethod  String
   payments       String   // JSON snapshot of payment breakdowns
-  sequenceNumber Int?     // Numéro séquentiel strict de transaction (NF525)
+  sequenceNumber Int?     @unique // Numéro séquentiel strict de transaction (NF525)
   previousHash   String?  // Hash du ticket précédent (chaînage)
   signature      String?  // Hash SHA-256 de ce ticket
   closedInZId    String?  // Référence au rapport Z dans lequel ce ticket a été clôturé

@@ -628,6 +628,7 @@ export default function App() {
               productId: product.id,
               name: product.name,
               price: effectivePrice,
+              vatRate: product.vatRate ?? 10,
               qty: 1,
               notes: "",
               status: "draft",
@@ -646,6 +647,7 @@ export default function App() {
       course,
       courseStatus,
       station,
+      addedAt: Date.now(), // le serveur fixe le prix (Happy Hour) à l'heure de l'ajout, même rejoué hors-ligne
     });
   };
 
@@ -667,6 +669,7 @@ export default function App() {
               productId: menuProduct.id,
               name: menuProduct.name,
               price: menuProduct.price,
+              vatRate: 10,
               qty: 1,
               notes: "",
               status: "draft",
@@ -688,6 +691,7 @@ export default function App() {
       course,
       courseStatus,
       station,
+      addedAt: Date.now(),
     });
   };
 
@@ -799,10 +803,8 @@ export default function App() {
 
     const finalMethod = paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
-    // Numéro de facture séquentiel lisible
-    const nowYear = new Date().getFullYear();
-    const seqNum = String((history.length + 1)).padStart(4, "0");
-    const ticketNumber = meta?.ticketNumber || `FAC-${nowYear}-${seqNum}`;
+    // Numéro provisoire : le numéro de facture définitif est attribué par le serveur (history:new_entry)
+    const ticketNumber = `PROV-${order.id}`;
 
     const receipt = {
       id: uid("rcpt"),
@@ -857,16 +859,11 @@ export default function App() {
       )
     );
 
+    // Montants, remise, TVA et numéro de ticket sont recalculés par le serveur
     emitOrQueue("order:checkout", {
       orderId,
       paymentMethod: finalMethod,
       payments: paymentList,
-      serverName,
-      subtotal,
-      total,
-      discount,
-      vatDetails,
-      ticketNumber,
     });
 
     return receipt;

@@ -1,5 +1,9 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { effectivePrice } from "../billing/pricing";
+
+// Tolérance sur l'horodatage client d'un ajout rejoué depuis la file hors-ligne
+const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
 
 @Injectable()
 export class OrdersService {
@@ -35,6 +39,7 @@ export class OrdersService {
         course: it.course || "direct",
         courseStatus: it.courseStatus || "direct",
         station: it.station || "kitchen",
+        vatRate: it.vatRate ?? 10,
       })),
     };
   }
@@ -114,6 +119,7 @@ export class OrdersService {
     course?: string;
     courseStatus?: string;
     station?: string;
+    addedAt?: number;
   }) {
     let order = await this.prisma.order.findUnique({
       where: { id: data.orderId },
@@ -134,12 +140,8 @@ export class OrdersService {
       });
     }
 
-    let dbProduct: any = null;
-    if (data.product?.id) {
-      dbProduct = await this.prisma.product.findUnique({
-        where: { id: data.product.id },
-      });
-    }
+    // 🔒 Prix, nom et taux de TVA viennent toujours de la base, jamais du client
+    const { dbProduct, name, price, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
 
     const cat = data.product?.cat || dbProduct?.cat || "";
     const isBar =
@@ -164,7 +166,12 @@ export class OrdersService {
 
     if (!data.product.isMenu) {
       const existing = order.items.find(
-        (i: any) => i.productId === data.product.id && i.status === "draft" && !i.notes && (i.course || "direct") === course
+        (i: any) =>
+          i.productId === data.product.id &&
+          i.status === "draft" &&
+          !i.notes &&
+          (i.course || "direct") === course &&
+          i.price === price
       );
       if (existing) {
         await this.prisma.orderItem.update({
@@ -177,8 +184,9 @@ export class OrdersService {
             id: `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             orderId: order.id,
             productId: data.product.id,
-            name: data.product.name,
-            price: data.product.price,
+            name,
+            price,
+            vatRate,
             qty: 1,
             notes: "",
             status: "draft",
@@ -195,8 +203,9 @@ export class OrdersService {
           id: `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           orderId: order.id,
           productId: data.product.id,
-          name: data.product.name,
-          price: data.product.price,
+          name,
+          price,
+          vatRate,
           qty: 1,
           notes: "",
           status: "draft",
@@ -214,6 +223,32 @@ export class OrdersService {
       include: { items: true, table: true },
     });
     return this.formatOrder(updated);
+  }
+
+  /**
+   * Prix de référence d'un produit ou d'un menu ("menu_<id>"), Happy Hour inclus.
+   * Pour une action rejouée depuis la file hors-ligne, le Happy Hour est évalué à l'heure de l'ajout.
+   */
+  private async resolveCatalogPrice(productId?: string, addedAt?: number) {
+    if (!productId) throw new BadRequestException("Produit manquant");
+    const now = Date.now();
+    const at = addedAt && addedAt <= now && now - addedAt < MAX_OFFLINE_AGE_MS ? new Date(addedAt) : new Date(now);
+
+    if (productId.startsWith("menu_")) {
+      const menu = await this.prisma.menu.findUnique({ where: { id: productId.slice(5) } });
+      if (!menu) throw new NotFoundException("Menu introuvable");
+      // ponytail: menu facturé à 10 % en bloc, ventiler par composant si un menu inclut de l'alcool
+      return { dbProduct: null, name: menu.name, price: menu.price, vatRate: 10 };
+    }
+
+    const dbProduct = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!dbProduct) throw new NotFoundException("Produit introuvable");
+    const cfg = await this.prisma.restaurantConfig.findUnique({
+      where: { id: "default" },
+      select: { happyHourConfig: true },
+    });
+    const hh = cfg?.happyHourConfig ? JSON.parse(cfg.happyHourConfig) : null;
+    return { dbProduct, name: dbProduct.name, price: effectivePrice(dbProduct, hh, at), vatRate: dbProduct.vatRate };
   }
 
   async changeQty(orderId: string, itemId: string, delta: number) {

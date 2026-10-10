@@ -21,10 +21,9 @@ export function calculateVatBreakdown(items = [], discount = null) {
   // Calcul du montant de remise en euros
   let discountAmount = 0;
   if (discount) {
-    if (discount.amount != null) {
-      discountAmount = discount.amount;
-    } else if (discount.type === "percent") {
-      discountAmount = Math.round(subtotal * (discount.value / 100) * 100) / 100;
+    // Recalcul depuis type/valeur, comme le serveur (server/src/billing/pricing.ts)
+    if (discount.type === "percent") {
+      discountAmount = Math.round(subtotal * (Math.min(100, discount.value) / 100) * 100) / 100;
     } else if (discount.type === "fixed") {
       discountAmount = Math.min(subtotal, Math.round(discount.value * 100) / 100);
     }

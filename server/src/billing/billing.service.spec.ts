@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BillingService } from "./billing.service";
-import { NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 
 describe("BillingService (Unitaire & Intégrité Financière)", () => {
   let billingService: BillingService;
@@ -11,6 +11,7 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       order: {
         findUnique: vi.fn(),
         update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         delete: vi.fn(),
       },
       orderHistory: {
@@ -18,6 +19,7 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...data })),
       },
+      $transaction: vi.fn().mockImplementation((fn) => fn(mockPrisma)),
       restaurantConfig: {
         findUnique: vi.fn().mockResolvedValue({ nf525Key: "TEST_SECRET_KEY" }),
       },
@@ -85,8 +87,6 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       const checkoutData = {
         orderId: "order_123",
         paymentMethod: "carte",
-        subtotal: 28.0,
-        total: 28.0,
       };
 
       const result = await billingService.processCheckout(checkoutData);
@@ -98,13 +98,58 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       expect(result.history.sequenceNumber).toBe(1);
 
       // Vérifie que la commande est marquée fermée et la table libérée
-      expect(mockPrisma.order.update).toHaveBeenCalledWith({
-        where: { id: "order_123" },
+      expect(mockPrisma.order.updateMany).toHaveBeenCalledWith({
+        where: { id: "order_123", status: "open" },
         data: { status: "closed" },
       });
+      expect(result.history.ticketNumber).toMatch(/^FAC-\d{4}-0001$/);
       expect(mockPrisma.table.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: "t1" } })
       );
+    });
+
+    const order = {
+      id: "order_9",
+      tableId: "t1",
+      server: "Alice",
+      table: { number: 2 },
+      discount: null,
+      items: [
+        { id: "a", name: "Plat", price: 20, qty: 1, status: "served", vatRate: 10 },
+        { id: "b", name: "Vin", price: 6, qty: 1, status: "served", vatRate: 20 },
+      ],
+    };
+
+    it("refuse un second encaissement de la même commande", async () => {
+      mockPrisma.order.findUnique.mockResolvedValue(order);
+      mockPrisma.order.updateMany.mockResolvedValue({ count: 0 });
+      await expect(billingService.processCheckout({ orderId: "order_9" })).rejects.toThrow(ConflictException);
+      expect(mockPrisma.orderHistory.create).not.toHaveBeenCalled();
+    });
+
+    it("ignore les montants du client et refuse des paiements différents du total", async () => {
+      mockPrisma.order.findUnique.mockResolvedValue(order);
+      await expect(
+        billingService.processCheckout({
+          orderId: "order_9",
+          total: 0.01,
+          payments: [{ amount: 0.01, method: "especes" }],
+        } as any)
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("recalcule remise et ventilation TVA par taux depuis la base", async () => {
+      mockPrisma.order.findUnique.mockResolvedValue({
+        ...order,
+        discount: JSON.stringify({ type: "percent", value: 10, amount: 999 }),
+      });
+      const res = await billingService.processCheckout({
+        orderId: "order_9",
+        payments: [{ amount: 23.4, method: "carte" }],
+      });
+      expect(res.history.total).toBe(23.4);
+      expect(res.history.discount.amount).toBe(2.6);
+      expect(res.history.vatDetails.rates.map((r: any) => r.rate)).toEqual([10, 20]);
     });
   });
 });
