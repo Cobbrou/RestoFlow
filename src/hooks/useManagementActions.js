@@ -137,6 +137,14 @@ export function useManagementActions(store, { emit, pushToast, currentStaff }) {
     }
   };
 
+  // Import CSV de la carte : un seul rafraîchissement local et un seul toast, une création serveur par produit
+  const importProducts = (list) => {
+    const created = list.map((p) => ({ id: uid("prod"), ...p }));
+    setProducts((prev) => [...prev, ...created]);
+    created.forEach((p) => emit("catalog:create_product", p));
+    pushToast(`${created.length} produit${created.length > 1 ? "s" : ""} importé${created.length > 1 ? "s" : ""}`, "server");
+  };
+
   const updateProduct = (id, data) => {
     setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
     emit("catalog:update_product", { id, ...data });
@@ -240,6 +248,7 @@ export function useManagementActions(store, { emit, pushToast, currentStaff }) {
     onUpdateTable: updateTable,
     onDeleteTable: deleteTable,
     onAddProduct: addProduct,
+    onImportProducts: importProducts,
     onUpdateProduct: updateProduct,
     onDeleteProduct: deleteProduct,
     onAddMenu: addMenu,
