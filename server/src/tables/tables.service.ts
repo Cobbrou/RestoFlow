@@ -13,18 +13,6 @@ export class TablesService {
     return this.prisma.table.findUnique({ where: { id } });
   }
 
-  async create(data: any) {
-    return this.prisma.table.create({ data });
-  }
-
-  async update(id: string, data: any) {
-    return this.prisma.table.update({ where: { id }, data });
-  }
-
-  async delete(id: string) {
-    return this.prisma.table.delete({ where: { id } });
-  }
-
   async toggleAlert(tableId: string) {
     const table = await this.prisma.table.findUnique({ where: { id: tableId } });
     if (!table) throw new NotFoundException("Table introuvable");

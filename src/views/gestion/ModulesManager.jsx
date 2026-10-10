@@ -10,7 +10,6 @@ import {
   HeartHandshake,
   Sparkles,
   Save,
-  CheckCircle2,
   UtensilsCrossed,
   Truck,
   Beer,

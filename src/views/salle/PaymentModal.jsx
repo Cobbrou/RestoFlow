@@ -48,9 +48,9 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   // Remise appliquée à la commande
   const discount = order.discount;
   const discountAmount = useMemo(() => {
+    // Même règle que le serveur : recalcul depuis type/valeur (le montant stocké peut dater d'avant un ajout d'article)
     if (!discount) return 0;
-    if (discount.amount != null) return discount.amount;
-    if (discount.type === "percent") return Math.round(subtotal * (discount.value / 100) * 100) / 100;
+    if (discount.type === "percent") return Math.round(subtotal * (Math.min(100, discount.value) / 100) * 100) / 100;
     return Math.min(subtotal, discount.value || 0);
   }, [discount, subtotal]);
 

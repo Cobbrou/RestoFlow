@@ -87,7 +87,7 @@ export default function CaisseSettingsManager({
 
   const handleSave = () => {
     onUpdateConfig?.(formData);
-    pushToast?.("success", "Paramètres de caisse et billetterie enregistrés avec succès.");
+    pushToast?.("Paramètres de caisse et billetterie enregistrés avec succès.", "server");
   };
 
   const handleTogglePrinterOption = (printerId, optionKey) => {
@@ -103,7 +103,7 @@ export default function CaisseSettingsManager({
     if (!newPromo.code.trim()) return;
     const cleanCode = newPromo.code.trim().toUpperCase();
     if (formData.promoCodes.some((p) => p.code === cleanCode)) {
-      pushToast?.("error", "Ce code promotionnel existe déjà.");
+      pushToast?.("Ce code promotionnel existe déjà.", "warn");
       return;
     }
 
@@ -122,7 +122,7 @@ export default function CaisseSettingsManager({
     }));
 
     setNewPromo({ code: "", label: "", type: "percent", value: 10 });
-    pushToast?.("success", `Code promo ${cleanCode} ajouté.`);
+    pushToast?.(`Code promo ${cleanCode} ajouté.`, "server");
   };
 
   const handleDeletePromo = (codeToDelete) => {
@@ -130,7 +130,7 @@ export default function CaisseSettingsManager({
       ...prev,
       promoCodes: prev.promoCodes.filter((p) => p.code !== codeToDelete),
     }));
-    pushToast?.("info", `Code promo ${codeToDelete} supprimé.`);
+    pushToast?.(`Code promo ${codeToDelete} supprimé.`, "server");
   };
 
   const handleTogglePromo = (codeToToggle) => {

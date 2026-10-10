@@ -1,33 +1,49 @@
 import { useState, useEffect } from "react";
-import { RefreshCw, Trash2, AlertTriangle, CheckCircle, Clock, X, Layers } from "lucide-react";
+import { RefreshCw, Trash2, AlertTriangle, CheckCircle, Clock, X, Layers, RotateCcw } from "lucide-react";
 import Modal from "./Modal.jsx";
-import { subscribeQueue, discardAction, clearQueue, flushQueue } from "../services/actionQueue.js";
+import { subscribeQueue, discardAction, retryAction, clearQueue, flushQueue } from "../services/actionQueue.js";
 import { getSocket } from "../services/socket.js";
 
+const ACTION_LABELS = {
+  "order:create_or_ensure": "Ouverture de commande",
+  "order:add_item": "Ajout d'article",
+  "order:change_qty": "Changement de quantité",
+  "order:remove_item": "Suppression d'article",
+  "order:set_note": "Note sur un article",
+  "order:send_kitchen": "Envoi en cuisine",
+  "order:start_prep": "Préparation démarrée",
+  "order:mark_ready": "Commande prête",
+  "order:serve": "Commande servie",
+  "order:call_course": "Réclame d'une suite",
+  "order:change_item_course": "Changement de suite",
+  "order:discount:apply": "Remise appliquée",
+  "order:discount:remove": "Remise retirée",
+  "order:checkout": "Encaissement",
+  "tables:toggle_alert": "Alerte de table",
+  "reservation:create": "Nouvelle réservation",
+  "reservation:update_status": "Statut de réservation",
+  "reservation:assign_table": "Table de réservation",
+  "reservation:delete": "Suppression de réservation",
+  "config:update": "Paramètres de caisse",
+  "recipe:save": "Fiche technique",
+};
+
 function getActionLabel(type, payload) {
-  switch (type) {
-    case "order:create":
-      return `Nouvelle commande (Table ${payload?.tableNumber || "?"})`;
-    case "order:update":
-      return `Mise à jour commande (Table ${payload?.tableNumber || "?"})`;
-    case "order:checkout":
-      return `Encaissement (Table ${payload?.tableNumber || "?"} — ${(payload?.totalPaid || payload?.total || 0).toFixed(2)} €)`;
-    case "table:update_status":
-      return `Statut Table ${payload?.tableNumber || payload?.tableId || "?"} ➔ ${payload?.status || "?"}`;
-    case "table:transfer":
-      return `Transfert Table ${payload?.sourceTableNumber} ➔ ${payload?.targetTableNumber}`;
-    case "table:merge":
-      return `Fusion Table ${payload?.sourceTableNumber} ➔ ${payload?.targetTableNumber}`;
-    case "reservation:create":
-      return `Réservation ${payload?.customerName} (${payload?.guests}p à ${payload?.time})`;
-    case "config:update":
-      return "Mise à jour de la configuration";
-    case "stock:adjust":
-      return `Ajustement stock (${payload?.reason || "Manuel"})`;
-    default:
-      return type;
+  const label = ACTION_LABELS[type] || type;
+  if (type === "order:add_item" && payload?.product?.name) return `${label} : ${payload.product.name}`;
+  if (type === "order:checkout" && payload?.payments?.length) {
+    const total = payload.payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    return `${label} : ${total.toFixed(2)} €`;
   }
+  if (type === "reservation:create" && payload?.customerName) return `${label} : ${payload.customerName}`;
+  return label;
 }
+
+const STATUS_STYLES = {
+  syncing: "bg-sky-50 border-sky-200",
+  rejected: "bg-red-50 border-red-200",
+  pending: "bg-white border-black/10",
+};
 
 export default function OfflineQueueModal({ isOpen, onClose }) {
   const [queue, setQueue] = useState([]);
@@ -42,6 +58,8 @@ export default function OfflineQueueModal({ isOpen, onClose }) {
     return unsub;
   }, []);
 
+  const rejectedCount = queue.filter((a) => a.status === "rejected").length;
+
   const handleManualSync = async () => {
     setSyncFeedback(null);
     const socket = getSocket();
@@ -52,27 +70,31 @@ export default function OfflineQueueModal({ isOpen, onClose }) {
 
     try {
       const res = await flushQueue(socket);
-      if (res.flushed > 0) {
-        setSyncFeedback({
-          ok: true,
-          message: `${res.flushed} action(s) synchronisée(s) avec succès ! ${res.remaining > 0 ? `(${res.remaining} restante(s))` : ""}`,
-        });
-      } else if (res.errors > 0) {
-        setSyncFeedback({ ok: false, message: `Échec sur ${res.errors} action(s). Le serveur a rejeté la requête.` });
+      if (res.rejected > 0) {
+        setSyncFeedback({ ok: false, message: `${res.flushed} action(s) synchronisée(s), ${res.rejected} refusée(s) par le serveur.` });
+      } else if (res.flushed > 0) {
+        setSyncFeedback({ ok: true, message: `${res.flushed} action(s) synchronisée(s) avec succès.` });
       } else {
-        setSyncFeedback({ ok: true, message: "Aucune action en attente." });
+        setSyncFeedback({ ok: true, message: "Aucune action à envoyer." });
       }
     } catch (e) {
       setSyncFeedback({ ok: false, message: e.message || "Erreur de synchronisation" });
     }
   };
 
+  const handleRetry = async (id) => {
+    await retryAction(id);
+    await handleManualSync();
+  };
+
   const handleDiscard = async (id) => {
-    await discardAction(id);
+    if (window.confirm("Abandonner définitivement cette action ? Elle ne sera jamais envoyée au serveur.")) {
+      await discardAction(id);
+    }
   };
 
   const handleClearAll = async () => {
-    if (window.confirm("Êtes-vous sûr de vouloir vider toutes les actions en attente ? Les modifications non synchronisées seront perdues.")) {
+    if (window.confirm("Vider toutes les actions en attente ? Les modifications non synchronisées seront perdues.")) {
       await clearQueue();
     }
   };
@@ -80,130 +102,114 @@ export default function OfflineQueueModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="File d'attente hors-ligne" size="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="File d'attente hors-ligne" wide>
       <div className="space-y-4">
-        {/* En-tête explicatif */}
-        <div className="flex items-start gap-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-[#E6E1D8]">
-          <Layers className="text-amber-400 shrink-0 mt-0.5" size={16} />
+        <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-[#5B5346]">
+          <Layers className="text-amber-600 shrink-0 mt-0.5" size={16} />
           <div>
-            <p className="font-semibold text-amber-300">Fonctionnement autonome activé</p>
-            <p className="text-[#C9C2B0] mt-0.5">
-              Ces actions ont été enregistrées localement dans votre navigateur (IndexedDB) pendant une coupure réseau. Elles seront automatiquement rejouées dès le rétablissement de la liaison avec le serveur.
+            <p className="font-semibold text-[#2B2622]">Actions enregistrées sur ce terminal</p>
+            <p className="mt-0.5">
+              Elles sont rejouées dans l'ordre dès le retour du serveur ; une action déjà prise en compte n'est jamais appliquée deux fois.
+              Une action refusée par le serveur reste ici jusqu'à ce que vous la réessayiez ou l'abandonniez.
             </p>
           </div>
         </div>
 
-        {/* Message de feedback après synchro manuelle */}
+        {rejectedCount > 0 && (
+          <div className="p-3 rounded-xl text-xs font-semibold bg-red-50 border border-red-200 text-[#C1361B] flex items-center gap-2">
+            <AlertTriangle size={14} /> {rejectedCount} action(s) refusée(s) par le serveur : vérifiez-les avant de les abandonner.
+          </div>
+        )}
+
         {syncFeedback && (
           <div
             className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
-              syncFeedback.ok
-                ? "bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
-                : "bg-red-500/15 border border-red-500/30 text-red-300"
+              syncFeedback.ok ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : "bg-red-50 border border-red-200 text-[#C1361B]"
             }`}
           >
             <span>{syncFeedback.message}</span>
-            <button onClick={() => setSyncFeedback(null)} className="p-1 hover:opacity-80">
+            <button onClick={() => setSyncFeedback(null)} className="p-1 hover:opacity-80" aria-label="Fermer le message">
               <X size={14} />
             </button>
           </div>
         )}
 
-        {/* Liste des actions */}
         <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1">
           {queue.length === 0 ? (
-            <div className="py-12 text-center text-[#6B6355]">
-              <CheckCircle size={32} className="mx-auto text-emerald-500/60 mb-2" />
-              <p className="font-semibold text-sm text-[#C9C2B0]">Toutes les actions sont synchronisées</p>
-              <p className="text-xs">Aucune opération en attente dans la mémoire locale.</p>
+            <div className="py-12 text-center text-[#8A8378]">
+              <CheckCircle size={32} className="mx-auto text-emerald-500 mb-2" />
+              <p className="font-semibold text-sm text-[#2B2622]">Toutes les actions sont synchronisées</p>
+              <p className="text-xs">Aucune opération en attente sur ce terminal.</p>
             </div>
           ) : (
-            queue.map((action, idx) => {
-              const dateStr = new Date(action.timestamp).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              });
-
-              return (
-                <div
-                  key={action.id || idx}
-                  className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs transition-all ${
-                    action.status === "syncing"
-                      ? "bg-sky-500/10 border-sky-500/30 text-sky-200"
-                      : action.status === "failed"
-                      ? "bg-red-500/10 border-red-500/30 text-red-200"
-                      : "bg-[#241E1A] border-[#3D352E] text-[#EDE7DE]"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5 min-w-0">
-                    <span className="font-mono text-[10px] text-[#8C8273] shrink-0 mt-0.5">
-                      #{idx + 1}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="font-semibold truncate">
-                        {getActionLabel(action.type, action.payload)}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-[11px] text-[#A69B89]">
-                        <span className="flex items-center gap-1 font-mono">
-                          <Clock size={11} /> {dateStr}
-                        </span>
-                        <span className="font-mono text-[10px] bg-black/20 px-1.5 py-0.5 rounded">
-                          {action.type}
-                        </span>
-                        {action.retries > 0 && (
-                          <span className="text-amber-400 font-semibold">
-                            {action.retries} essai(s)
-                          </span>
-                        )}
-                      </div>
-                      {action.lastError && (
-                        <div className="mt-1 text-[10px] text-red-400 flex items-center gap-1">
-                          <AlertTriangle size={11} /> {action.lastError}
-                        </div>
-                      )}
+            queue.map((action, idx) => (
+              <div
+                key={action.id}
+                className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs ${STATUS_STYLES[action.status] || STATUS_STYLES.pending}`}
+              >
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <span className="font-mono text-[10px] text-[#8A8378] shrink-0 mt-0.5">#{idx + 1}</span>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[#2B2622] truncate">{getActionLabel(action.type, action.payload)}</div>
+                    <div className="flex items-center gap-3 mt-1 text-[11px] text-[#8A8378]">
+                      <span className="flex items-center gap-1 font-mono">
+                        <Clock size={11} />
+                        {new Date(action.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      </span>
+                      {action.status === "rejected" && <span className="font-bold text-[#C1361B]">Refusée</span>}
+                      {action.status === "syncing" && <span className="font-bold text-sky-700">Envoi…</span>}
+                      {action.retries > 0 && <span className="text-amber-700 font-semibold">{action.retries} tentative(s)</span>}
                     </div>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => handleDiscard(action.id)}
-                      title="Supprimer cette action"
-                      className="p-1.5 rounded-lg text-[#8C8273] hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {action.lastError && (
+                      <div className="mt-1 text-[11px] text-[#C1361B] flex items-center gap-1">
+                        <AlertTriangle size={11} /> {action.lastError}
+                      </div>
+                    )}
                   </div>
                 </div>
-              );
-            })
+
+                <div className="flex items-center gap-1 shrink-0">
+                  {action.status === "rejected" && (
+                    <button
+                      onClick={() => handleRetry(action.id)}
+                      title="Réessayer cette action"
+                      aria-label="Réessayer cette action"
+                      className="p-1.5 rounded-lg text-[#5B5346] hover:bg-black/5"
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDiscard(action.id)}
+                    title="Abandonner cette action"
+                    aria-label="Abandonner cette action"
+                    className="p-1.5 rounded-lg text-[#8A8378] hover:text-[#C1361B] hover:bg-red-50"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))
           )}
         </div>
 
-        {/* Boutons d'action en bas */}
-        <div className="pt-3 border-t border-[#3D352E] flex items-center justify-between">
+        <div className="pt-3 border-t border-black/10 flex items-center justify-between">
           <div>
             {queue.length > 0 && (
-              <button
-                onClick={handleClearAll}
-                className="text-xs text-red-400/80 hover:text-red-400 hover:underline flex items-center gap-1"
-              >
+              <button onClick={handleClearAll} className="text-xs text-[#C1361B] hover:underline flex items-center gap-1">
                 <Trash2 size={12} /> Tout vider
               </button>
             )}
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#2E2721] text-[#C9C2B0] hover:bg-[#3D352E] transition-colors"
-            >
+            <button onClick={onClose} className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-black/5 text-[#2B2622]">
               Fermer
             </button>
             <button
               onClick={handleManualSync}
               disabled={isFlushing || queue.length === 0}
-              className="px-4 py-2 rounded-xl text-xs font-bold bg-[#C1440E] hover:bg-[#D94F14] text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-colors"
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-[#C1440E] text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw size={13} className={isFlushing ? "animate-spin" : ""} />
               {isFlushing ? "Synchronisation..." : "Forcer la synchronisation"}

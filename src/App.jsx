@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import GlobalStyle from "./components/GlobalStyle.jsx";
 import TopNav from "./components/TopNav.jsx";
 import ToastStack from "./components/ToastStack.jsx";
@@ -30,9 +30,9 @@ import { seedTables, seedOrders, seedHistory, seedMenus, seedReservations, uid }
 import { PRODUCTS_SEED } from "./data/products.js";
 import { INITIAL_ROLES, INITIAL_STAFF } from "./data/staff.js";
 import { menuToProduct, getProductEffectivePrice, deduplicateHistory } from "./utils/index.js";
-import { useBeep, useContainerWidth, useNow, DEFAULT_MODULES_CONFIG } from "./hooks/index.js";
-import { getSocket, setSocketToken } from "./services/socket.js";
-import { enqueueAction, flushQueue } from "./services/actionQueue.js";
+import { useBeep, useContainerWidth, DEFAULT_MODULES_CONFIG } from "./hooks/index.js";
+import { getSocket, setSocketToken, hasValidSessionToken, clearSessionToken } from "./services/socket.js";
+import { enqueueAction, flushQueue, hasPendingActions, newActionId } from "./services/actionQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
 import PwaInstallPrompt from "./components/PwaInstallPrompt.jsx";
 import {
@@ -169,7 +169,6 @@ export default function App() {
   const [activeTableId, setActiveTableId] = useState(null);
 
   // ── Horloge + sons + toasts ───────────────────────────────
-  const now      = useNow();
   const [toasts, setToasts]   = useState([]);
   const [soundOn, setSoundOn] = useState(true);
   const beep     = useBeep();
@@ -228,6 +227,7 @@ export default function App() {
   }, [tables, orders, reservations, history, closings, products, ingredients, recipes, stockMovements]);
 
   // ── Synchronisation Temps Réel Socket.IO ───────────────────
+  const syncHandlerRef = useRef(null);
   useEffect(() => {
     const socket = getSocket();
 
@@ -309,8 +309,8 @@ export default function App() {
       setReservations((prev) => prev.map((r) => (r.id === reservation.id ? reservation : r)));
     };
 
-    const handleReservationDeleted = ({ reservationId }) => {
-      setReservations((prev) => prev.filter((r) => r.id !== reservationId));
+    const handleReservationDeleted = ({ id }) => {
+      setReservations((prev) => prev.filter((r) => r.id !== id));
     };
 
     const handleTablesTransferred = (payload) => {
@@ -379,9 +379,10 @@ export default function App() {
           return h;
         })
       );
-      pushToast(`Clôture Z n°${newClosing.zNumber || ""} enregistrée`, "server");
+      pushToast(`Clôture ${newClosing.reportNumber || "Z"} enregistrée`, "server");
     };
 
+    // Le serveur confirme la session (auth:ok) avant tout rejeu : sinon les actions seraient rejetées puis perdues
     const handleConnect = async () => {
       try {
         const syncResult = await flushQueue(socket);
@@ -396,6 +397,7 @@ export default function App() {
       });
     };
 
+    syncHandlerRef.current = handleSyncInit;
     socket.on("sync:init", handleSyncInit);
     socket.on("table:updated", handleTableUpdated);
     socket.on("order:updated", handleOrderUpdated);
@@ -410,16 +412,41 @@ export default function App() {
     socket.on("tables:transferred", handleTablesTransferred);
     socket.on("tables:merged", handleTablesMerged);
     socket.on("stock:updated", handleStockUpdated);
-    socket.on("recipes:updated", handleRecipesUpdated);
+    socket.on("recipe:updated", handleRecipesUpdated);
     socket.on("stock:movements_updated", handleMovementsUpdated);
     socket.on("catalog:products_updated", handleCatalogProductsUpdated);
     socket.on("stock:alert", handleStockAlert);
     socket.on("config:updated", handleConfigUpdated);
     socket.on("config:modules_updated", handleModulesUpdated);
     socket.on("closing:new_z", handleClosingNewZ);
-    socket.on("connect", handleConnect);
+    socket.on("tables:list", setTables);
+    socket.on("menus:list", setMenus);
+    socket.on("staff:list", setStaff);
+    socket.on("roles:list", setRoles);
+    // Session absente/expirée côté serveur : retour à l'écran PIN (sans reconnexion, évite une boucle)
+    const handleAuthRequired = () => {
+      clearSessionToken();
+      setCurrentStaff((prev) => {
+        if (prev) pushToast("Session expirée : veuillez saisir à nouveau votre code PIN", "warn");
+        return null;
+      });
+      try {
+        localStorage.removeItem("rf_active_staff");
+      } catch {}
+      saveCachedAuth(null);
+      setIsPinModalOpen(true);
+    };
 
-    if (socket.connected) {
+    // Erreurs levées par les guards serveur (droits insuffisants, session invalide)
+    const handleServerException = (err) => {
+      pushToast(err?.message || "Action refusée par le serveur", "warn");
+    };
+
+    socket.on("auth:ok", handleConnect);
+    socket.on("auth:required", handleAuthRequired);
+    socket.on("exception", handleServerException);
+
+    if (socket.connected && hasValidSessionToken()) {
       flushQueue(socket);
     }
 
@@ -438,14 +465,20 @@ export default function App() {
       socket.off("tables:transferred", handleTablesTransferred);
       socket.off("tables:merged", handleTablesMerged);
       socket.off("stock:updated", handleStockUpdated);
-      socket.off("recipes:updated", handleRecipesUpdated);
+      socket.off("recipe:updated", handleRecipesUpdated);
       socket.off("stock:movements_updated", handleMovementsUpdated);
       socket.off("catalog:products_updated", handleCatalogProductsUpdated);
       socket.off("stock:alert", handleStockAlert);
       socket.off("config:updated", handleConfigUpdated);
       socket.off("config:modules_updated", handleModulesUpdated);
       socket.off("closing:new_z", handleClosingNewZ);
-      socket.off("connect", handleConnect);
+      socket.off("tables:list", setTables);
+      socket.off("menus:list", setMenus);
+      socket.off("staff:list", setStaff);
+      socket.off("roles:list", setRoles);
+      socket.off("auth:ok", handleConnect);
+      socket.off("auth:required", handleAuthRequired);
+      socket.off("exception", handleServerException);
     };
   }, [soundOn, beep, pushToast]);
 
@@ -464,22 +497,39 @@ export default function App() {
   }, [currentStaff, roles, role]);
 
   // Helper pour émettre avec fallback dans la file d'attente hors-ligne et réconciliation / rollback (Axe 3)
+  // Ordre strict : tant que la file n'est pas vide, toute nouvelle action passe derrière.
+  // Chaque action porte un clientActionId : un acquittement perdu => rejouée, et le serveur ignore le doublon.
   const emitOrQueue = (eventType, payload, onAck) => {
     const socket = getSocket();
-    if (socket && socket.connected) {
-      socket.emit(eventType, payload, (response) => {
-        if (response && response.ok === false) {
-          pushToast(response.error || "Une erreur est survenue sur le serveur", "warn");
-          if (onAck) onAck(response);
-          // Réconciliation automatique avec l'état réel de la base de données
-          socket.emit("sync:request");
-        } else if (onAck) {
-          onAck(response);
-        }
-      });
-    } else {
+    if (!socket?.connected || hasPendingActions()) {
       enqueueAction(eventType, payload);
+      if (socket?.connected && hasValidSessionToken()) flushQueue(socket);
+      return;
     }
+
+    const clientActionId = newActionId();
+    let settled = false;
+    const ackTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      enqueueAction(eventType, payload, clientActionId);
+    }, 5000);
+
+    socket.emit(eventType, { ...payload, clientActionId }, (response) => {
+      clearTimeout(ackTimer);
+      if (settled) return;
+      settled = true;
+      if (response && response.ok === false) {
+        pushToast(response.error || "Une erreur est survenue sur le serveur", "warn");
+        if (onAck) onAck(response);
+        // Réconciliation automatique avec l'état réel de la base de données
+        socket.emit("sync:request", {}, (res) => {
+          if (res && res.state) syncHandlerRef.current?.(res.state);
+        });
+      } else if (onAck) {
+        onAck(response);
+      }
+    });
   };
 
   const getActiveOrder = useCallback(
@@ -595,6 +645,11 @@ export default function App() {
     const order = ensureOrderForTable(tableId);
     const { course, courseStatus, station, cat } = getItemCourseAndStation(product);
     const effectivePrice = getProductEffectivePrice(product, config);
+    // Nouvelle ligne : son id est partagé avec le serveur (les actions hors-ligne suivantes le référencent)
+    const lineId = uid("it");
+    const mergesIntoExisting = order.items.some(
+      (i) => i.productId === product.id && i.status === "draft" && !i.notes && (i.course || course) === course && i.price === effectivePrice
+    );
 
     setOrders((prev) =>
       prev.map((o) => {
@@ -610,10 +665,11 @@ export default function App() {
           items: [
             ...o.items,
             {
-              id: uid("it"),
+              id: lineId,
               productId: product.id,
               name: product.name,
               price: effectivePrice,
+              vatRate: product.vatRate ?? 10,
               qty: 1,
               notes: "",
               status: "draft",
@@ -628,10 +684,13 @@ export default function App() {
 
     emitOrQueue("order:add_item", {
       orderId: order.id,
+      tableId,
+      itemId: mergesIntoExisting ? undefined : lineId,
       product: { id: product.id, name: product.name, price: effectivePrice, cat, station, isMenu: false },
       course,
       courseStatus,
       station,
+      addedAt: Date.now(), // le serveur fixe le prix (Happy Hour) à l'heure de l'ajout, même rejoué hors-ligne
     });
   };
 
@@ -640,6 +699,7 @@ export default function App() {
     const course = "plat";
     const courseStatus = "held";
     const station = "kitchen";
+    const lineId = uid("it");
 
     setOrders((prev) =>
       prev.map((o) => {
@@ -649,10 +709,11 @@ export default function App() {
           items: [
             ...o.items,
             {
-              id: uid("it"),
+              id: lineId,
               productId: menuProduct.id,
               name: menuProduct.name,
               price: menuProduct.price,
+              vatRate: 10,
               qty: 1,
               notes: "",
               status: "draft",
@@ -669,11 +730,14 @@ export default function App() {
 
     emitOrQueue("order:add_item", {
       orderId: order.id,
+      tableId,
+      itemId: lineId,
       product: { id: menuProduct.id, name: menuProduct.name, price: menuProduct.price, cat: "menus", station: "kitchen", isMenu: true },
       composition,
       course,
       courseStatus,
       station,
+      addedAt: Date.now(),
     });
   };
 
@@ -757,8 +821,8 @@ export default function App() {
       const socket = getSocket();
       if (socket && socket.connected) {
         socket.emit("closing:process_z", payload, (res) => {
-          if (res && res.success) {
-            pushToast(`✅ Clôture Z n°${res.closing?.zNumber || ""} validée avec succès`, "server");
+          if (res && res.ok) {
+            pushToast(`✅ Clôture ${res.closing?.reportNumber || "Z"} validée avec succès`, "server");
             resolve(res);
           } else {
             pushToast(`❌ Erreur lors du Z : ${res?.error || "Inconnue"}`, "warn");
@@ -766,9 +830,8 @@ export default function App() {
           }
         });
       } else {
-        enqueueAction("closing:process_z", payload);
-        pushToast("Clôture Z enregistrée en file locale (hors-ligne)", "server");
-        resolve({ success: true, offline: true });
+        pushToast("Clôture Z impossible hors-ligne : reconnectez la caisse au serveur", "warn");
+        reject(new Error("offline"));
       }
     });
   };
@@ -795,8 +858,8 @@ export default function App() {
 
     const finalMethod = paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
 
-    // Numéro de facture séquentiel lisible
-    const ticketNumber = meta?.ticketNumber || null; // Le serveur génère le numéro de facture définitif
+    // Numéro provisoire : le numéro de facture définitif est attribué par le serveur (history:new_entry)
+    const ticketNumber = `PROV-${order.id}`;
 
     const receipt = {
       id: uid("rcpt"),
@@ -853,16 +916,11 @@ export default function App() {
       )
     );
 
+    // Montants, remise, TVA et numéro de ticket sont recalculés par le serveur
     emitOrQueue("order:checkout", {
       orderId,
       paymentMethod: finalMethod,
       payments: paymentList,
-      serverName,
-      subtotal,
-      total,
-      discount,
-      vatDetails,
-      ticketNumber,
       tip: Number(meta?.tip || 0),
     });
 
@@ -1052,19 +1110,19 @@ export default function App() {
     setReservations((prev) =>
       prev.map((r) => (r.id === reservationId ? { ...r, status } : r))
     );
-    emitOrQueue("reservation:update_status", { reservationId, status });
+    emitOrQueue("reservation:update_status", { id: reservationId, status });
   };
 
   const handleAssignReservationTable = (reservationId, tableId) => {
     setReservations((prev) =>
       prev.map((r) => (r.id === reservationId ? { ...r, tableId } : r))
     );
-    emitOrQueue("reservation:assign_table", { reservationId, tableId });
+    emitOrQueue("reservation:assign_table", { id: reservationId, tableId });
   };
 
   const handleDeleteReservation = (reservationId) => {
     setReservations((prev) => prev.filter((r) => r.id !== reservationId));
-    emitOrQueue("reservation:delete", { reservationId });
+    emitOrQueue("reservation:delete", { id: reservationId });
     pushToast("Réservation supprimée", "server");
   };
 
@@ -1072,8 +1130,8 @@ export default function App() {
     setReservations((prev) =>
       prev.map((r) => (r.id === reservation.id ? { ...r, status: "seated", tableId: table.id } : r))
     );
-    emitOrQueue("reservation:assign_table", { reservationId: reservation.id, tableId: table.id });
-    emitOrQueue("reservation:update_status", { reservationId: reservation.id, status: "seated" });
+    emitOrQueue("reservation:assign_table", { id: reservation.id, tableId: table.id });
+    emitOrQueue("reservation:update_status", { id: reservation.id, status: "seated" });
 
     setActiveTableId(table.id);
     ensureOrderForTable(table.id);
@@ -1085,11 +1143,20 @@ export default function App() {
 
   // ── Actions Gestion : tables ───────────────────────────────
   const tableHasActiveOrder = (tableId) => orders.some((o) => o.tableId === tableId);
-  const addTable    = (data) => setTables((prev) => [...prev, { id: uid("tbl"), reserved: false, alert: false, x: 50, y: 50, ...data }]);
-  const updateTable = (id, data) => setTables((prev) => prev.map((t) => (t.id === id ? { ...t, ...data } : t)));
+  // Back-office persisté côté serveur (ManagementGateway) : mise à jour optimiste, puis liste diffusée par le serveur
+  const addTable = (data) => {
+    const id = uid("tbl");
+    setTables((prev) => [...prev, { id, reserved: false, alert: false, x: 50, y: 50, ...data }]);
+    emitOrQueue("table:create", { id, ...data });
+  };
+  const updateTable = (id, data) => {
+    setTables((prev) => prev.map((t) => (t.id === id ? { ...t, ...data } : t)));
+    emitOrQueue("table:update", { id, data });
+  };
   const deleteTable = (id) => {
     if (tableHasActiveOrder(id)) { pushToast("Impossible de supprimer : commande en cours", "warn"); return false; }
     setTables((prev) => prev.filter((t) => t.id !== id));
+    emitOrQueue("table:delete", { id });
     return true;
   };
 
@@ -1182,18 +1249,51 @@ export default function App() {
   };
 
   // ── Actions Gestion : menus ────────────────────────────────
-  const addMenu    = (data) => setMenus((prev) => [...prev, { id: uid("menu"), groups: [], ...data }]);
-  const updateMenu = (id, data) => setMenus((prev) => prev.map((m) => (m.id === id ? { ...m, ...data } : m)));
-  const deleteMenu = (id) => setMenus((prev) => prev.filter((m) => m.id !== id));
+  const addMenu = (data) => {
+    const id = uid("menu");
+    setMenus((prev) => [...prev, { id, groups: [], ...data }]);
+    emitOrQueue("menu:create", { id, ...data });
+  };
+  const updateMenu = (id, data) => {
+    setMenus((prev) => prev.map((m) => (m.id === id ? { ...m, ...data } : m)));
+    emitOrQueue("menu:update", { id, data });
+  };
+  const deleteMenu = (id) => {
+    setMenus((prev) => prev.filter((m) => m.id !== id));
+    emitOrQueue("menu:delete", { id });
+  };
 
   // ── Actions Gestion : équipe & rôles ────────────────────────
-  const addStaff    = (data) => setStaff((prev) => [...prev, { id: uid("stf"), ...data }]);
-  const updateStaff = (id, data) => setStaff((prev) => prev.map((s) => (s.id === id ? { ...s, ...data } : s)));
-  const deleteStaff = (id) => setStaff((prev) => prev.filter((s) => s.id !== id));
+  // Le PIN part au serveur (haché en bcrypt) mais n'est jamais conservé dans l'état local
+  const addStaff = (data) => {
+    const id = uid("stf");
+    const { pin: _pin, ...publicData } = data;
+    setStaff((prev) => [...prev, { id, ...publicData }]);
+    emitOrQueue("staff:create", { id, ...data });
+  };
+  const updateStaff = (id, data) => {
+    const { pin: _pin, ...publicData } = data;
+    setStaff((prev) => prev.map((s) => (s.id === id ? { ...s, ...publicData } : s)));
+    emitOrQueue("staff:update", { id, data });
+  };
+  const deleteStaff = (id) => {
+    setStaff((prev) => prev.filter((s) => s.id !== id));
+    emitOrQueue("staff:delete", { id });
+  };
 
-  const addRole    = (data) => setRoles((prev) => [...prev, { id: uid("role"), isSystem: false, ...data }]);
-  const updateRole = (id, data) => setRoles((prev) => prev.map((r) => (r.id === id ? { ...r, ...data } : r)));
-  const deleteRole = (id) => setRoles((prev) => prev.filter((r) => r.id !== id));
+  const addRole = (data) => {
+    const id = uid("role");
+    setRoles((prev) => [...prev, { id, isSystem: false, ...data }]);
+    emitOrQueue("role:create", { id, ...data });
+  };
+  const updateRole = (id, data) => {
+    setRoles((prev) => prev.map((r) => (r.id === id ? { ...r, ...data } : r)));
+    emitOrQueue("role:update", { id, data });
+  };
+  const deleteRole = (id) => {
+    setRoles((prev) => prev.filter((r) => r.id !== id));
+    emitOrQueue("role:delete", { id });
+  };
 
   // ── Actions Gestion : stocks & fiches techniques (Phase 2) ──
   const handleAddStockMovement = (data) => {
@@ -1383,7 +1483,6 @@ export default function App() {
             tables={tables}
             orders={orders}
             reservations={reservations}
-            now={now}
             onOpen={openTable}
             onToggleAlert={toggleAlert}
             onOpenReservations={() => setIsReservationModalOpen(true)}
@@ -1397,7 +1496,6 @@ export default function App() {
           <OrderTaking
             table={activeTable}
             order={activeOrder}
-            now={now}
             products={combinedProducts}
             recipes={recipes}
             ingredients={ingredients}
@@ -1439,7 +1537,6 @@ export default function App() {
             setView={setCuisineView}
             tables={tables}
             orders={orders}
-            now={now}
             products={combinedProducts}
             config={config}
             onStart={startPrep}

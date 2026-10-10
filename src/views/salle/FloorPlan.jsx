@@ -1,3 +1,4 @@
+import { useNow } from "../../hooks/index.js";
 import { Users, Clock, Lock, CalendarClock, ArrowRightLeft } from "lucide-react";
 import { tableStatus, STATUS_META, orderTotal, elapsed } from "../../utils/index.js";
 import { useModules } from "../../hooks/useModules.js";
@@ -17,13 +18,13 @@ export default function FloorPlan({
   tables,
   orders,
   reservations = [],
-  now,
   onOpen,
   onToggleAlert,
   onOpenReservations,
   onOpenTableAction,
   isMobile,
 }) {
+  const now = useNow();
   const { hasReservations } = useModules();
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayReservations = reservations.filter((r) => r.date === todayStr && r.status !== "cancelled");

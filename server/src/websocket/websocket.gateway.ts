@@ -8,7 +8,8 @@ import {
   MessageBody,
 } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
-import { Injectable, Logger, UseGuards, UsePipes, ValidationPipe } from "@nestjs/common";
+import { Injectable, Logger, UseGuards, UseInterceptors, ValidationPipe } from "@nestjs/common";
+import { ClientActionInterceptor } from "./client-action.interceptor";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthService } from "../auth/auth.service";
 import { OrdersService } from "../orders/orders.service";
@@ -20,21 +21,26 @@ import { PrinterService } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
+import { JournalService } from "../journal/journal.service";
+import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
+import { WsAuthGuard, authenticateSocket } from "../auth/guards/ws-auth.guard";
+import { Public } from "../auth/decorators/public.decorator";
+import { ALLOWED_ORIGINS } from "../cors";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
-import { AddItemDto } from "../orders/dto/add-item.dto";
-import { ChangeQtyDto } from "../orders/dto/change-qty.dto";
 import { CheckoutDto } from "../orders/dto/checkout.dto";
 import { StockMovementDto } from "../stock/dto/stock-movement.dto";
 import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto";
-import { CreateReservationDto } from "../tables/dto/reservation.dto";
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') || ["http://localhost:5173", "http://localhost:4173"],
+    origin: ALLOWED_ORIGINS,
   },
 })
-@UseGuards(WsPermissionsGuard)
+// 🔒 Toute action exige une session valide (sauf @Public), puis les permissions déclarées
+@UseGuards(WsAuthGuard, WsPermissionsGuard)
+// Idempotence : une action déjà appliquée (même clientActionId) n'est jamais rejouée
+@UseInterceptors(ClientActionInterceptor)
 @Injectable()
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -53,12 +59,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     private printerService: PrinterService,
     private recipesService: RecipesService,
     private closingService: ClosingService,
-    private catalogService: CatalogService
+    private catalogService: CatalogService,
+    private journal: JournalService
   ) {}
 
   async handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
     try {
+      // Sans session : uniquement de quoi afficher l'écran de connexion PIN
+      if (!authenticateSocket(client, this.authService)) {
+        client.emit("sync:init", await this.getPublicState());
+        client.emit("auth:required");
+        return;
+      }
+      client.emit("auth:ok");
       const fullState = await this.getFullState();
       client.emit("sync:init", fullState);
     } catch (err) {
@@ -68,6 +82,23 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+  }
+
+  /**
+   * État minimal exposé avant authentification (sélection de l'équipier au clavier PIN)
+   */
+  private async getPublicState() {
+    const [staff, roles] = await Promise.all([
+      this.prisma.staff.findMany({
+        where: { active: true },
+        select: { id: true, name: true, roleId: true, active: true, avatarBg: true },
+      }),
+      this.prisma.role.findMany(),
+    ]);
+    return {
+      staff,
+      roles: roles.map((r) => ({ ...r, permissions: JSON.parse(r.permissions || "[]") })),
+    };
   }
 
   /**
@@ -94,8 +125,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         where: { status: "open" },
         include: { items: true, table: true },
       }),
-      this.prisma.product.findMany(),
-      this.prisma.menu.findMany(),
+      this.catalogService.getProducts(),
+      this.catalogService.getMenus(),
       this.prisma.role.findMany(),
       // 🔒 Sécurité Axe 1 : EXCLUSION TOTALE des PINs
       this.prisma.staff.findMany({
@@ -116,13 +147,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.prisma.ingredient.findMany({
         orderBy: { name: "asc" },
       }),
-      this.prisma.recipeItem.findMany({
-        include: {
-          ingredient: {
-            select: { id: true, name: true, unit: true, costPerUnit: true, currentStock: true },
-          },
-        },
-      }),
+      this.recipesService.listItems(),
       this.prisma.stockMovement.findMany({
         take: 60,
         orderBy: { createdAt: "desc" },
@@ -141,57 +166,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const parsedOrders = rawOrders.map((o) => this.ordersService.formatOrder(o));
 
-    const parsedProducts = products.map((p) => ({
-      ...p,
-      emoji: p.emoji || "🍽️",
-      allergens: JSON.parse(p.allergens || "[]"),
-    }));
-
-    const parsedMenus = menus.map((m) => ({
-      ...m,
-      emoji: m.emoji || "📋",
-      groups: JSON.parse(m.groups || "[]"),
-    }));
-
     const parsedRoles = roles.map((r) => ({
       ...r,
       permissions: JSON.parse(r.permissions || "[]"),
     }));
 
-    const parsedHistory = rawHistory.map((h) => ({
-      id: h.id,
-      orderId: h.orderId,
-      ticketNumber: h.ticketNumber,
-      tableNumber: h.tableNumber,
-      server: h.server,
-      items: JSON.parse(h.items || "[]"),
-      subtotal: h.subtotal ?? h.total,
-      total: h.total,
-      discount: h.discount ? JSON.parse(h.discount) : null,
-      vatDetails: h.vatDetails ? JSON.parse(h.vatDetails) : null,
-      paymentMethod: h.paymentMethod,
-      payments: JSON.parse(h.payments || "[]"),
-      tip: h.tip ?? 0,
-      createdAt: h.createdAt.getTime(),
-    }));
+    const parsedHistory = rawHistory.map(toClientHistory);
 
     const parsedIngredients = rawIngredients.map((ing) => ({
       ...ing,
       status: ing.currentStock <= 0 ? "out" : ing.currentStock <= ing.minThreshold ? "low" : "ok",
       stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
-    }));
-
-    const parsedRecipes = rawRecipes.map((rc) => ({
-      id: rc.id,
-      productId: rc.productId,
-      ingredientId: rc.ingredientId,
-      ingredientName: rc.ingredient.name,
-      quantity: rc.quantity,
-      unit: rc.unit,
-      costPerUnit: rc.ingredient.costPerUnit,
-      currentStock: rc.ingredient.currentStock,
-      isCritical: rc.isCritical,
-      notes: rc.notes || "",
     }));
 
     const parsedMovements = rawMovements.map((m) => ({
@@ -212,13 +197,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     return {
       tables,
       orders: parsedOrders,
-      products: parsedProducts,
-      menus: parsedMenus,
+      products,
+      menus,
       roles: parsedRoles,
       staff,
       history: parsedHistory,
       ingredients: parsedIngredients,
-      recipes: parsedRecipes,
+      recipes: rawRecipes,
       stockMovements: parsedMovements,
       config: rawConfig,
       reservations: rawReservations,
@@ -228,12 +213,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Synchronisation & Auth (Axe 1) ──────────────────────────────────
 
+  @Public()
   @SubscribeMessage("sync:request")
-  async handleSyncRequest(@ConnectedSocket() _client: Socket) {
+  async handleSyncRequest(@ConnectedSocket() client: Socket) {
+    if (!authenticateSocket(client, this.authService)) {
+      return { ok: true, state: await this.getPublicState(), authRequired: true };
+    }
     const fullState = await this.getFullState();
     return { ok: true, state: fullState };
   }
 
+  @Public()
   @SubscribeMessage("auth:verify_pin")
   async handleVerifyPin(@MessageBody() data: { pin: string; staffId?: string }) {
     try {
@@ -322,16 +312,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage("order:add_item")
-  async handleAddItem(@MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: AddItemDto) {
+  async handleAddItem(@MessageBody() data: any) {
     try {
-      const order = await this.ordersService.addItem({
-        orderId: data.orderId,
-        product: data.product || { id: data.productId || "", name: "Article", price: data.price || 0 },
-        composition: data.composition,
-        course: data.course,
-        courseStatus: data.courseStatus,
-        station: data.station,
-      });
+      const order = await this.ordersService.addItem(data);
       this.server.emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
@@ -388,15 +371,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           this.server.emit("stock:alert", { message: msg });
         }
         if (stockResult.affectedProducts.length > 0) {
-          const allProducts = await this.prisma.product.findMany();
-          this.server.emit(
-            "catalog:products_updated",
-            allProducts.map((p) => ({
-              ...p,
-              emoji: p.emoji || "🍽️",
-              allergens: JSON.parse(p.allergens || "[]"),
-            }))
-          );
+          this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
         }
         this.server.emit("stock:updated", stockResult.refreshedIngredients);
         this.server.emit("stock:movements_updated", stockResult.recentMovements);
@@ -526,11 +501,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.discount")
   @SubscribeMessage("order:discount:apply")
-  async handleApplyDiscount(@MessageBody() data: { orderId: string; discount: any }) {
+  async handleApplyDiscount(@ConnectedSocket() client: Socket, @MessageBody() data: { orderId: string; discount: any }) {
     try {
       const res = await this.billingService.applyDiscount(data.orderId, data.discount);
       const formatted = this.ordersService.formatOrder(res.order);
       this.server.emit("order:updated", formatted);
+      await this.journal.log("DISCOUNT_APPLY", { staffId: client.data.user.staffId, name: client.data.user.name }, { orderId: data.orderId, discount: formatted.discount });
       return { ok: true, order: formatted };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -539,11 +515,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.discount")
   @SubscribeMessage("order:discount:remove")
-  async handleRemoveDiscount(@MessageBody() data: { orderId: string }) {
+  async handleRemoveDiscount(@ConnectedSocket() client: Socket, @MessageBody() data: { orderId: string }) {
     try {
       const res = await this.billingService.removeDiscount(data.orderId);
       const formatted = this.ordersService.formatOrder(res.order);
       this.server.emit("order:updated", formatted);
+      await this.journal.log("DISCOUNT_REMOVE", { staffId: client.data.user.staffId, name: client.data.user.name }, { orderId: data.orderId });
       return { ok: true, order: formatted };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -553,10 +530,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("caisse.checkout")
   @SubscribeMessage("order:checkout")
   async handleCheckout(
+    @ConnectedSocket() client: Socket,
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CheckoutDto
   ) {
     try {
-      const res = await this.billingService.processCheckout(data);
+      const res = await this.billingService.processCheckout({ ...data, serverName: client.data.user.name });
 
       this.server.emit("order:closed", { orderId: res.orderId });
       this.server.emit("table:updated", res.table);
@@ -592,15 +570,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Impression Matérielle Directe (Axe 4) ───────────────────────────
 
-  @RequirePermissions("admin.printers")
+  // Anti-SSRF : seules les IP d'imprimantes déclarées dans la configuration sont joignables
+  private async assertKnownPrinterIp(ip: string) {
+    const cfg = await this.configService.getConfig();
+    const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
+    if (!allowedIps.includes(ip)) {
+      throw new Error(`IP ${ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.`);
+    }
+  }
+
+  @RequirePermissions("caisse.settings")
   @SubscribeMessage("printer:test")
   async handlePrinterTest(@MessageBody() data: { ip: string; port?: number }) {
     try {
-      const cfg = await this.configService.getConfig();
-      const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
-      if (!allowedIps.includes(data.ip)) {
-        return { success: false, error: `IP ${data.ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.` };
-      }
+      await this.assertKnownPrinterIp(data.ip);
       const res = await this.printerService.testPrinter(data.ip, data.port || 9100);
       return res;
     } catch (err: any) {
@@ -608,15 +591,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("admin.printers")
+  @RequirePermissions("caisse.settings")
   @SubscribeMessage("printer:send_raw")
   async handlePrinterSendRaw(@MessageBody() data: { ip: string; port?: number; buffer: number[] | string }) {
     try {
-      const cfg = await this.configService.getConfig();
-      const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
-      if (!allowedIps.includes(data.ip)) {
-        return { success: false, error: `IP ${data.ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.` };
-      }
+      await this.assertKnownPrinterIp(data.ip);
       const buffer = Array.isArray(data.buffer)
         ? Buffer.from(data.buffer)
         : Buffer.from(data.buffer, "base64");
@@ -637,10 +616,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("config:update")
-  async handleUpdateConfig(@MessageBody() data: any) {
+  async handleUpdateConfig(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
       const updated = await this.configService.updateConfig(data);
       this.server.emit("config:updated", updated);
+      await this.journal.log("CONFIG_UPDATE", { staffId: client.data.user.staffId, name: client.data.user.name }, { fields: Object.keys(data || {}) });
       return { ok: true, config: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -649,77 +629,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("config:update_modules")
-  async handleUpdateModules(@MessageBody() data: { modules: any }) {
+  async handleUpdateModules(@ConnectedSocket() client: Socket, @MessageBody() data: { modules: any }) {
     try {
       const updated = await this.configService.updateModulesConfig(data.modules);
       this.server.emit("config:modules_updated", updated.modulesConfig);
       this.server.emit("config:updated", updated);
+      await this.journal.log("CONFIG_UPDATE", { staffId: client.data.user.staffId, name: client.data.user.name }, { fields: ["modulesConfig"] });
       return { ok: true, modulesConfig: updated.modulesConfig };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  // ── Réservations ────────────────────────────────────────────────────
-
-  @SubscribeMessage("reservation:create")
-  async handleCreateReservation(@MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CreateReservationDto) {
-    try {
-      const res = await this.prisma.reservation.create({
-        data: {
-          id: data.id || `res_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          customerName: data.customerName,
-          phone: data.phone,
-          email: data.email || null,
-          date: data.date,
-          time: data.time,
-          guests: Number(data.guests) || 2,
-          status: data.status || "confirmed",
-          tableId: data.tableId || null,
-          notes: data.notes || null,
-        },
-      });
-      this.server.emit("reservation:created", res);
-      return { ok: true, reservation: res };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  @SubscribeMessage("reservation:update_status")
-  async handleUpdateReservationStatus(@MessageBody() data: { id: string; status: string }) {
-    try {
-      const res = await this.prisma.reservation.update({
-        where: { id: data.id },
-        data: { status: data.status },
-      });
-      this.server.emit("reservation:updated", res);
-      return { ok: true, reservation: res };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  @SubscribeMessage("reservation:assign_table")
-  async handleAssignReservationTable(@MessageBody() data: { id: string; tableId: string | null }) {
-    try {
-      const res = await this.prisma.reservation.update({
-        where: { id: data.id },
-        data: { tableId: data.tableId },
-      });
-      this.server.emit("reservation:updated", res);
-      return { ok: true, reservation: res };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  @SubscribeMessage("reservation:delete")
-  async handleDeleteReservation(@MessageBody() data: { id: string }) {
-    try {
-      await this.prisma.reservation.delete({ where: { id: data.id } });
-      this.server.emit("reservation:deleted", { id: data.id });
-      return { ok: true, id: data.id };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
@@ -767,15 +683,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.server.emit("stock:movements_updated", movements);
 
       if (result.affectedProducts.length > 0) {
-        const products = await this.prisma.product.findMany();
-        this.server.emit(
-          "catalog:products_updated",
-          products.map((p) => ({
-            ...p,
-            emoji: p.emoji || "🍽️",
-            allergens: JSON.parse(p.allergens || "[]"),
-          }))
-        );
+        this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
       }
 
       return { ok: true, movement: result.movement, ingredient: result.ingredient };
@@ -846,25 +754,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleSaveRecipe(@MessageBody() data: { productId: string; items: any[] }) {
     try {
       await this.recipesService.saveRecipe(data.productId, data.items);
-      const recipes = await this.prisma.recipeItem.findMany({
-        include: {
-          ingredient: {
-            select: { id: true, name: true, unit: true, costPerUnit: true, currentStock: true },
-          },
-        },
-      });
-      const parsedRecipes = recipes.map((rc) => ({
-        id: rc.id,
-        productId: rc.productId,
-        ingredientId: rc.ingredientId,
-        ingredientName: rc.ingredient.name,
-        quantity: rc.quantity,
-        unit: rc.unit,
-        costPerUnit: rc.ingredient.costPerUnit,
-        currentStock: rc.ingredient.currentStock,
-        isCritical: rc.isCritical,
-        notes: rc.notes || "",
-      }));
+      const parsedRecipes = await this.recipesService.listItems();
       this.server.emit("recipe:updated", parsedRecipes);
       return { ok: true, recipes: parsedRecipes };
     } catch (err: any) {
@@ -893,25 +783,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const allProducts = await this.catalogService.getProducts();
       const allIngredients = await this.stockService.findAllIngredients();
       const movements = await this.stockService.getMovements(60);
-      const recipes = await this.prisma.recipeItem.findMany({
-        include: {
-          ingredient: {
-            select: { id: true, name: true, unit: true, costPerUnit: true, currentStock: true },
-          },
-        },
-      });
-      const parsedRecipes = recipes.map((rc) => ({
-        id: rc.id,
-        productId: rc.productId,
-        ingredientId: rc.ingredientId,
-        ingredientName: rc.ingredient.name,
-        quantity: rc.quantity,
-        unit: rc.unit,
-        costPerUnit: rc.ingredient.costPerUnit,
-        currentStock: rc.ingredient.currentStock,
-        isCritical: rc.isCritical,
-        notes: rc.notes || "",
-      }));
+      const parsedRecipes = await this.recipesService.listItems();
 
       this.server.emit("catalog:products_updated", allProducts);
       this.server.emit("stock:updated", allIngredients);
@@ -962,15 +834,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         data: { available: !p.available },
       });
 
-      const allProducts = await this.prisma.product.findMany();
-      this.server.emit(
-        "catalog:products_updated",
-        allProducts.map((prod) => ({
-          ...prod,
-          emoji: prod.emoji || "🍽️",
-          allergens: JSON.parse(prod.allergens || "[]"),
-        }))
-      );
+      this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
       return { ok: true, product: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -979,6 +843,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Clôture de Caisse & Conformité Fiscale (ClosingService - Phase 7) ──
 
+  @RequirePermissions("caisse.close", "caisse.history")
   @SubscribeMessage("closing:get_x")
   async handleGetXReport() {
     try {
@@ -989,12 +854,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("caisse.checkout", "caisse.settings")
+  @RequirePermissions("caisse.close")
   @SubscribeMessage("closing:process_z")
-  async handleProcessZClosing(@MessageBody() data: any) {
+  async handleProcessZClosing(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
       const zReport = await this.closingService.processZClosing({
-        closedBy: data.closedBy,
+        // Le Z est signé au nom de la session, jamais d'un nom fourni par le client
+        closedBy: client.data.user.name,
         openingCash: data.openingCash,
         countedCash: data.countedCash,
         notes: data.notes,
@@ -1002,6 +868,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       // Diffusion temps réel de la nouvelle clôture Z à tous les postes connectés
       this.server.emit("closing:new_z", zReport);
+      await this.journal.log("Z_CLOSING", { staffId: client.data.user.staffId, name: client.data.user.name }, { reportNumber: zReport.reportNumber, totalNet: zReport.totalNet });
 
       // Recharger l'état de la config et de l'historique
       const updatedConfig = await this.configService.getConfig();
@@ -1013,6 +880,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.close", "caisse.history")
   @SubscribeMessage("closing:get_history")
   async handleGetClosingHistory(@MessageBody() data?: { limit?: number }) {
     try {
@@ -1023,21 +891,57 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.fec", "caisse.close")
   @SubscribeMessage("closing:verify_chain")
-  async handleVerifyFiscalChain() {
+  async handleVerifyFiscalChain(@ConnectedSocket() client: Socket) {
     try {
       const audit = await this.closingService.verifyFiscalChainIntegrity();
+      await this.journal.log("AUDIT_RUN", { staffId: client.data.user.staffId, name: client.data.user.name }, { status: audit.status, errors: audit.errors.length });
       return { ok: true, audit };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("caisse.fec")
   @SubscribeMessage("closing:get_fec")
-  async handleGetFecExport(@MessageBody() data?: any) {
+  async handleGetFecExport(@ConnectedSocket() client: Socket, @MessageBody() data?: any) {
     try {
       const fec = await this.closingService.generateFecExport(data || {});
+      if (data?.download) {
+        await this.journal.log("FEC_EXPORT", { staffId: client.data.user.staffId, name: client.data.user.name }, { fileName: fec.fileName, startDate: data.startDate, endDate: data.endDate });
+      }
       return { ok: true, fec };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  // ── Avoirs & Journal des événements (NF525) ─────────────────────────
+
+  @RequirePermissions("caisse.close")
+  @SubscribeMessage("history:refund")
+  async handleRefund(@ConnectedSocket() client: Socket, @MessageBody() data: { historyId: string; reason: string }) {
+    try {
+      const creditNote = await this.billingService.refundTicket(data?.historyId, data?.reason, client.data.user.name);
+      this.server.emit("history:new_entry", creditNote);
+      await this.journal.log("CREDIT_NOTE", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+        ticketNumber: creditNote.ticketNumber,
+        refTicketNumber: creditNote.refTicketNumber,
+        total: creditNote.total,
+        reason: creditNote.reason,
+      });
+      return { ok: true, history: creditNote };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("caisse.fec", "caisse.close")
+  @SubscribeMessage("journal:list")
+  async handleJournalList(@MessageBody() data?: { limit?: number }) {
+    try {
+      return { ok: true, events: await this.journal.list(Math.min(Number(data?.limit) || 200, 1000)) };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

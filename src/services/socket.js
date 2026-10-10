@@ -16,6 +16,30 @@ function getSavedToken() {
   }
 }
 
+/**
+ * Vrai si un jeton serveur non expiré est présent (le jeton "offline-token" du mode hors-ligne ne compte pas).
+ * Lecture de l'expiration seulement : la signature reste vérifiée par le serveur.
+ */
+export function hasValidSessionToken() {
+  const token = getSavedToken();
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" && payload.exp > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Oublie le jeton sans forcer de reconnexion (utilisé quand le serveur exige une nouvelle connexion PIN)
+ */
+export function clearSessionToken() {
+  try {
+    localStorage.removeItem("rf_session_token");
+  } catch {}
+  if (socket) socket.auth = {};
+}
+
 export function setSocketToken(token) {
   try {
     if (token) {

@@ -25,26 +25,9 @@ export class WsPermissionsGuard implements CanActivate {
       return true;
     }
 
+    // WsAuthGuard (exécuté avant) a déjà authentifié le socket
     const client: Socket = context.switchToWs().getClient();
-    const data = context.switchToWs().getData();
-
-    let user: SessionPayload | null = client.data?.user || null;
-
-    if (!user) {
-      const token =
-        client.handshake?.auth?.token ||
-        (client.handshake?.headers?.authorization?.startsWith("Bearer ")
-          ? client.handshake.headers.authorization.slice(7)
-          : null) ||
-        (typeof data === "object" && data !== null ? data._token || data.token : null);
-
-      if (token) {
-        user = this.authService.verifyToken(token);
-        if (user) {
-          client.data.user = user;
-        }
-      }
-    }
+    const user: SessionPayload | null = client.data?.user || null;
 
     if (!user) {
       throw new WsException("Authentification requise pour effectuer cette opération");

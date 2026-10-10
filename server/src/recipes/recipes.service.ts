@@ -13,6 +13,25 @@ export interface RecipeItemPayload {
 export class RecipesService {
   constructor(private prisma: PrismaService) {}
 
+  /** Lignes de fiches techniques au format client (sync:init, recipe:updated) */
+  async listItems() {
+    const recipes = await this.prisma.recipeItem.findMany({
+      include: { ingredient: { select: { name: true, costPerUnit: true, currentStock: true } } },
+    });
+    return recipes.map((rc) => ({
+      id: rc.id,
+      productId: rc.productId,
+      ingredientId: rc.ingredientId,
+      ingredientName: rc.ingredient.name,
+      quantity: rc.quantity,
+      unit: rc.unit,
+      costPerUnit: rc.ingredient.costPerUnit,
+      currentStock: rc.ingredient.currentStock,
+      isCritical: rc.isCritical,
+      notes: rc.notes || "",
+    }));
+  }
+
   async findAll() {
     const products = await this.prisma.product.findMany({
       where: { isMenu: false },

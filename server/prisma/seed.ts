@@ -1,5 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import * as crypto from "crypto";
+import { computeVatBreakdown } from "../src/billing/pricing";
+import { GENESIS_TICKET, signTicket } from "../src/billing/fiscal";
+
+// Clé de scellement NF525 propre à cette installation
+const nf525Key = crypto.randomBytes(32).toString("hex");
 
 const prisma = new PrismaClient();
 
@@ -103,7 +109,7 @@ const INITIAL_ROLES = [
     isSystem: false,
     permissions: [
       "salle.view", "salle.order", "salle.send_kitchen", "salle.serve", "salle.reservations", "salle.alerts",
-      "caisse.checkout", "caisse.split", "caisse.history", "caisse.discount", "gestion.tables", "gestion.stocks", "dashboard.view",
+      "caisse.checkout", "caisse.split", "caisse.history", "caisse.discount", "caisse.close", "gestion.tables", "gestion.stocks", "dashboard.view",
     ],
   },
   {
@@ -131,7 +137,7 @@ const INITIAL_ROLES = [
     description: "Suivi des ventes, consultation des rapports financiers et historique complet des paiements.",
     color: "#6B5B95",
     isSystem: false,
-    permissions: ["caisse.history", "dashboard.view"],
+    permissions: ["caisse.history", "caisse.fec", "dashboard.view"],
   },
 ];
 
@@ -272,6 +278,21 @@ const RECIPES_SEED = [
 async function main() {
   console.log("Seeding RestoFlow Database...");
 
+  // Base de démonstration : on lève les verrous NF525 (recréés au démarrage du serveur) pour tout réinitialiser
+  for (const trigger of [
+    "nf525_ticket_no_delete",
+    "nf525_ticket_frozen",
+    "nf525_ticket_z_once",
+    "nf525_z_no_update",
+    "nf525_z_no_delete",
+    "nf525_jet_no_update",
+    "nf525_jet_no_delete",
+  ]) {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${trigger}`);
+  }
+  await prisma.eventLog.deleteMany({});
+  await prisma.dailyClosing.deleteMany({});
+
   // Clear existing data in correct dependency order
   await prisma.restaurantConfig.deleteMany({});
   await prisma.stockMovement.deleteMany({});
@@ -291,6 +312,7 @@ async function main() {
   // 0. Configuration Restaurant & Imprimantes (Phase 3)
   await prisma.restaurantConfig.create({
     data: {
+      nf525Key,
       id: "default",
       name: "RestoFlow Bistrot",
       legalName: "RESTOFLOW BISTROT SAS",
@@ -528,9 +550,10 @@ async function main() {
     ],
   });
 
-  // 8. Order History (for Dashboard)
+  // 8. Order History (for Dashboard) — tickets numérotés, chaînés et signés comme en production
   const servers = ["Léa", "Marco", "Inès"];
   const paymentMethods = ["carte", "especes", "partage"];
+  const demoTickets: any[] = [];
 
   for (let d = 6; d >= 0; d--) {
     const dayTimestamp = now.getTime() - d * 86400000;
@@ -540,28 +563,47 @@ async function main() {
       const server = servers[Math.floor(Math.random() * servers.length)];
       const method = paymentMethods[Math.floor(Math.random() * paymentMethods.length)];
       const items = [
-        { id: `hist_it_${d}_${j}_1`, productId: "p7", name: "Burger Classic", price: 12, qty: 2, status: "served" },
-        { id: `hist_it_${d}_${j}_2`, productId: "p15", name: "Tiramisu maison", price: 7, qty: 2, status: "served" },
-        { id: `hist_it_${d}_${j}_3`, productId: "p18", name: "Coca-Cola", price: 4, qty: 2, status: "served" },
+        { id: `hist_it_${d}_${j}_1`, productId: "p7", name: "Burger Classic", price: 12, qty: 2, status: "served", vatRate: 10 },
+        { id: `hist_it_${d}_${j}_2`, productId: "p15", name: "Tiramisu maison", price: 7, qty: 2, status: "served", vatRate: 10 },
+        { id: `hist_it_${d}_${j}_3`, productId: "p18", name: "Coca-Cola", price: 4, qty: 2, status: "served", vatRate: 10 },
       ];
-      const total = items.reduce((s, it) => s + it.price * it.qty, 0);
+      const { subtotalCents: _s, discountCents: _d, totalCents, ...vatDetails } = computeVatBreakdown(items);
+      const total = totalCents / 100;
+      const createdAt = new Date(dayTimestamp - j * 1800000);
 
-      await prisma.orderHistory.create({
-        data: {
-          id: `hist_${d}_${j}`,
-          orderId: `ord_old_${d}_${j}`,
-          tableNumber: (j % 12) + 1,
-          server,
-          items: JSON.stringify(items),
-          total,
-          paymentMethod: method,
-          payments: JSON.stringify([
-            { id: `pay_${d}_${j}`, label: "Paiement", amount: total, method, paidAt: dayTimestamp - j * 1800000 },
-          ]),
-          createdAt: new Date(dayTimestamp - j * 1800000),
-        },
+      demoTickets.push({
+        id: `hist_${d}_${j}`,
+        orderId: `ord_old_${d}_${j}`,
+        tableNumber: (j % 12) + 1,
+        server,
+        items: JSON.stringify(items),
+        subtotal: total,
+        total,
+        discount: null,
+        vatDetails: JSON.stringify(vatDetails),
+        paymentMethod: method,
+        payments: JSON.stringify([
+          { id: `pay_${d}_${j}`, label: "Paiement", amount: total, method, paidAt: createdAt.getTime() },
+        ]),
+        type: "SALE",
+        refTicketNumber: null,
+        createdAt,
       });
     }
+  }
+
+  demoTickets.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  let previousHash = GENESIS_TICKET;
+  for (const [idx, t] of demoTickets.entries()) {
+    const fields = {
+      ...t,
+      sequenceNumber: idx + 1,
+      ticketNumber: `FAC-${t.createdAt.getFullYear()}-${String(idx + 1).padStart(4, "0")}`,
+      previousHash,
+    };
+    const signature = signTicket(fields, nf525Key);
+    await prisma.orderHistory.create({ data: { ...fields, signature } });
+    previousHash = signature;
   }
 
   // 9. Reservations (Phase 4)

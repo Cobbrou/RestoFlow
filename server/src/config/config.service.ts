@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import * as crypto from "crypto";
 
 @Injectable()
 export class ConfigService {
@@ -14,6 +15,7 @@ export class ConfigService {
       cfg = await this.prisma.restaurantConfig.create({
         data: {
           id: "default",
+          nf525Key: crypto.randomBytes(32).toString("hex"),
           name: "RestoFlow Bistrot",
           legalName: "RESTOFLOW SAS",
           siret: "987 654 321 00012",
@@ -32,8 +34,10 @@ export class ConfigService {
       });
     }
 
+    // 🔒 La clé de scellement NF525 ne quitte jamais le serveur
+    const { nf525Key: _secret, ...publicCfg } = cfg;
     return {
-      ...cfg,
+      ...publicCfg,
       printers: JSON.parse(cfg.printers || "[]"),
       promoCodes: JSON.parse(cfg.promoCodes || "[]"),
       happyHourConfig: cfg.happyHourConfig ? JSON.parse(cfg.happyHourConfig) : {
@@ -65,6 +69,19 @@ export class ConfigService {
         enableTips: true,
       },
     };
+  }
+
+  /**
+   * Clé secrète de scellement NF525 (usage serveur uniquement)
+   */
+  async getNf525Key(): Promise<string> {
+    await this.getConfig(); // crée la config (et sa clé) si absente
+    const cfg = await this.prisma.restaurantConfig.findUnique({
+      where: { id: "default" },
+      select: { nf525Key: true },
+    });
+    if (!cfg?.nf525Key) throw new Error("Clé NF525 absente de la configuration");
+    return cfg.nf525Key;
   }
 
   async updateConfig(data: any) {

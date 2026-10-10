@@ -77,6 +77,10 @@ export default defineConfig({
       },
     },
   },
+  // Les tests serveur (et leur build compilé) tournent dans server/
+  test: {
+    exclude: ['**/node_modules/**', '**/server/**'],
+  },
   build: {
     chunkSizeWarningLimit: 600,
     rollupOptions: {
@@ -97,8 +101,5 @@ export default defineConfig({
         },
       },
     },
-  },
-  test: {
-    exclude: ['**/node_modules/**', '**/server/**'],
   },
 })
