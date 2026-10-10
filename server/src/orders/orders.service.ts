@@ -281,6 +281,37 @@ export class OrdersService {
     return this.formatOrder(updated);
   }
 
+  /**
+   * Annulation d'un article déjà envoyé en cuisine (motif journalisé par l'appelant).
+   * La ligne est supprimée ou sa quantité réduite : un article annulé n'est jamais facturé.
+   */
+  async voidItem(orderId: string, itemId: string, qty?: number) {
+    const item = await this.prisma.orderItem.findUnique({
+      where: { id: itemId },
+      include: { order: { include: { table: true } } },
+    });
+    if (!item || item.orderId !== orderId) throw new NotFoundException("Article introuvable");
+    if (item.order.status !== "open") throw new BadRequestException("Commande déjà encaissée : émettez un avoir");
+    if (item.status === "draft") throw new BadRequestException("Article non envoyé : supprimez-le directement");
+
+    const voidQty = qty === undefined || qty === null ? item.qty : Number(qty);
+    if (!Number.isInteger(voidQty) || voidQty < 1 || voidQty > item.qty) {
+      throw new BadRequestException("Quantité à annuler invalide");
+    }
+
+    if (voidQty === item.qty) {
+      await this.prisma.orderItem.delete({ where: { id: itemId } });
+    } else {
+      await this.prisma.orderItem.update({ where: { id: itemId }, data: { qty: item.qty - voidQty } });
+    }
+
+    const updated = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, table: true },
+    });
+    return { order: this.formatOrder(updated), item, voidQty, tableNumber: item.order.table?.number };
+  }
+
   async setNote(orderId: string, itemId: string, note: string) {
     await this.prisma.orderItem.update({
       where: { id: itemId },

@@ -162,7 +162,7 @@ export default function App() {
   const management = useManagementActions(store, { emit, pushToast, currentStaff });
 
   const {
-    getActiveOrder, ensureOrderForTable, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem,
+    getActiveOrder, ensureOrderForTable, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem, voidItem,
     setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder,
     toggleAlert, startPrep, markReady, handleCallCourse, handleChangeItemCourse, handleTransferTable,
     handleMergeTable, handleCreateReservation, handleUpdateReservationStatus, handleAssignReservationTable,
@@ -360,6 +360,7 @@ export default function App() {
             onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(activeTable.id, menuProduct, composition)}
             onQty={(itemId, d) => changeQty(activeOrder.id, itemId, d)}
             onRemove={(itemId) => removeItem(activeOrder.id, itemId)}
+            onVoid={(itemId, qty, reason, done) => voidItem(activeOrder.id, itemId, qty, reason, done)}
             onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
             onSend={() => sendToKitchen(activeOrder.id)}
             onServe={() => serveAndMaybeFree(activeOrder.id)}
