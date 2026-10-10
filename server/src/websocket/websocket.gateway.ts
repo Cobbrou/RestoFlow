@@ -889,8 +889,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  // « 86 » : cuisine, responsable de salle (gestion des tables) ou gestion du catalogue
+  @RequirePermissions("cuisine.status", "gestion.tables", "gestion.products")
   @SubscribeMessage("catalog:toggle_product_available")
-  async handleToggleProductAvailable(@MessageBody() data: { productId: string }) {
+  async handleToggleProductAvailable(@ConnectedSocket() client: Socket, @MessageBody() data: { productId: string }) {
     try {
       const p = await this.prisma.product.findUnique({ where: { id: data.productId } });
       if (!p) return { ok: false, error: "Produit introuvable" };
@@ -901,6 +903,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
 
       this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
+      // Annonce « 86 » à tous les postes (salle comprise) pour ne plus vendre le plat
+      this.server.emit("catalog:product_86", { name: updated.name, available: updated.available, by: client.data.user?.name });
       return { ok: true, product: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };

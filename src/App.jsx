@@ -391,6 +391,13 @@ export default function App() {
             config={config}
             onStart={startPrep}
             onReady={markReady}
+            onToggleProductAvailable={
+              ["cuisine.status", "gestion.tables", "gestion.products"].some((p) =>
+                hasPermission(currentStaff, roles.find((r) => r.id === currentStaff?.roleId), p)
+              )
+                ? management.onToggleProductAvailable
+                : null
+            }
           />
         </ErrorBoundary>
       )}
