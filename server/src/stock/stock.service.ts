@@ -304,19 +304,12 @@ export class StockService {
     }));
   }
 
-  async deductForOrder(orderId: string) {
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { items: true, table: true },
-    });
-    if (!order) return null;
-
-    const draftItems = order.items.filter((i) => i.status === "draft");
-    if (draftItems.length === 0) return null;
-
+  /** Besoins en ingrédients d'une liste d'articles (menus composés éclatés par composant) */
+  private async ingredientNeeds(items: { productId: string; name: string; qty: number; isMenu: boolean; composition: string | null }[]) {
+    const deductionMap = new Map<string, { qty: number; ingredient: any; reasons: string[] }>();
     const productQuantities: { productId: string; qty: number; itemName: string }[] = [];
 
-    for (const item of draftItems) {
+    for (const item of items) {
       if (item.isMenu && item.composition) {
         try {
           const comp = typeof item.composition === "string" ? JSON.parse(item.composition) : item.composition;
@@ -347,7 +340,7 @@ export class StockService {
       }
     }
 
-    if (productQuantities.length === 0) return null;
+    if (productQuantities.length === 0) return deductionMap;
 
     const productIds = productQuantities.map((p) => p.productId);
     const recipeItems = await this.prisma.recipeItem.findMany({
@@ -355,7 +348,6 @@ export class StockService {
       include: { ingredient: true, product: true },
     });
 
-    const deductionMap = new Map<string, { qty: number; ingredient: any; reasons: string[] }>();
     for (const pq of productQuantities) {
       const recipes = recipeItems.filter((r) => r.productId === pq.productId);
       for (const rc of recipes) {
@@ -370,7 +362,20 @@ export class StockService {
         deductionMap.set(rc.ingredientId, existing);
       }
     }
+    return deductionMap;
+  }
 
+  async deductForOrder(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, table: true },
+    });
+    if (!order) return null;
+
+    const draftItems = order.items.filter((i) => i.status === "draft");
+    if (draftItems.length === 0) return null;
+
+    const deductionMap = await this.ingredientNeeds(draftItems);
     if (deductionMap.size === 0) return null;
 
     const stockAlerts: string[] = [];
@@ -468,5 +473,45 @@ export class StockService {
         createdAt: m.createdAt.getTime(),
       })),
     };
+  }
+
+  /**
+   * Réintègre les ingrédients d'un article annulé avant sa préparation.
+   * Retourne false si le produit n'a pas de fiche technique (rien à réintégrer).
+   */
+  async returnForVoid(
+    item: { productId: string; name: string; qty: number; isMenu: boolean; composition: string | null },
+    qty: number,
+    orderId: string,
+    tableNumber: number | undefined,
+    staffId: string | null,
+    reason: string
+  ) {
+    const needs = await this.ingredientNeeds([{ ...item, qty }]);
+    if (needs.size === 0) return false;
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const [ingredientId, need] of needs.entries()) {
+        const current = await tx.ingredient.findUnique({ where: { id: ingredientId } });
+        if (!current) continue;
+        await tx.ingredient.update({
+          where: { id: ingredientId },
+          data: { currentStock: current.currentStock + need.qty },
+        });
+        await tx.stockMovement.create({
+          data: {
+            id: `mov_void_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            ingredientId,
+            type: "CANCEL_RETURN",
+            quantity: need.qty,
+            unitCost: current.costPerUnit,
+            orderId,
+            staffId,
+            reason: `Annulation Table ${tableNumber ?? "?"} : ${need.reasons.join(", ")} (${reason})`,
+          },
+        });
+      }
+    });
+    return true;
   }
 }

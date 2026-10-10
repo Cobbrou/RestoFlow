@@ -346,6 +346,72 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  // Annulation d'un article déjà envoyé : même droit que les avoirs, motif obligatoire, journalisée (NF525)
+  @RequirePermissions("caisse.close")
+  @SubscribeMessage("order:void_item")
+  async handleVoidItem(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { orderId: string; itemId: string; qty?: number; reason: string }
+  ) {
+    try {
+      const reason = typeof data?.reason === "string" ? data.reason.trim().slice(0, 200) : "";
+      if (reason.length < 3) throw new Error("Motif d'annulation obligatoire");
+
+      const actor = { staffId: client.data.user.staffId, name: client.data.user.name };
+      const { order, item, voidQty, tableNumber } = await this.ordersService.voidItem(data.orderId, data.itemId, data.qty);
+
+      // Pas encore commencé en cuisine : les ingrédients repartent en stock. Sinon la consommation reste (perte réelle).
+      const restocked =
+        item.status === "new" &&
+        (await this.stockService.returnForVoid(item, voidQty, data.orderId, tableNumber, actor.staffId, reason));
+      if (restocked) {
+        this.server.emit("stock:updated", await this.stockService.findAllIngredients());
+        this.server.emit("stock:movements_updated", await this.stockService.getMovements(60));
+      }
+
+      this.server.emit("order:updated", order);
+      this.server.emit("kitchen:item_voided", {
+        orderId: data.orderId,
+        tableNumber,
+        name: item.name,
+        qty: voidQty,
+        station: item.station,
+        reason,
+        by: actor.name,
+      });
+      await this.journal.log("ITEM_VOID", actor, {
+        orderId: data.orderId,
+        tableNumber,
+        productId: item.productId,
+        name: item.name,
+        qty: voidQty,
+        unitPrice: item.price,
+        statusAtVoid: item.status,
+        restocked: !!restocked,
+        reason,
+      });
+
+      this.attemptAutoVoidPrint(tableNumber, voidQty, item.name, reason, actor.name).catch((e) =>
+        this.logger.warn(`Échec de l'impression réseau du bon d'annulation: ${e.message}`)
+      );
+
+      return { ok: true, order };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  private async attemptAutoVoidPrint(tableNumber: number | undefined, qty: number, name: string, reason: string, by: string) {
+    const cfg = await this.configService.getConfig();
+    const kitchenPrinter = cfg.printers?.find(
+      (p: any) => p.type === "kitchen" && p.interface === "network" && p.enabled && p.ip
+    );
+    if (!kitchenPrinter) return;
+    const rawText = `\x1b\x40\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\nTABLE ${tableNumber ?? "?"}\nPar: ${by}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
+      `${qty}x ${name}\nMotif: ${reason}\n\n\n\x1d\x56\x01`;
+    await this.printerService.sendRaw(kitchenPrinter.ip, kitchenPrinter.port || 9100, Buffer.from(rawText, "latin1"));
+  }
+
   @SubscribeMessage("order:set_note")
   async handleSetNote(
     @MessageBody() data: { orderId: string; itemId: string; note: string }

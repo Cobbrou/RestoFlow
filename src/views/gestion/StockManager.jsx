@@ -477,6 +477,10 @@ export default function StockManager({
                     badgeColor = "#B5793A";
                     badgeBg = "#B5793A15";
                     badgeLabel = "INVENTAIRE";
+                  } else if (mov.type === "CANCEL_RETURN") {
+                    badgeColor = "#6B4226";
+                    badgeBg = "#6B422615";
+                    badgeLabel = "ANNULATION";
                   }
 
                   return (

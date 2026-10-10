@@ -180,6 +180,25 @@ export function useOrderActions(store, {
     emit("order:remove_item", { orderId, itemId });
   };
 
+  // Annulation d'un article envoyé : jamais hors-ligne (droit vérifié, stock et journal NF525 côté serveur)
+  const voidItem = (orderId, itemId, qty, reason, done) => {
+    const socket = getSocket();
+    if (!socket?.connected) {
+      pushToast("Annulation impossible hors-ligne : reconnectez le terminal au serveur", "warn");
+      done?.(false);
+      return;
+    }
+    socket.emit("order:void_item", { orderId, itemId, qty, reason }, (res) => {
+      if (res?.ok) {
+        setOrders((prev) => prev.map((o) => (o.id === res.order.id ? res.order : o)));
+        pushToast("Article annulé, cuisine prévenue", "server");
+      } else {
+        pushToast(res?.error || "Échec de l'annulation", "warn");
+      }
+      done?.(!!res?.ok);
+    });
+  };
+
   const setItemNote = (orderId, itemId, note) => {
     updateOrder(orderId, (o) => ({
       ...o,
@@ -519,6 +538,7 @@ export function useOrderActions(store, {
     addComposedMenuToOrder,
     changeQty,
     removeItem,
+    voidItem,
     setItemNote,
     sendToKitchen,
     serveAndMaybeFree,
