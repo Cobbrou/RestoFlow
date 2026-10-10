@@ -1,6 +1,26 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { effectivePrice } from "../billing/pricing";
+import { effectivePrice, normalizeOptionGroups, resolveOptions, toCents, toEuros, OptionPick } from "../billing/pricing";
+
+const COURSE_RANK: Record<string, number> = { entree: 1, plat: 2, dessert: 3 };
+
+/**
+ * Brouillons « en attente de réclame » à libérer dès l'envoi (copie de heldToRelease, src/utils/index.js) :
+ * aucune suite antérieure n'est encore à servir dans la commande, ou le cadencement est désactivé.
+ */
+export function heldToRelease(
+  items: { id: string; status: string; course?: string | null; courseStatus?: string | null }[],
+  pacingEnabled: boolean
+): string[] {
+  return items
+    .filter((i) => i.status === "draft" && i.courseStatus === "held")
+    .filter((i) => {
+      if (!pacingEnabled) return true;
+      const rank = COURSE_RANK[i.course || ""] ?? 0;
+      return !items.some((o) => o.status !== "served" && (COURSE_RANK[o.course || ""] ?? rank) < rank);
+    })
+    .map((i) => i.id);
+}
 
 // Tolérance sur l'horodatage client d'un ajout rejoué depuis la file hors-ligne
 const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
@@ -40,6 +60,7 @@ export class OrdersService {
         courseStatus: it.courseStatus || "direct",
         station: it.station || "kitchen",
         vatRate: it.vatRate ?? 10,
+        options: it.options || "",
       })),
     };
   }
@@ -119,6 +140,7 @@ export class OrdersService {
     addedAt?: number;
     itemId?: string;
     tableId?: string;
+    options?: OptionPick[];
   }) {
     // La commande doit exister (order:create_or_ensure précède toujours, file hors-ligne ordonnée).
     // Table ouverte hors-ligne sur deux terminaux : la commande du terminal arrivé second n'existe pas,
@@ -137,7 +159,20 @@ export class OrdersService {
         : `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     // 🔒 Prix, nom et taux de TVA viennent toujours de la base, jamais du client
-    const { dbProduct, name, price, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
+    const { dbProduct, name, price: basePrice, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
+
+    // Options (cuisson, suppléments) validées contre la fiche produit ; le supplément s'ajoute au prix de la ligne
+    let optionsLabel = "";
+    let price = basePrice;
+    if (dbProduct) {
+      try {
+        const resolved = resolveOptions(normalizeOptionGroups(JSON.parse(dbProduct.options || "[]")), data.options);
+        optionsLabel = resolved.label;
+        price = toEuros(toCents(basePrice) + resolved.extraCents);
+      } catch (e: any) {
+        throw new BadRequestException(e.message);
+      }
+    }
 
     const cat = data.product?.cat || dbProduct?.cat || "";
     const isBar =
@@ -162,6 +197,7 @@ export class OrdersService {
           i.productId === data.product.id &&
           i.status === "draft" &&
           !i.notes &&
+          (i.options || "") === optionsLabel &&
           (i.course || "direct") === course &&
           i.price === price
       );
@@ -181,6 +217,7 @@ export class OrdersService {
             vatRate,
             qty: 1,
             notes: "",
+            options: optionsLabel || null,
             status: "draft",
             isMenu: false,
             course,
@@ -190,16 +227,34 @@ export class OrdersService {
         });
       }
     } else {
+      // Options des composants (cuisson du burger…) : composition[g].options[i] = picks de productIds[i]
+      const parts: string[] = [];
+      let extraCents = 0;
+      for (const g of Array.isArray(data.composition) ? data.composition : []) {
+        const ids: string[] = Array.isArray(g?.productIds) ? g.productIds : [];
+        for (const [i, pid] of ids.entries()) {
+          const p = await this.prisma.product.findUnique({ where: { id: pid }, select: { name: true, options: true } });
+          if (!p) continue;
+          try {
+            const r = resolveOptions(normalizeOptionGroups(JSON.parse(p.options || "[]")), g.options?.[i]);
+            extraCents += r.extraCents;
+            if (r.label) parts.push(`${p.name} : ${r.label}`);
+          } catch (e: any) {
+            throw new BadRequestException(`${p.name} — ${e.message}`);
+          }
+        }
+      }
       await this.prisma.orderItem.create({
         data: {
           id: newItemId,
           orderId: order.id,
           productId: data.product.id,
           name,
-          price,
+          price: toEuros(toCents(price) + extraCents),
           vatRate,
           qty: 1,
           notes: "",
+          options: parts.join(" | ") || null,
           status: "draft",
           isMenu: true,
           composition: data.composition ? JSON.stringify(data.composition) : null,
@@ -331,6 +386,14 @@ export class OrdersService {
     });
     if (!order) {
       throw new NotFoundException(`Commande introuvable : ${orderId}`);
+    }
+
+    // Une suite n'attend la réclame que si une suite précédente reste à servir (ex. burger seul : envoi direct)
+    const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
+    const pacingEnabled = (cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {}).enableCoursePacing ?? true;
+    const released = heldToRelease(order.items, pacingEnabled);
+    if (released.length > 0) {
+      await this.prisma.orderItem.updateMany({ where: { id: { in: released } }, data: { courseStatus: "direct" } });
     }
 
     const now = new Date();

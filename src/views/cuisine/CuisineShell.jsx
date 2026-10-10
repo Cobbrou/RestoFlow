@@ -562,6 +562,7 @@ function KitchenTicket({
                 </div>
               )}
 
+              {it.options && <div className="text-[12px] font-bold pl-3">» {it.options}</div>}
               {it.notes && !isAllergy && <div className="text-[11px] opacity-70 pl-3">↳ {it.notes}</div>}
             </div>
           );
@@ -741,6 +742,7 @@ function KitchenByTable({
                                   ))}
                                 </div>
                               )}
+                              {it.options && <div className="text-[12px] font-bold pl-4">» {it.options}</div>}
                               {it.notes && !isAllergy && (
                                 <div className="text-[11px] opacity-70 pl-4">↳ {it.notes}</div>
                               )}

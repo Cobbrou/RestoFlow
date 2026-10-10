@@ -69,6 +69,7 @@ model Product {
   isMenu         Boolean      @default(false)
   vatRate        Float        @default(10)
   station        String       @default("kitchen") // "kitchen" | "bar"
+  options        String       @default("[]") // JSON : [{ name, required, max, choices: [{ label, price }] }] (cuisson, suppléments...)
   recipeItems    RecipeItem[]
 }
 
@@ -157,6 +158,7 @@ model OrderItem {
   courseStatus String  @default("direct") // "direct" | "held" | "called"
   station     String   @default("kitchen") // "kitchen" | "bar"
   vatRate     Float    @default(10) // Taux figé à l'ajout, copié du produit (NF525 : ventilation TVA)
+  options     String?  // Libellé figé des options choisies, ex. "Saignant · Bacon (+2.00€)" (supplément inclus dans price)
 }
 
 model Reservation {

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { uid } from "../data/seed.js";
-import { getProductEffectivePrice } from "../utils/index.js";
+import { getProductEffectivePrice, resolveOptions, resolveMenuOptions, heldToRelease } from "../utils/index.js";
 import { getSocket } from "../services/socket.js";
 
 /**
@@ -62,22 +62,23 @@ export function useOrderActions(store, {
     return { course, courseStatus, station, cat };
   };
 
-  const addProductToOrder = (tableId, product) => {
+  // optionPicks : [{ group, choice }] (cuisson, suppléments), revalidés et facturés par le serveur
+  const addProductToOrder = (tableId, product, optionPicks = []) => {
     const order = ensureOrderForTable(tableId);
     const { course, courseStatus, station, cat } = getItemCourseAndStation(product);
-    const effectivePrice = getProductEffectivePrice(product, config);
+    const { label: options, extra } = resolveOptions(product.options, optionPicks);
+    const effectivePrice = Math.round((getProductEffectivePrice(product, config) + extra) * 100) / 100;
+    const sameLine = (i) =>
+      i.productId === product.id && i.status === "draft" && !i.notes && (i.options || "") === options &&
+      (i.course || course) === course && i.price === effectivePrice;
     // Nouvelle ligne : son id est partagé avec le serveur (les actions hors-ligne suivantes le référencent)
     const lineId = uid("it");
-    const mergesIntoExisting = order.items.some(
-      (i) => i.productId === product.id && i.status === "draft" && !i.notes && (i.course || course) === course && i.price === effectivePrice
-    );
+    const mergesIntoExisting = order.items.some(sameLine);
 
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== order.id) return o;
-        const existing = o.items.find(
-          (i) => i.productId === product.id && i.status === "draft" && !i.notes && (i.course || course) === course && i.price === effectivePrice
-        );
+        const existing = o.items.find(sameLine);
         if (existing) {
           return { ...o, items: o.items.map((i) => i.id === existing.id ? { ...i, qty: i.qty + 1 } : i) };
         }
@@ -93,6 +94,7 @@ export function useOrderActions(store, {
               vatRate: product.vatRate ?? 10,
               qty: 1,
               notes: "",
+              options,
               status: "draft",
               course,
               courseStatus,
@@ -108,6 +110,7 @@ export function useOrderActions(store, {
       tableId,
       itemId: mergesIntoExisting ? undefined : lineId,
       product: { id: product.id, name: product.name, price: effectivePrice, cat, station, isMenu: false },
+      options: optionPicks,
       course,
       courseStatus,
       station,
@@ -121,6 +124,7 @@ export function useOrderActions(store, {
     const courseStatus = "held";
     const station = "kitchen";
     const lineId = uid("it");
+    const { label: options, extra } = resolveMenuOptions(composition, store.products);
 
     setOrders((prev) =>
       prev.map((o) => {
@@ -133,10 +137,11 @@ export function useOrderActions(store, {
               id: lineId,
               productId: menuProduct.id,
               name: menuProduct.name,
-              price: menuProduct.price,
+              price: Math.round((menuProduct.price + extra) * 100) / 100,
               vatRate: 10,
               qty: 1,
               notes: "",
+              options,
               status: "draft",
               isMenu: true,
               composition,
@@ -209,12 +214,19 @@ export function useOrderActions(store, {
 
   const sendToKitchen = (orderId) => {
     const serverName = currentStaff ? currentStaff.name.split(" ")[0] : "Service";
-    updateOrder(orderId, (o) => ({
-      ...o,
-      sentAt: Date.now(),
-      server: serverName,
-      items: o.items.map((i) => (i.status === "draft" ? { ...i, status: "new" } : i)),
-    }));
+    const rawModules = config?.modulesConfig;
+    const modules = (typeof rawModules === "string" ? JSON.parse(rawModules) : rawModules) || {};
+    updateOrder(orderId, (o) => {
+      const released = heldToRelease(o.items, modules.enableCoursePacing ?? true);
+      return {
+        ...o,
+        sentAt: Date.now(),
+        server: serverName,
+        items: o.items.map((i) =>
+          i.status === "draft" ? { ...i, status: "new", ...(released.includes(i.id) && { courseStatus: "direct" }) } : i
+        ),
+      };
+    });
     setServerView("plan");
     emit("order:send_kitchen", { orderId, serverName });
   };

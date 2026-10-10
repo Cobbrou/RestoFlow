@@ -232,3 +232,87 @@ export function deduplicateHistory(list) {
 
   return Array.from(map.values());
 }
+
+/* ── Options produit (cuisson, suppléments) ─────────────────── */
+
+/**
+ * Libellé figé et supplément d'une sélection d'options (copie de resolveOptions, server/src/billing/pricing.ts).
+ * picks : [{ group, choice }]. Le serveur revalide et fait foi.
+ */
+export function resolveOptions(groups = [], picks = []) {
+  const parts = [];
+  let extraCents = 0;
+  for (const g of groups) {
+    const labels = picks.filter((p) => p.group === g.name).map((p) => p.choice);
+    for (const c of g.choices.filter((c) => labels.includes(c.label))) {
+      extraCents += Math.round((Number(c.price) || 0) * 100);
+      parts.push(c.price > 0 ? `${c.label} (+${Number(c.price).toFixed(2)}€)` : c.label);
+    }
+  }
+  return { label: parts.join(" · "), extra: extraCents / 100 };
+}
+
+/** Options des composants d'un menu (composition[g].options[i] ↔ productIds[i]), même libellé que le serveur */
+export function resolveMenuOptions(composition = [], products = []) {
+  const parts = [];
+  let extraCents = 0;
+  for (const g of composition) {
+    (g.productIds || []).forEach((id, i) => {
+      const p = products.find((x) => x.id === id);
+      if (!p) return;
+      const r = resolveOptions(p.options, g.options?.[i]);
+      extraCents += Math.round(r.extra * 100);
+      if (r.label) parts.push(`${p.name} : ${r.label}`);
+    });
+  }
+  return { label: parts.join(" | "), extra: extraCents / 100 };
+}
+
+/**
+ * Saisie back-office, un groupe par ligne :
+ *   Cuisson* : Bleu, Saignant, À point
+ *   Suppléments (max 2) : Bacon +2, Œuf +1.5
+ * « * » = choix obligatoire (1 par défaut), « (max N) » = nombre de choix maximum.
+ */
+export function parseOptionsText(text = "") {
+  return text
+    .split("\n")
+    .map((line) => line.match(/^\s*([^:*(]+?)\s*(\*)?\s*(?:\(\s*max\s*(\d+)\s*\))?\s*:\s*(.+)$/i))
+    .filter(Boolean)
+    .map(([, name, star, max, rest]) => {
+      const choices = rest
+        .split(/,(?!\d)/) // « +1,5 » reste un prix
+        .map((s) => s.trim().match(/^(.+?)(?:\s*\+\s*(\d+(?:[.,]\d+)?)\s*€?)?$/))
+        .filter(Boolean)
+        .map(([, label, price]) => ({ label: label.trim(), price: price ? Number(price.replace(",", ".")) : 0 }));
+      return { name: name.trim(), required: !!star, max: max ? Number(max) : star ? 1 : choices.length, choices };
+    })
+    .filter((g) => g.name && g.choices.length);
+}
+
+export function formatOptionsText(groups = []) {
+  return groups
+    .map((g) => {
+      const max = g.max !== (g.required ? 1 : g.choices.length) ? ` (max ${g.max})` : "";
+      const choices = g.choices.map((c) => (c.price > 0 ? `${c.label} +${c.price}` : c.label)).join(", ");
+      return `${g.name}${g.required ? "*" : ""}${max} : ${choices}`;
+    })
+    .join("\n");
+}
+
+const COURSE_RANK = { entree: 1, plat: 2, dessert: 3 };
+
+/**
+ * Brouillons « en attente de réclame » à libérer dès l'envoi (copie de heldToRelease, server/src/orders/orders.service.ts) :
+ * aucune suite antérieure n'est encore à servir dans la commande, ou le cadencement est désactivé.
+ */
+export function heldToRelease(items = [], pacingEnabled = true) {
+  return items
+    .filter((i) => i.status === "draft" && i.courseStatus === "held")
+    .filter((i) => {
+      if (!pacingEnabled) return true;
+      const rank = COURSE_RANK[i.course] ?? 0;
+      return !items.some((o) => o.status !== "served" && (COURSE_RANK[o.course] ?? rank) < rank);
+    })
+    .map((i) => i.id);
+}

@@ -6,7 +6,7 @@ import {
   ArrowRightLeft, Merge, BellRing
 } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
-import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice } from "../../utils/index.js";
+import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice, resolveOptions, resolveMenuOptions } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
@@ -54,6 +54,7 @@ export default function OrderTaking({
   const [confirmSend, setConfirmSend] = useState(false);
   const [mobileTab, setMobileTab]     = useState("menu");   // "menu" | "commande"
   const [composerMenu, setComposerMenu] = useState(null);
+  const [optionsFor, setOptionsFor] = useState(null); // produit à options (cuisson, suppléments)
   const [paying, setPaying]           = useState(false);
   const [receipt, setReceipt]         = useState(null);
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
@@ -146,6 +147,7 @@ export default function OrderTaking({
       return;
     }
     if (p.isMenu) setComposerMenu(p);
+    else if (p.options?.length) setOptionsFor(p);
     else onAdd(p);
   };
 
@@ -372,6 +374,13 @@ export default function OrderTaking({
       getPortionsAvailable={getPortionsAvailable}
       onCancel={() => setComposerMenu(null)}
       onConfirm={(composition) => { onAddComposedMenu(composerMenu, composition); setComposerMenu(null); }}
+    />
+  ) || optionsFor && (
+    <OptionPicker
+      product={optionsFor}
+      basePrice={getProductEffectivePrice(optionsFor, config)}
+      onCancel={() => setOptionsFor(null)}
+      onConfirm={(picks) => { onAdd(optionsFor, picks); setOptionsFor(null); }}
     />
   );
 
@@ -709,6 +718,7 @@ function DraftItemRow({ item, isMobile, products, hasSuites, noteOpen, onToggleN
         </div>
         <button onClick={onRemove} className="text-[#B5451B] shrink-0 p-0.5"><X size={isMobile ? 16 : 14} /></button>
       </div>
+      {item.options && <p className="text-[11px] text-[#6B4226] mt-0.5">↳ {item.options}</p>}
       {item.isMenu && item.composition?.length > 0 && (
         <div className="mt-1 space-y-0.5">
           {item.composition.map((g, i) => <p key={i} className="text-[11px] text-[#6B4226]">• {g.title} : {g.names.join(", ")}</p>)}
@@ -802,6 +812,7 @@ function SentLine({ item, products, hasSuites, onVoid }) {
           )}
         </div>
       </div>
+      {item.options && <p className="text-[10px] text-[#6B4226] mt-0.5 pl-5">↳ {item.options}</p>}
       {item.isMenu && item.composition?.length > 0 && (
         <div className="mt-1 pl-5 space-y-0.5">
           {item.composition.map((g, i) => <p key={i} className="text-[10px] text-[#8A8378]">• {g.title} : {g.names.join(", ")}</p>)}
@@ -890,6 +901,85 @@ export function AllergyBadge({ item, product, compact }) {
   );
 }
 
+/* ── Options produit (cuisson, suppléments) ────────────────── */
+
+// Bascule un choix ; choix unique : on remplace, sinon on ajoute dans la limite du groupe
+const togglePick = (prev, g, label) => {
+  const mine = prev.filter((p) => p.group === g.name);
+  if (mine.some((p) => p.choice === label)) return prev.filter((p) => !(p.group === g.name && p.choice === label));
+  if (g.max === 1) return [...prev.filter((p) => p.group !== g.name), { group: g.name, choice: label }];
+  return mine.length >= g.max ? prev : [...prev, { group: g.name, choice: label }];
+};
+
+const optionsComplete = (groups = [], picks = []) =>
+  groups.every((g) => !g.required || picks.some((p) => p.group === g.name));
+
+function OptionPicker({ product, basePrice, onCancel, onConfirm }) {
+  const groups = product.options || [];
+  const [picks, setPicks] = useState([]); // [{ group, choice }]
+  const { extra } = resolveOptions(groups, picks);
+
+  return (
+    <Modal title={`${product.emoji || "🍽️"} ${product.name}`} onClose={onCancel}>
+      <div className="max-h-[400px] overflow-y-auto rf-scrollbar pr-1">
+        <OptionGroups groups={groups} picks={picks} onToggle={(g, label) => setPicks((prev) => togglePick(prev, g, label))} />
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button type="button" onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
+        <button
+          type="button"
+          disabled={!optionsComplete(groups, picks)}
+          onClick={() => onConfirm(picks)}
+          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+          style={{ background: "#C1440E" }}
+        >
+          Ajouter · {money(basePrice + extra)}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function OptionGroups({ groups, picks, onToggle }) {
+  return (
+    <div className="space-y-4">
+      {groups.map((g) => {
+        const count = picks.filter((p) => p.group === g.name).length;
+        return (
+          <div key={g.name}>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-[#6B4226]">
+                {g.name}{g.required && <span className="text-[#C1361B]"> *</span>}
+              </span>
+              <span className="text-[10px] text-[#9A917E]">
+                {g.max === 1 ? (g.required ? "1 choix obligatoire" : "1 choix max") : `${count}/${g.max} max`}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {g.choices.map((c) => {
+                const on = picks.some((p) => p.group === g.name && p.choice === c.label);
+                return (
+                  <button
+                    key={c.label}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => onToggle(g, c.label)}
+                    className="rf-tap py-2.5 px-3 rounded-lg text-sm font-semibold flex items-center justify-between gap-2 border"
+                    style={{ background: on ? "#2B2622" : "#fff", color: on ? "#FAF6EE" : "#2B2622", borderColor: on ? "#2B2622" : "rgba(0,0,0,.1)" }}
+                  >
+                    <span className="truncate">{c.label}</span>
+                    {c.price > 0 && <span className="text-xs opacity-80 shrink-0">+{money(c.price)}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── Composeur de menu ─────────────────────────────────────── */
 
 function MenuComposer({ menu, products, getPortionsAvailable, onCancel, onConfirm }) {
@@ -916,17 +1006,28 @@ function MenuComposer({ menu, products, getPortionsAvailable, onCancel, onConfir
     });
   };
 
-  const complete = groups.length > 0 && groups.every((g) => (selections[g.id]?.length || 0) === g.count);
+  // Options des composants choisis (cuisson du burger…), clé `${groupe}:${produit}`
+  const [optPicks, setOptPicks] = useState({});
+  const chosenWithOptions = (g) =>
+    (selections[g.id] || []).map((id) => products.find((p) => p.id === id)).filter((p) => p?.options?.length);
 
-  const confirm = () => {
-    const composition = groups.map((g) => ({
+  const complete =
+    groups.length > 0 &&
+    groups.every((g) => (selections[g.id]?.length || 0) === g.count) &&
+    groups.every((g) => chosenWithOptions(g).every((p) => optionsComplete(p.options, optPicks[`${g.id}:${p.id}`])));
+
+  const composition = groups.map((g) => {
+    // Identifiants requis par le serveur pour décompter le stock de chaque composant
+    const productIds = (selections[g.id] || []).filter((id) => products.some((p) => p.id === id));
+    return {
       title: g.title,
-      names: (selections[g.id] || []).map((id) => products.find((p) => p.id === id)?.name).filter(Boolean),
-      // Identifiants requis par le serveur pour décompter le stock de chaque composant
-      productIds: (selections[g.id] || []).filter((id) => products.some((p) => p.id === id)),
-    }));
-    onConfirm(composition);
-  };
+      names: productIds.map((id) => products.find((p) => p.id === id).name),
+      productIds,
+      options: productIds.map((id) => optPicks[`${g.id}:${id}`] || []),
+    };
+  });
+  const { extra } = resolveMenuOptions(composition, products);
+  const confirm = () => onConfirm(composition);
 
   return (
     <Modal title={`Composer : ${menu.name}`} onClose={onCancel} wide>
@@ -972,6 +1073,19 @@ function MenuComposer({ menu, products, getPortionsAvailable, onCancel, onConfir
                   );
                 })}
               </div>
+              {chosenWithOptions(g).map((p) => {
+                const key = `${g.id}:${p.id}`;
+                return (
+                  <div key={key} className="mt-2 p-2.5 rounded-lg bg-black/[.03]">
+                    <p className="text-[11px] font-bold text-[#2B2622] mb-1.5">{p.emoji} {p.name}</p>
+                    <OptionGroups
+                      groups={p.options}
+                      picks={optPicks[key] || []}
+                      onToggle={(og, label) => setOptPicks((prev) => ({ ...prev, [key]: togglePick(prev[key] || [], og, label) }))}
+                    />
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -979,7 +1093,7 @@ function MenuComposer({ menu, products, getPortionsAvailable, onCancel, onConfir
       <div className="flex gap-2 mt-4">
         <button onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
         <button disabled={!complete} onClick={confirm} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: "#C1440E" }}>
-          Ajouter à la commande
+          Ajouter · {money(menu.price + extra)}
         </button>
       </div>
     </Modal>

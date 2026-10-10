@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { normalizeOptionGroups } from "../billing/pricing";
 
 @Injectable()
 export class CatalogService {
@@ -15,6 +16,7 @@ export class CatalogService {
       ...p,
       emoji: p.emoji || "🍽️",
       allergens: JSON.parse(p.allergens || "[]"),
+      options: JSON.parse(p.options || "[]"),
     }));
   }
 
@@ -39,6 +41,7 @@ export class CatalogService {
     available?: boolean;
     station?: string;
     vatRate?: number;
+    options?: unknown;
   }) {
     const id = data.id || `prod_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const allergensStr = Array.isArray(data.allergens)
@@ -60,6 +63,7 @@ export class CatalogService {
         available: data.available !== undefined ? Boolean(data.available) : true,
         station: data.station || (["boissons", "bieres", "vins", "cafes"].includes(data.cat) ? "bar" : "kitchen"),
         vatRate: data.vatRate || (["boissons", "bieres", "vins"].includes(data.cat) ? 20 : 10),
+        options: JSON.stringify(normalizeOptionGroups(data.options)),
       },
     });
 
@@ -67,6 +71,7 @@ export class CatalogService {
       ...product,
       emoji: product.emoji || "🍽️",
       allergens: JSON.parse(product.allergens || "[]"),
+      options: JSON.parse(product.options || "[]"),
     };
   }
 
@@ -82,6 +87,7 @@ export class CatalogService {
     available?: boolean;
     station?: string;
     vatRate?: number;
+    options?: unknown;
     initialStock: number;
     minThreshold?: number;
     costPerUnit?: number;
@@ -116,6 +122,7 @@ export class CatalogService {
           available: initialStock > 0 ? (data.available !== undefined ? Boolean(data.available) : true) : false,
           station: data.station || (["boissons", "bieres", "vins", "cafes"].includes(data.cat) ? "bar" : "kitchen"),
           vatRate: data.vatRate || (["boissons", "bieres", "vins"].includes(data.cat) ? 20 : 10),
+          options: JSON.stringify(normalizeOptionGroups(data.options)),
         },
       });
 
@@ -166,6 +173,7 @@ export class CatalogService {
           ...product,
           emoji: product.emoji || "🍽️",
           allergens: JSON.parse(product.allergens || "[]"),
+          options: JSON.parse(product.options || "[]"),
         },
         ingredient,
       };
@@ -195,6 +203,7 @@ export class CatalogService {
     if (data.available !== undefined) patch.available = Boolean(data.available);
     if (data.station !== undefined) patch.station = data.station;
     if (data.vatRate !== undefined) patch.vatRate = Number(data.vatRate);
+    if (data.options !== undefined) patch.options = JSON.stringify(normalizeOptionGroups(data.options));
 
     const updated = await this.prisma.product.update({
       where: { id },
@@ -205,6 +214,7 @@ export class CatalogService {
       ...updated,
       emoji: updated.emoji || "🍽️",
       allergens: JSON.parse(updated.allergens || "[]"),
+      options: JSON.parse(updated.options || "[]"),
     };
   }
 

@@ -513,7 +513,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                     key={it.id}
                     className="grid grid-cols-[1fr_50px_70px_70px] gap-2 items-center text-xs py-1 px-1 border-b border-black/5 last:border-0"
                   >
-                    <span className="font-semibold text-[#2B2622] truncate">{it.name}</span>
+                    <span className="font-semibold text-[#2B2622] truncate" title={it.options || undefined}>{it.name}{it.options ? ` · ${it.options}` : ""}</span>
                     <span className="text-center text-[#5B5346]">{it.qty}</span>
                     <span className="text-right text-[#5B5346]">{money(it.price)}</span>
                     <span className="text-right font-bold text-[#2B2622]">
@@ -944,7 +944,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                         <div className="min-w-0 flex-1 pr-2">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-xs text-[#2B2622] truncate">
-                              {it.name}
+                              {it.name}{it.options ? ` · ${it.options}` : ""}
                             </span>
                             <span className="text-[11px] font-bold text-[#8A8378]">
                               ×{it.qty} ({money(it.price)})

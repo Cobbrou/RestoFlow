@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
-import { isAvailable, money, deduplicateHistory } from "../../utils/index.js";
+import { isAvailable, money, deduplicateHistory, parseOptionsText, formatOptionsText } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
@@ -416,6 +416,8 @@ function ProductForm({ product, categories, recipes, ingredients, onCancel, onSa
   const [emoji,          setEmoji]          = useState(product?.emoji          ?? "🍽️");
   const [allergens,      setAllergens]      = useState((product?.allergens     ?? []).join(", "));
   const [available,      setAvailable]      = useState(product ? isAvailable(product) : true);
+  const [optionsText,    setOptionsText]    = useState(formatOptionsText(product?.options ?? []));
+  const parsedOptions = parseOptionsText(optionsText);
 
   // Détection si le produit a déjà un suivi direct ou une recette
   const existingRecipes = recipes?.filter((r) => r.productId === product?.id) || [];
@@ -467,6 +469,20 @@ function ProductForm({ product, categories, recipes, ingredients, onCancel, onSa
 
       <Field label="Allergènes (séparés par des virgules)">
         <input className={inputCls} value={allergens} onChange={(e) => setAllergens(e.target.value)} placeholder="Ex : Gluten, Lait" />
+      </Field>
+
+      <Field label="Options & suppléments (un groupe par ligne)">
+        <textarea
+          className={inputCls + " font-mono text-xs"}
+          rows={3}
+          value={optionsText}
+          onChange={(e) => setOptionsText(e.target.value)}
+          placeholder={"Cuisson* : Bleu, Saignant, À point, Bien cuit\nSuppléments (max 2) : Bacon +2, Œuf +1.5"}
+        />
+        <p className="text-[10px] text-[#8A8378] mt-1">
+          « * » = choix obligatoire · « (max N) » = nombre de choix · « +2 » = supplément en €.
+          {parsedOptions.length > 0 && ` Reconnu : ${parsedOptions.map((g) => `${g.name} (${g.choices.length} choix${g.required ? ", obligatoire" : ""})`).join(" · ")}`}
+        </p>
       </Field>
 
       {/* ── Section Suivi de Stock Unifiée ── */}
@@ -590,6 +606,7 @@ function ProductForm({ product, categories, recipes, ingredients, onCancel, onSa
             desc: desc.trim(),
             emoji: emoji || "🍽️",
             allergens: allergens.split(",").map((s) => s.trim()).filter(Boolean),
+            options: parsedOptions,
             available,
             directStock: stockMode === "direct",
             initialStock: Number(initialStock) || 0,
@@ -961,7 +978,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
                 {(detail.items || []).map((it, idx) => (
                   <div key={it.id ?? idx} className="rf-mono text-[12px]">
                     <div className="flex justify-between gap-2">
-                      <span className="flex-1">{it.qty} × {it.name}</span>
+                      <span className="flex-1">{it.qty} × {it.name}{it.options && <span className="block text-[10px] text-[#8A8378]">{it.options}</span>}</span>
                       <span>{money(it.price * it.qty)}</span>
                     </div>
                     <div className="text-[10px] opacity-60">{money(it.price)} / unité</div>

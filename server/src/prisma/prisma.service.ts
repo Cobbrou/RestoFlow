@@ -31,6 +31,13 @@ export const NF525_TRIGGERS: Record<string, string> = {
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     await this.$connect();
+    // Fichier SQLite absent ou vide (créé à la volée) : on guide plutôt que d'échouer sur les triggers
+    const tables = await this.$queryRawUnsafe<{ name: string }[]>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'OrderHistory'"
+    );
+    if (tables.length === 0) {
+      throw new Error("Base de données vide ou non initialisée : lancez `npm run db:push` puis `npm run db:seed` dans server/");
+    }
     for (const sql of Object.values(NF525_TRIGGERS)) {
       await this.$executeRawUnsafe(sql);
     }

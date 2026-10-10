@@ -24,10 +24,15 @@ const PRODUCTS_SEED = [
   { id: "p1", cat: "entrees", name: "Burrata crémeuse", desc: "Tomates anciennes, basilic, huile d'olive", price: 9, emoji: "🍅", allergens: ["Lait"], vatRate: 10, station: "kitchen" },
   { id: "p2", cat: "entrees", name: "Velouté du jour", desc: "Potiron rôti, crème, noisettes", price: 7.5, emoji: "🥣", allergens: ["Lait", "Fruits à coque"], vatRate: 10, station: "kitchen" },
   { id: "p3", cat: "entrees", name: "Planche à partager", desc: "Charcuterie, fromages, pain grillé", price: 14, emoji: "🧀", allergens: ["Lait", "Gluten"], vatRate: 10, station: "kitchen" },
-  { id: "p4", cat: "plats", name: "Entrecôte grillée", desc: "Frites maison, sauce au poivre", price: 22, emoji: "🥩", allergens: [], vatRate: 10, station: "kitchen" },
+  { id: "p4", cat: "plats", name: "Entrecôte grillée", desc: "Frites maison, sauce au poivre", price: 22, emoji: "🥩", allergens: [], vatRate: 10, station: "kitchen",
+    options: [{ name: "Cuisson", required: true, max: 1, choices: [{ label: "Bleu" }, { label: "Saignant" }, { label: "À point" }, { label: "Bien cuit" }] }] },
   { id: "p5", cat: "plats", name: "Saumon rôti", desc: "Purée de panais, beurre citronné", price: 19, emoji: "🐟", allergens: ["Poisson", "Lait"], vatRate: 10, station: "kitchen" },
   { id: "p6", cat: "plats", name: "Risotto champignons", desc: "Parmesan, huile de truffe", price: 16, emoji: "🍚", allergens: ["Lait"], vatRate: 10, station: "kitchen" },
-  { id: "p7", cat: "burgers", name: "Burger Classic", desc: "Bœuf, cheddar, oignons confits", price: 12, emoji: "🍔", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
+  { id: "p7", cat: "burgers", name: "Burger Classic", desc: "Bœuf, cheddar, oignons confits", price: 12, emoji: "🍔", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen",
+    options: [
+      { name: "Cuisson", required: true, max: 1, choices: [{ label: "Saignant" }, { label: "À point" }, { label: "Bien cuit" }] },
+      { name: "Suppléments", max: 3, choices: [{ label: "Bacon", price: 2 }, { label: "Œuf", price: 1.5 }, { label: "Double cheddar", price: 1.5 }] },
+    ] },
   { id: "p8", cat: "burgers", name: "Burger Veggie", desc: "Galette de légumes, avocat, roquette", price: 12.5, emoji: "🥑", allergens: ["Gluten"], vatRate: 10, station: "kitchen" },
   { id: "p9", cat: "burgers", name: "Burger Bacon BBQ", desc: "Double bœuf, bacon, sauce barbecue", price: 14.5, emoji: "🥓", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
   { id: "p10", cat: "pizzas", name: "Pizza 4 Fromages", desc: "Mozzarella, gorgonzola, chèvre, parmesan", price: 14, emoji: "🍕", allergens: ["Gluten", "Lait"], vatRate: 10, station: "kitchen" },
@@ -361,6 +366,7 @@ async function main() {
         isMenu: false,
         vatRate: p.vatRate || 10,
         station: p.station || "kitchen",
+        options: JSON.stringify(p.options || []),
       },
     });
   }

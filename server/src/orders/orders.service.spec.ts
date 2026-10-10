@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BadRequestException } from "@nestjs/common";
-import { OrdersService } from "./orders.service";
+import { OrdersService, heldToRelease } from "./orders.service";
 
 describe("OrdersService.voidItem", () => {
   let service: OrdersService;
@@ -39,5 +39,33 @@ describe("OrdersService.voidItem", () => {
     await expect(service.voidItem("o1", "it1")).rejects.toThrow(BadRequestException);
     expect(prisma.orderItem.delete).not.toHaveBeenCalled();
     expect(prisma.orderItem.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("heldToRelease (cadencement à l'envoi)", () => {
+  const it_ = (id: string, course: string, status = "draft", courseStatus = course === "plat" || course === "dessert" ? "held" : "direct") => ({ id, course, status, courseStatus });
+
+  it("burger seul : le plat part directement", () => {
+    expect(heldToRelease([it_("b", "plat"), it_("v", "boisson")], true)).toEqual(["b"]);
+  });
+
+  it("entrée + plat + dessert : seule l'entrée part, plat et dessert attendent", () => {
+    expect(heldToRelease([it_("e", "entree"), it_("p", "plat"), it_("d", "dessert")], true)).toEqual([]);
+  });
+
+  it("plat + dessert : le plat part, le dessert attend", () => {
+    expect(heldToRelease([it_("p", "plat"), it_("d", "dessert")], true)).toEqual(["p"]);
+  });
+
+  it("entrées déjà servies : le plat ajouté ensuite part directement", () => {
+    expect(heldToRelease([it_("e", "entree", "served"), it_("p", "plat")], true)).toEqual(["p"]);
+  });
+
+  it("entrée envoyée mais pas servie : le plat attend la réclame", () => {
+    expect(heldToRelease([it_("e", "entree", "preparing"), it_("p", "plat")], true)).toEqual([]);
+  });
+
+  it("cadencement désactivé : rien n'attend", () => {
+    expect(heldToRelease([it_("e", "entree"), it_("p", "plat"), it_("d", "dessert")], false)).toEqual(["p", "d"]);
   });
 });
