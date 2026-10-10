@@ -51,6 +51,10 @@ export function useRealtimeSync(store, { pushToast, beep, soundOn, onAuthRequire
         pushToast(`🔔 Commande de la Table ${tableNumber} prête !`, "server");
         ring(980);
       },
+      "catalog:product_86": ({ name, available, by }) => {
+        pushToast(available ? `✅ ${name} de nouveau disponible` : `⛔ 86 — ${name} en rupture${by ? ` (${by})` : ""}`, available ? "server" : "warn");
+        if (!available) ring(440);
+      },
       "kitchen:call_course": ({ tableNumber, courseLabel, course, server }) => {
         pushToast(`🔔 Table ${tableNumber} — Réclame : ${courseLabel ? courseLabel.toUpperCase() : course} (${server})`, "kitchen");
         ring(840);

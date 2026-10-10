@@ -390,6 +390,7 @@ export default function App() {
             config={config}
             onStart={startPrep}
             onReady={markReady}
+            onToggleProductAvailable={management.onToggleProductAvailable}
           />
         </ErrorBoundary>
       )}

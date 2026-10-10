@@ -1,11 +1,11 @@
 import { useState, useMemo } from "react";
 import {
   LayoutGrid, Table2, Clock, Users, CheckCircle2,
-  Flame, Printer, X, BellRing, ChefHat, Wine, Layers, Volume2
+  Flame, Printer, X, BellRing, ChefHat, Wine, Layers, Volume2, Ban, Search
 } from "lucide-react";
 import {
   tableStatus, STATUS_META, orderKitchenStatus,
-  kitchenStartTs, timerLevel, TIMER_LEVELS, formatTimer, noteIndicatesAllergy
+  kitchenStartTs, timerLevel, TIMER_LEVELS, formatTimer, noteIndicatesAllergy, isAvailable
 } from "../../utils/index.js";
 import { AllergyBadge } from "../salle/OrderTaking.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
@@ -24,11 +24,13 @@ export default function CuisineShell({
   config = {},
   onStart,
   onReady,
+  onToggleProductAvailable,
 }) {
   const now = useNow();
   const { hasMultiStation } = useModules();
   const { isSuspended, unlock } = useAudioState();
   const [printOrder, setPrintOrder] = useState(null); // { order, table, defaultTab } | null
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
   const [stationFilter, setStationFilter] = useState(() => {
     try {
       return localStorage.getItem("rf_kds_station") || "all";
@@ -54,6 +56,15 @@ export default function CuisineShell({
     if (effectiveStation === "kitchen") return !isBar;
     return true;
   };
+
+  // Produits du poste actif (hors menus) pour le panneau « 86 »
+  const stationProducts = (products || []).filter((p) => {
+    if (p.isMenu) return false;
+    if (!hasMultiStation || effectiveStation === "all") return true;
+    const isBar = p.station === "bar" || p.cat === "boissons";
+    return effectiveStation === "bar" ? isBar : !isBar;
+  });
+  const outCount = stationProducts.filter((p) => !isAvailable(p)).length;
 
   return (
     <div className="p-5">
@@ -122,6 +133,23 @@ export default function CuisineShell({
             </div>
           )}
 
+          {/* Ruptures « 86 » : retirer un plat de la vente depuis la cuisine */}
+          {onToggleProductAvailable && (
+            <button
+              onClick={() => setShowOutOfStock(true)}
+              className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border"
+              style={{
+                background: outCount ? "#C1361B33" : "rgba(255,255,255,.05)",
+                borderColor: outCount ? "#C1361B" : "rgba(255,255,255,.1)",
+                color: outCount ? "#FFB4A3" : "#C9C2B0",
+              }}
+              title="Mettre un plat en rupture ou le remettre en vente"
+            >
+              <Ban size={13} />
+              <span>86 · Ruptures{outCount ? ` (${outCount})` : ""}</span>
+            </button>
+          )}
+
           {/* Bascule Vue Kanban / Par Table */}
           <div className="flex gap-1 p-1 rounded-full bg-white/5">
             {[
@@ -184,6 +212,14 @@ export default function CuisineShell({
         />
       )}
 
+      {showOutOfStock && (
+        <OutOfStockPanel
+          products={stationProducts}
+          onToggle={onToggleProductAvailable}
+          onClose={() => setShowOutOfStock(false)}
+        />
+      )}
+
       {/* Impression thermique du bon cuisine / bar */}
       {printOrder && (
         <ThermalReceiptPreview
@@ -194,6 +230,62 @@ export default function CuisineShell({
           onClose={() => setPrintOrder(null)}
         />
       )}
+    </div>
+  );
+}
+
+/* ── Panneau des ruptures « 86 » ───────────────────────────── */
+
+function OutOfStockPanel({ products, onToggle, onClose }) {
+  const [query, setQuery] = useState("");
+  const list = products
+    .filter((p) => p.name.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => Number(isAvailable(a)) - Number(isAvailable(b)) || a.name.localeCompare(b.name));
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-label="Ruptures 86"
+        className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl bg-[#1E1A15] border border-white/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <h2 className="text-[#F2ECDD] font-semibold flex items-center gap-2"><Ban size={16} /> 86 · Ruptures</h2>
+          <button onClick={onClose} className="rf-tap p-1.5 rounded-full bg-white/5 text-[#C9C2B0]" aria-label="Fermer"><X size={16} /></button>
+        </div>
+        <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2">
+          <Search size={14} className="text-[#9A917E]" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Rechercher un plat…"
+            aria-label="Rechercher un plat"
+            className="flex-1 bg-transparent outline-none text-sm text-[#F2ECDD] placeholder:text-[#6B6355]"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto rf-scrollbar p-2 space-y-1">
+          {list.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onToggle(p.id)}
+              className="rf-tap w-full flex items-center justify-between gap-3 px-3 py-3 rounded-xl text-left hover:bg-white/5"
+            >
+              <span className={`text-sm font-medium ${isAvailable(p) ? "text-[#F2ECDD]" : "text-[#9A917E] line-through"}`}>
+                {p.emoji || "🍽️"} {p.name}
+              </span>
+              <span
+                className="text-[11px] font-extrabold px-2.5 py-1 rounded-full shrink-0"
+                style={isAvailable(p) ? { background: "rgba(255,255,255,.08)", color: "#C9C2B0" } : { background: "#C1361B", color: "#FFF7ED" }}
+              >
+                {isAvailable(p) ? "Marquer 86" : "RUPTURE · Remettre"}
+              </span>
+            </button>
+          ))}
+          {list.length === 0 && <p className="text-sm text-[#9A917E] text-center py-6">Aucun produit.</p>}
+        </div>
+      </div>
     </div>
   );
 }
