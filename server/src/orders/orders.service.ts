@@ -2,6 +2,26 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { PrismaService } from "../prisma/prisma.service";
 import { effectivePrice, normalizeOptionGroups, resolveOptions, toCents, toEuros, OptionPick } from "../billing/pricing";
 
+const COURSE_RANK: Record<string, number> = { entree: 1, plat: 2, dessert: 3 };
+
+/**
+ * Brouillons « en attente de réclame » à libérer dès l'envoi (copie de heldToRelease, src/utils/index.js) :
+ * aucune suite antérieure n'est encore à servir dans la commande, ou le cadencement est désactivé.
+ */
+export function heldToRelease(
+  items: { id: string; status: string; course?: string | null; courseStatus?: string | null }[],
+  pacingEnabled: boolean
+): string[] {
+  return items
+    .filter((i) => i.status === "draft" && i.courseStatus === "held")
+    .filter((i) => {
+      if (!pacingEnabled) return true;
+      const rank = COURSE_RANK[i.course || ""] ?? 0;
+      return !items.some((o) => o.status !== "served" && (COURSE_RANK[o.course || ""] ?? rank) < rank);
+    })
+    .map((i) => i.id);
+}
+
 // Tolérance sur l'horodatage client d'un ajout rejoué depuis la file hors-ligne
 const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
 
@@ -348,6 +368,14 @@ export class OrdersService {
     });
     if (!order) {
       throw new NotFoundException(`Commande introuvable : ${orderId}`);
+    }
+
+    // Une suite n'attend la réclame que si une suite précédente reste à servir (ex. burger seul : envoi direct)
+    const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
+    const pacingEnabled = (cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {}).enableCoursePacing ?? true;
+    const released = heldToRelease(order.items, pacingEnabled);
+    if (released.length > 0) {
+      await this.prisma.orderItem.updateMany({ where: { id: { in: released } }, data: { courseStatus: "direct" } });
     }
 
     const now = new Date();

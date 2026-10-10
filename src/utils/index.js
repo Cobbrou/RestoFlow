@@ -283,3 +283,20 @@ export function formatOptionsText(groups = []) {
     })
     .join("\n");
 }
+
+const COURSE_RANK = { entree: 1, plat: 2, dessert: 3 };
+
+/**
+ * Brouillons « en attente de réclame » à libérer dès l'envoi (copie de heldToRelease, server/src/orders/orders.service.ts) :
+ * aucune suite antérieure n'est encore à servir dans la commande, ou le cadencement est désactivé.
+ */
+export function heldToRelease(items = [], pacingEnabled = true) {
+  return items
+    .filter((i) => i.status === "draft" && i.courseStatus === "held")
+    .filter((i) => {
+      if (!pacingEnabled) return true;
+      const rank = COURSE_RANK[i.course] ?? 0;
+      return !items.some((o) => o.status !== "served" && (COURSE_RANK[o.course] ?? rank) < rank);
+    })
+    .map((i) => i.id);
+}

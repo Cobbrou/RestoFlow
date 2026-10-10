@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { uid } from "../data/seed.js";
-import { getProductEffectivePrice, resolveOptions } from "../utils/index.js";
+import { getProductEffectivePrice, resolveOptions, heldToRelease } from "../utils/index.js";
 import { getSocket } from "../services/socket.js";
 
 /**
@@ -212,12 +212,19 @@ export function useOrderActions(store, {
 
   const sendToKitchen = (orderId) => {
     const serverName = currentStaff ? currentStaff.name.split(" ")[0] : "Service";
-    updateOrder(orderId, (o) => ({
-      ...o,
-      sentAt: Date.now(),
-      server: serverName,
-      items: o.items.map((i) => (i.status === "draft" ? { ...i, status: "new" } : i)),
-    }));
+    const rawModules = config?.modulesConfig;
+    const modules = (typeof rawModules === "string" ? JSON.parse(rawModules) : rawModules) || {};
+    updateOrder(orderId, (o) => {
+      const released = heldToRelease(o.items, modules.enableCoursePacing ?? true);
+      return {
+        ...o,
+        sentAt: Date.now(),
+        server: serverName,
+        items: o.items.map((i) =>
+          i.status === "draft" ? { ...i, status: "new", ...(released.includes(i.id) && { courseStatus: "direct" }) } : i
+        ),
+      };
+    });
     setServerView("plan");
     emit("order:send_kitchen", { orderId, serverName });
   };

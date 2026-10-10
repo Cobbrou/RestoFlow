@@ -25,3 +25,12 @@ describe("options produit (saisie back-office)", () => {
     expect(r).toEqual({ label: "Saignant · Bacon (+2.00€) · Œuf (+1.50€)", extra: 3.5 });
   });
 });
+
+describe("heldToRelease (copie client)", () => {
+  it("burger seul : envoi direct ; avec entrée : réclame", async () => {
+    const { heldToRelease } = await import("./index.js");
+    const plat = { id: "p", course: "plat", status: "draft", courseStatus: "held" };
+    expect(heldToRelease([plat], true)).toEqual(["p"]);
+    expect(heldToRelease([{ id: "e", course: "entree", status: "draft", courseStatus: "direct" }, plat], true)).toEqual([]);
+  });
+});
