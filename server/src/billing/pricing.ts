@@ -120,3 +120,64 @@ export function effectivePrice(
   }
   return product.price || 0;
 }
+
+export interface OptionChoice {
+  label: string;
+  price: number;
+}
+
+export interface OptionGroup {
+  name: string;
+  required: boolean;
+  max: number;
+  choices: OptionChoice[];
+}
+
+export interface OptionPick {
+  group: string;
+  choice: string;
+}
+
+/** Nettoie les groupes d'options saisis au back-office (frontière de confiance) */
+export function normalizeOptionGroups(raw: unknown): OptionGroup[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .flatMap((g: any) => {
+      const name = String(g?.name ?? "").trim().slice(0, 40);
+      const choices: OptionChoice[] = (Array.isArray(g?.choices) ? g.choices : [])
+        .map((c: any) => ({
+          label: String(c?.label ?? "").trim().slice(0, 40),
+          price: toEuros(Math.max(0, toCents(c?.price))),
+        }))
+        .filter((c: OptionChoice, i: number, all: OptionChoice[]) => c.label && all.findIndex((o) => o.label === c.label) === i);
+      if (!name || choices.length === 0) return [];
+      const max = Math.min(choices.length, Math.max(1, Math.floor(Number(g?.max)) || choices.length));
+      return [{ name, required: !!g?.required, max, choices }];
+    })
+    .filter((g, i, all) => all.findIndex((o) => o.name === g.name) === i)
+    .slice(0, 10);
+}
+
+/**
+ * Libellé figé (copie de resolveOptions dans src/utils/index.js) et supplément en centimes
+ * d'une sélection d'options. Lève si la sélection ne respecte pas les groupes du produit.
+ */
+export function resolveOptions(groups: OptionGroup[], picks: OptionPick[] | undefined | null) {
+  const list = Array.isArray(picks) ? picks : [];
+  if (list.some((p) => !groups.some((g) => g.name === p?.group))) throw new Error("Groupe d'options inconnu");
+
+  const parts: string[] = [];
+  let extraCents = 0;
+  for (const g of groups) {
+    const labels = list.filter((p) => p.group === g.name).map((p) => p.choice);
+    const chosen = g.choices.filter((c) => labels.includes(c.label));
+    if (chosen.length !== labels.length) throw new Error(`Option inconnue ou en double pour « ${g.name} »`);
+    if (g.required && chosen.length === 0) throw new Error(`Choix obligatoire : ${g.name}`);
+    if (chosen.length > g.max) throw new Error(`${g.name} : ${g.max} choix maximum`);
+    for (const c of chosen) {
+      extraCents += toCents(c.price);
+      parts.push(c.price > 0 ? `${c.label} (+${c.price.toFixed(2)}€)` : c.label);
+    }
+  }
+  return { label: parts.join(" · "), extraCents };
+}

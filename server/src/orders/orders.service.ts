@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { effectivePrice } from "../billing/pricing";
+import { effectivePrice, normalizeOptionGroups, resolveOptions, toCents, toEuros, OptionPick } from "../billing/pricing";
 
 // Tolérance sur l'horodatage client d'un ajout rejoué depuis la file hors-ligne
 const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
@@ -40,6 +40,7 @@ export class OrdersService {
         courseStatus: it.courseStatus || "direct",
         station: it.station || "kitchen",
         vatRate: it.vatRate ?? 10,
+        options: it.options || "",
       })),
     };
   }
@@ -119,6 +120,7 @@ export class OrdersService {
     addedAt?: number;
     itemId?: string;
     tableId?: string;
+    options?: OptionPick[];
   }) {
     // La commande doit exister (order:create_or_ensure précède toujours, file hors-ligne ordonnée).
     // Table ouverte hors-ligne sur deux terminaux : la commande du terminal arrivé second n'existe pas,
@@ -137,7 +139,20 @@ export class OrdersService {
         : `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     // 🔒 Prix, nom et taux de TVA viennent toujours de la base, jamais du client
-    const { dbProduct, name, price, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
+    const { dbProduct, name, price: basePrice, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
+
+    // Options (cuisson, suppléments) validées contre la fiche produit ; le supplément s'ajoute au prix de la ligne
+    let optionsLabel = "";
+    let price = basePrice;
+    if (dbProduct) {
+      try {
+        const resolved = resolveOptions(normalizeOptionGroups(JSON.parse(dbProduct.options || "[]")), data.options);
+        optionsLabel = resolved.label;
+        price = toEuros(toCents(basePrice) + resolved.extraCents);
+      } catch (e: any) {
+        throw new BadRequestException(e.message);
+      }
+    }
 
     const cat = data.product?.cat || dbProduct?.cat || "";
     const isBar =
@@ -162,6 +177,7 @@ export class OrdersService {
           i.productId === data.product.id &&
           i.status === "draft" &&
           !i.notes &&
+          (i.options || "") === optionsLabel &&
           (i.course || "direct") === course &&
           i.price === price
       );
@@ -181,6 +197,7 @@ export class OrdersService {
             vatRate,
             qty: 1,
             notes: "",
+            options: optionsLabel || null,
             status: "draft",
             isMenu: false,
             course,

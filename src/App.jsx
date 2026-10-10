@@ -356,7 +356,7 @@ export default function App() {
             roles={roles}
             onToggleProductAvailable={management.onToggleProductAvailable}
             onBack={() => setServerView("plan")}
-            onAdd={(p) => addProductToOrder(activeTable.id, p)}
+            onAdd={(p, optionPicks) => addProductToOrder(activeTable.id, p, optionPicks)}
             onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(activeTable.id, menuProduct, composition)}
             onQty={(itemId, d) => changeQty(activeOrder.id, itemId, d)}
             onRemove={(itemId) => removeItem(activeOrder.id, itemId)}

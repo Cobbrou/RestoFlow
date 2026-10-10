@@ -6,7 +6,7 @@ import {
   ArrowRightLeft, Merge, BellRing
 } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
-import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice } from "../../utils/index.js";
+import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice, resolveOptions } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
@@ -54,6 +54,7 @@ export default function OrderTaking({
   const [confirmSend, setConfirmSend] = useState(false);
   const [mobileTab, setMobileTab]     = useState("menu");   // "menu" | "commande"
   const [composerMenu, setComposerMenu] = useState(null);
+  const [optionsFor, setOptionsFor] = useState(null); // produit à options (cuisson, suppléments)
   const [paying, setPaying]           = useState(false);
   const [receipt, setReceipt]         = useState(null);
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
@@ -146,6 +147,7 @@ export default function OrderTaking({
       return;
     }
     if (p.isMenu) setComposerMenu(p);
+    else if (p.options?.length) setOptionsFor(p);
     else onAdd(p);
   };
 
@@ -372,6 +374,13 @@ export default function OrderTaking({
       getPortionsAvailable={getPortionsAvailable}
       onCancel={() => setComposerMenu(null)}
       onConfirm={(composition) => { onAddComposedMenu(composerMenu, composition); setComposerMenu(null); }}
+    />
+  ) || optionsFor && (
+    <OptionPicker
+      product={optionsFor}
+      basePrice={getProductEffectivePrice(optionsFor, config)}
+      onCancel={() => setOptionsFor(null)}
+      onConfirm={(picks) => { onAdd(optionsFor, picks); setOptionsFor(null); }}
     />
   );
 
@@ -709,6 +718,7 @@ function DraftItemRow({ item, isMobile, products, hasSuites, noteOpen, onToggleN
         </div>
         <button onClick={onRemove} className="text-[#B5451B] shrink-0 p-0.5"><X size={isMobile ? 16 : 14} /></button>
       </div>
+      {item.options && <p className="text-[11px] text-[#6B4226] mt-0.5">↳ {item.options}</p>}
       {item.isMenu && item.composition?.length > 0 && (
         <div className="mt-1 space-y-0.5">
           {item.composition.map((g, i) => <p key={i} className="text-[11px] text-[#6B4226]">• {g.title} : {g.names.join(", ")}</p>)}
@@ -802,6 +812,7 @@ function SentLine({ item, products, hasSuites, onVoid }) {
           )}
         </div>
       </div>
+      {item.options && <p className="text-[10px] text-[#6B4226] mt-0.5 pl-5">↳ {item.options}</p>}
       {item.isMenu && item.composition?.length > 0 && (
         <div className="mt-1 pl-5 space-y-0.5">
           {item.composition.map((g, i) => <p key={i} className="text-[10px] text-[#8A8378]">• {g.title} : {g.names.join(", ")}</p>)}
@@ -887,6 +898,77 @@ export function AllergyBadge({ item, product, compact }) {
       </span>
       {item?.notes && <span className="font-semibold normal-case tracking-normal opacity-90">{item.notes}</span>}
     </div>
+  );
+}
+
+/* ── Options produit (cuisson, suppléments) ────────────────── */
+
+function OptionPicker({ product, basePrice, onCancel, onConfirm }) {
+  const groups = product.options || [];
+  const [picks, setPicks] = useState([]); // [{ group, choice }]
+
+  const toggle = (g, label) =>
+    setPicks((prev) => {
+      const mine = prev.filter((p) => p.group === g.name);
+      if (mine.some((p) => p.choice === label)) return prev.filter((p) => !(p.group === g.name && p.choice === label));
+      // Choix unique : on remplace ; sinon on ajoute dans la limite du groupe
+      if (g.max === 1) return [...prev.filter((p) => p.group !== g.name), { group: g.name, choice: label }];
+      return mine.length >= g.max ? prev : [...prev, { group: g.name, choice: label }];
+    });
+
+  const complete = groups.every((g) => !g.required || picks.some((p) => p.group === g.name));
+  const { extra } = resolveOptions(groups, picks);
+
+  return (
+    <Modal title={`${product.emoji || "🍽️"} ${product.name}`} onClose={onCancel}>
+      <div className="space-y-4 max-h-[400px] overflow-y-auto rf-scrollbar pr-1">
+        {groups.map((g) => {
+          const count = picks.filter((p) => p.group === g.name).length;
+          return (
+            <div key={g.name}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-[#6B4226]">
+                  {g.name}{g.required && <span className="text-[#C1361B]"> *</span>}
+                </span>
+                <span className="text-[10px] text-[#9A917E]">
+                  {g.max === 1 ? (g.required ? "1 choix obligatoire" : "1 choix max") : `${count}/${g.max} max`}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {g.choices.map((c) => {
+                  const on = picks.some((p) => p.group === g.name && p.choice === c.label);
+                  return (
+                    <button
+                      key={c.label}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggle(g, c.label)}
+                      className="rf-tap py-2.5 px-3 rounded-lg text-sm font-semibold flex items-center justify-between gap-2 border"
+                      style={{ background: on ? "#2B2622" : "#fff", color: on ? "#FAF6EE" : "#2B2622", borderColor: on ? "#2B2622" : "rgba(0,0,0,.1)" }}
+                    >
+                      <span className="truncate">{c.label}</span>
+                      {c.price > 0 && <span className="text-xs opacity-80 shrink-0">+{money(c.price)}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button type="button" onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
+        <button
+          type="button"
+          disabled={!complete}
+          onClick={() => onConfirm(picks)}
+          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+          style={{ background: "#C1440E" }}
+        >
+          Ajouter · {money(basePrice + extra)}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

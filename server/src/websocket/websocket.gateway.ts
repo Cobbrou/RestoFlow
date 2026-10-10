@@ -472,7 +472,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.logger.log(`Impression automatique du bon cuisine vers ${kitchenPrinter.ip}:${kitchenPrinter.port || 9100}`);
       const rawText = `\x1b\x40\x1b\x61\x01--- BON DE CUISINE ---\nTABLE ${order.table?.number || "?"}\nServeur: ${order.server}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
         order.items
-          .map((i: any) => `${i.qty}x ${i.name} ${i.notes ? `(${i.notes})` : ""}`)
+          .map((i: any) => `${i.qty}x ${i.name} ${i.notes ? `(${i.notes})` : ""}${i.options ? `\n   > ${i.options}` : ""}`)
           .join("\n") +
         `\n\n\n\x1d\x56\x01`;
       await this.printerService.sendRaw(kitchenPrinter.ip, kitchenPrinter.port || 9100, Buffer.from(rawText, "latin1"));
@@ -626,7 +626,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.logger.log(`Impression automatique facturette vers ${caissePrinter.ip}:${caissePrinter.port || 9100}`);
       const rawText = `\x1b\x40\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\nSIRET: ${cfg.siret || ""}\n\nFacture: ${historyRecord.ticketNumber}\nTable: ${historyRecord.tableNumber || "?"}\nDate: ${new Date(historyRecord.createdAt).toLocaleString()}\n\n\x1b\x61\x00` +
         historyRecord.items
-          .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E`)
+          .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
           .join("\n") +
         (historyRecord.tip > 0 ? `\nPourboire: ${Number(historyRecord.tip).toFixed(2)}E` : "") +
         `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01\x1b\x70\x00\x19\xfa`;
