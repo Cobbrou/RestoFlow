@@ -12,6 +12,7 @@ import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 import { useModules } from "../../hooks/useModules.js";
+import { hasPermission } from "../../utils/permissions.js";
 
 const TableActionModal = lazy(() => import("../../components/TableActionModal.jsx"));
 
@@ -33,10 +34,10 @@ export default function OrderTaking({
   table, order, products, isMobile,
   recipes = [], ingredients = [], config = {},
   tables = [], orders = [],
-  currentStaff,
+  currentStaff, roles = [],
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
-  onQty, onRemove, onNote,
+  onQty, onRemove, onVoid, onNote,
   onSend, onServe, onCheckout, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
   onCallCourse,
@@ -58,6 +59,9 @@ export default function OrderTaking({
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [kitchenPrintModal, setKitchenPrintModal] = useState(false);
   const [tableActionModal, setTableActionModal] = useState(null); // "transfer" | "merge" | null
+  const [voidTarget, setVoidTarget] = useState(null); // article envoyé à annuler
+  // Même droit que les avoirs, revérifié par le serveur
+  const canVoid = hasPermission(currentStaff, roles.find((r) => r.id === currentStaff?.roleId), "caisse.close");
 
   // 🪟 Axe 6 : Détection de clôture ou encaissement concurrent par un autre terminal
   const initialOrderIdRef = useRef(order?.id);
@@ -223,7 +227,9 @@ export default function OrderTaking({
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wide text-[#8A8378] mb-1.5">Déjà envoyé</p>
             <div className="space-y-1.5">
-              {sentItems.map((it) => <SentLine key={it.id} item={it} products={products} hasSuites={hasSuites} />)}
+              {sentItems.map((it) => (
+                <SentLine key={it.id} item={it} products={products} hasSuites={hasSuites} onVoid={canVoid && onVoid ? () => setVoidTarget(it) : null} />
+              ))}
             </div>
           </div>
         )}
@@ -383,6 +389,19 @@ export default function OrderTaking({
             setPaying(false);
             setReceipt(r);
           }}
+        />
+      )}
+
+      {voidTarget && (
+        <VoidItemModal
+          item={voidTarget}
+          onCancel={() => setVoidTarget(null)}
+          onConfirm={(qty, reason, done) =>
+            onVoid(voidTarget.id, qty, reason, (ok) => {
+              done();
+              if (ok) setVoidTarget(null);
+            })
+          }
         />
       )}
 
@@ -726,7 +745,7 @@ function DraftItemRow({ item, isMobile, products, hasSuites, noteOpen, onToggleN
   );
 }
 
-function SentLine({ item, products, hasSuites }) {
+function SentLine({ item, products, hasSuites, onVoid }) {
   const statusMap = {
     new:       { l: "envoyé", c: "#D9A441" },
     preparing: { l: "en préparation", c: "#3E7CB1" },
@@ -770,6 +789,17 @@ function SentLine({ item, products, hasSuites }) {
             </span>
           )}
           <span className="font-semibold" style={{ color: meta.c }}>{meta.l}</span>
+          {onVoid && (
+            <button
+              type="button"
+              onClick={onVoid}
+              title="Annuler cet article (motif obligatoire)"
+              aria-label={`Annuler ${item.name}`}
+              className="rf-tap p-0.5 rounded text-[#B5451B] hover:bg-[#C1361B]/10"
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
       </div>
       {item.isMenu && item.composition?.length > 0 && (
@@ -778,6 +808,70 @@ function SentLine({ item, products, hasSuites }) {
         </div>
       )}
     </div>
+  );
+}
+
+const VOID_REASONS = ["Erreur de saisie", "Client a changé d'avis", "Plat renvoyé", "Plat tombé / cassé", "Rupture en cuisine"];
+
+function VoidItemModal({ item, onCancel, onConfirm }) {
+  const [qty, setQty] = useState(item.qty);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const valid = reason.trim().length >= 3;
+  const restockHint =
+    item.status === "new"
+      ? "Pas encore commencé : les ingrédients seront réintégrés au stock."
+      : "Déjà en préparation ou servi : la consommation de stock est conservée.";
+
+  return (
+    <Modal title={`Annuler : ${item.name}`} onClose={onCancel}>
+      <div className="space-y-3">
+        {item.qty > 1 && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-[#5B5346]">Quantité à annuler</span>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setQty((q) => Math.max(1, q - 1))} className="rf-tap w-8 h-8 rounded-full bg-black/5 flex items-center justify-center" aria-label="Moins"><Minus size={14} /></button>
+              <span className="text-sm font-bold w-10 text-center">{qty} / {item.qty}</span>
+              <button type="button" onClick={() => setQty((q) => Math.min(item.qty, q + 1))} className="rf-tap w-8 h-8 rounded-full bg-black/5 flex items-center justify-center" aria-label="Plus"><Plus size={14} /></button>
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-1.5">
+          {VOID_REASONS.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setReason(r)}
+              className="rf-tap text-xs px-2.5 py-1 rounded-full"
+              style={{ background: reason === r ? "#2B2622" : "rgba(0,0,0,.05)", color: reason === r ? "#FAF6EE" : "#5B5346" }}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={200}
+          placeholder="Motif (obligatoire)"
+          aria-label="Motif d'annulation"
+          className="w-full text-sm px-3 py-2 rounded-lg border border-black/15 outline-none focus:border-black/40"
+        />
+        <p className="text-[11px] text-[#8A8378]">{restockHint} L'annulation est tracée dans le journal fiscal.</p>
+        <div className="flex gap-2 justify-end">
+          <button type="button" onClick={onCancel} className="rf-tap px-3 py-2 rounded-lg text-sm font-semibold bg-black/5">Retour</button>
+          <button
+            type="button"
+            disabled={!valid || busy}
+            onClick={() => { setBusy(true); onConfirm(qty, reason.trim(), () => setBusy(false)); }}
+            className="rf-tap px-3 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+            style={{ background: "#C1361B" }}
+          >
+            {busy ? "Annulation…" : `Annuler ${qty} article${qty > 1 ? "s" : ""}`}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
