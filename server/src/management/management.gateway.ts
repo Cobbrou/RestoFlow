@@ -1,7 +1,7 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket } from "@nestjs/websockets";
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server, Socket } from "socket.io";
-import { WsAuthGuard, STAFF_ROOM, authenticateSocket } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, STAFF_ROOM, SENSITIVE, authenticateSocket, permRooms } from "../auth/guards/ws-auth.guard";
 import { AuthService } from "../auth/auth.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
@@ -36,7 +36,14 @@ export class ManagementGateway {
           if (!(await authenticateSocket(s as any, this.authService))) s.emit("auth:required");
         }
       }
-      this.server.to(STAFF_ROOM).emit(event, list);
+      if (event === "staff:list") {
+        // Coordonnées (e-mail, téléphone) réservées aux gestionnaires de l'équipe
+        const managers = permRooms(SENSITIVE.staffContacts);
+        this.server.to(managers).emit(event, list);
+        this.server.to(STAFF_ROOM).except(managers).emit(event, list.map(({ email: _e, phone: _p, ...s }: any) => s));
+      } else {
+        this.server.to(STAFF_ROOM).emit(event, list);
+      }
       return { ok: true };
     } catch (err: any) {
       return { ok: false, error: err.message };

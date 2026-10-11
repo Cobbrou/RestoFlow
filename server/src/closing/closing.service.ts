@@ -758,7 +758,8 @@ export class ClosingService {
     let unbalancedEntries = 0;
 
     tickets.forEach((ticket, idx) => {
-      const ecritureNum = `ECR${String(idx + 1).padStart(6, "0")}`;
+      // Numéro de séquence fiscal : stable d'un export à l'autre (deux exports successifs ne réutilisent jamais un numéro)
+      const ecritureNum = `ECR${String(ticket.sequenceNumber ?? idx + 1).padStart(6, "0")}`;
       const date = formatDate(ticket.createdAt);
       const pieceRef = ticket.ticketNumber || ticket.id;
       const isCreditNote = ticket.type === "CREDIT_NOTE";

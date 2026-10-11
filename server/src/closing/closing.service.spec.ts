@@ -70,3 +70,19 @@ describe("ClosingService.generateFecExport", () => {
     expect(fec.content).toContain("|468600|Pourboires à reverser|");
   });
 });
+
+describe("ClosingService.generateFecExport : numérotation", () => {
+  it("numérote les écritures par le n° de séquence fiscal, stable d'un export à l'autre", async () => {
+    const ticket = (seq: number) => ({
+      id: `h${seq}`, ticketNumber: `FAC-2026-${seq}`, sequenceNumber: seq, type: "SALE", createdAt: new Date("2026-10-10T12:00:00"),
+      total: 11, tip: 0, paymentMethod: "carte", payments: JSON.stringify([{ method: "carte", amount: 11 }]),
+      vatDetails: JSON.stringify({ rates: [{ rate: 10, ht: 10, vat: 1 }] }),
+    });
+    const prisma: any = { orderHistory: { findMany: vi.fn().mockResolvedValue([ticket(41), ticket(42)]) } };
+    const config: any = { getConfig: vi.fn().mockResolvedValue({ siret: "98765432100012", fecExportConfig: null }) };
+    const fec = await new ClosingService(prisma, config, {} as any).generateFecExport({ startDate: "2026-10-10" });
+    expect(fec.content).toContain("|ECR000041|");
+    expect(fec.content).toContain("|ECR000042|");
+    expect(fec.content).not.toContain("|ECR000001|");
+  });
+});

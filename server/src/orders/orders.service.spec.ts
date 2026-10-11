@@ -221,3 +221,62 @@ describe("Menus : composition validée contre la formule", () => {
     expect(prisma.orderItem.create).not.toHaveBeenCalled();
   });
 });
+
+describe("OrdersService.createOrEnsure", () => {
+  const table = { id: "t1", number: 1 };
+  const make = () => {
+    const orders: any[] = [{ id: "ord_old", tableId: "t1", status: "closed", items: [] }];
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    const prisma: any = {
+      table: { findUnique: vi.fn().mockResolvedValue(table) },
+      order: {
+        findFirst: vi.fn(async ({ where }) => {
+          await tick();
+          return orders.find((o) => o.tableId === where.tableId && o.status === where.status) || null;
+        }),
+        findUnique: vi.fn(async ({ where }) => orders.find((o) => o.id === where.id) || null),
+        create: vi.fn(async ({ data }) => {
+          await tick();
+          const o = { ...data, items: [] };
+          orders.push(o);
+          return o;
+        }),
+      },
+    };
+    return { orders, service: new OrdersService(prisma) };
+  };
+
+  it("deux ouvertures simultanées de la même table donnent une seule commande", async () => {
+    const { orders, service } = make();
+    const [a, b] = await Promise.all([service.createOrEnsure("t1", "A", "ord_a"), service.createOrEnsure("t1", "B", "ord_b")]);
+    expect(a?.id).toBe("ord_a");
+    expect(b?.id).toBe("ord_a");
+    expect(orders.filter((o) => o.status === "open")).toHaveLength(1);
+  });
+
+  it("un orderId déjà encaissé n'est pas renvoyé : nouvelle commande ouverte", async () => {
+    const { service } = make();
+    const order = await service.createOrEnsure("t1", "A", "ord_old");
+    expect(order?.status).toBe("open");
+    expect(order?.id).not.toBe("ord_old");
+  });
+});
+
+describe("OrdersService.callCourse", () => {
+  it("ne réclame pas une suite encore en brouillon (non envoyée ni déstockée)", async () => {
+    const prisma: any = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "o1",
+          items: [
+            { id: "sent", course: "plat", courseStatus: "held", status: "new" },
+            { id: "draft", course: "plat", courseStatus: "held", status: "draft" },
+          ],
+        }),
+      },
+      orderItem: { updateMany: vi.fn() },
+    };
+    const res = await new OrdersService(prisma).callCourse("o1", "plat");
+    expect(res.calledIds).toEqual(["sent"]);
+  });
+});

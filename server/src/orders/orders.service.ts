@@ -65,6 +65,17 @@ export function checkMenuComposition(groups: any[], composition: unknown) {
   return groups;
 }
 
+// Ouvertures de table sérialisées par table : deux terminaux qui ouvrent la même table au même instant
+// obtiennent la même commande, jamais deux commandes ouvertes
+// ponytail: verrou en mémoire mono-processus, index unique partiel en base si plusieurs instances serveur
+const tableLocks = new Map<string, Promise<unknown>>();
+function withTableLock<T>(tableId: string, fn: () => Promise<T>): Promise<T> {
+  const run = (tableLocks.get(tableId) || Promise.resolve()).catch(() => {}).then(fn);
+  tableLocks.set(tableId, run);
+  run.finally(() => tableLocks.get(tableId) === run && tableLocks.delete(tableId)).catch(() => {});
+  return run;
+}
+
 @Injectable()
 export class OrdersService {
   constructor(private prisma: PrismaService) {}
@@ -151,35 +162,29 @@ export class OrdersService {
 
     const resolvedTableId = table.id;
 
-    let order = null;
-    if (orderId) {
-      order = await this.prisma.order.findUnique({
-        where: { id: orderId },
-        include: { items: true, table: true },
-      });
-    }
-
-    if (!order) {
-      order = await this.prisma.order.findFirst({
-        where: { tableId: resolvedTableId, status: "open" },
-        include: { items: true, table: true },
-      });
-    }
-
-    if (!order) {
-      order = await this.prisma.order.create({
-        data: {
-          id: orderId || `ord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          tableId: resolvedTableId,
-          server: serverName || "Service",
-          status: "open",
-          covers: validCovers(covers),
-        },
-        include: { items: true, table: true },
-      });
-    }
-
-    return this.formatOrder(order);
+    return withTableLock(resolvedTableId, async () => {
+      // Seule une commande encore ouverte sur cette table est reprise (rejeu après encaissement, autre table : ignorée)
+      const order =
+        (await this.prisma.order.findFirst({
+          where: { tableId: resolvedTableId, status: "open" },
+          include: { items: true, table: true },
+        })) ||
+        (await this.prisma.order.create({
+          data: {
+            // Identifiant du terminal réutilisé seulement s'il est libre
+            id:
+              orderId && !(await this.prisma.order.findUnique({ where: { id: orderId } }))
+                ? orderId
+                : `ord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            tableId: resolvedTableId,
+            server: serverName || "Service",
+            status: "open",
+            covers: validCovers(covers),
+          },
+          include: { items: true, table: true },
+        }));
+      return this.formatOrder(order);
+    });
   }
 
   /**
@@ -666,10 +671,12 @@ export class OrdersService {
     });
     if (!order) throw new NotFoundException("Commande introuvable");
 
+    // Seules les suites déjà envoyées (et déstockées) sont réclamées ; un brouillon part par l'envoi en cuisine
     const heldItems = order.items.filter(
       (i: any) =>
         (course === "suite" || i.course === course) &&
-        i.courseStatus === "held"
+        i.courseStatus === "held" &&
+        i.status !== "draft"
     );
 
     if (heldItems.length > 0) {

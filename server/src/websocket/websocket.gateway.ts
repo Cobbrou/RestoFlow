@@ -11,7 +11,7 @@ import { Server, Socket } from "socket.io";
 import { Injectable, Logger, UseGuards, UseInterceptors, ValidationPipe } from "@nestjs/common";
 import { ClientActionInterceptor } from "./client-action.interceptor";
 import { PrismaService } from "../prisma/prisma.service";
-import { AuthService } from "../auth/auth.service";
+import { AuthService, SessionPayload } from "../auth/auth.service";
 import { OrdersService, orderLabel } from "../orders/orders.service";
 import { BillingService } from "../billing/billing.service";
 import { ConfigService } from "../config/config.service";
@@ -24,7 +24,7 @@ import { CatalogService } from "../catalog/catalog.service";
 import { JournalService } from "../journal/journal.service";
 import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
-import { WsAuthGuard, authenticateSocket, STAFF_ROOM } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
 import { Public } from "../auth/decorators/public.decorator";
 import { ALLOWED_ORIGINS } from "../cors";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
@@ -67,13 +67,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.logger.log(`Client connected: ${client.id}`);
     try {
       // Sans session : uniquement de quoi afficher l'écran de connexion PIN
-      if (!(await authenticateSocket(client, this.authService))) {
+      const user = await authenticateSocket(client, this.authService);
+      if (!user) {
         client.emit("sync:init", await this.getPublicState());
         client.emit("auth:required");
         return;
       }
       client.emit("auth:ok");
-      const fullState = await this.getFullState();
+      const fullState = await this.getFullState(user);
       client.emit("sync:init", fullState);
     } catch (err) {
       this.logger.error("Error sending initial sync to client", err);
@@ -102,9 +103,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   /**
-   * État initial global sécurisé (les PINs sont strictement exclus)
+   * État initial global sécurisé (les PINs sont strictement exclus) ;
+   * tickets, Z, mouvements de stock et coordonnées de l'équipe selon les permissions de la session
    */
-  public async getFullState() {
+  public async getFullState(user: SessionPayload) {
     const [
       tables,
       rawOrders,
@@ -194,20 +196,21 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       createdAt: m.createdAt.getTime(),
     }));
 
+    const can = (perms: string[]) => hasAnyPermission(user, perms);
     return {
       tables,
       orders: parsedOrders,
       products,
       menus,
       roles: parsedRoles,
-      staff,
-      history: parsedHistory,
+      staff: can(SENSITIVE.staffContacts) ? staff : staff.map(({ email: _e, phone: _p, ...s }) => s),
+      history: can(SENSITIVE.history) ? parsedHistory : [],
       ingredients: parsedIngredients,
       recipes: rawRecipes,
-      stockMovements: parsedMovements,
+      stockMovements: can(SENSITIVE.stockMovements) ? parsedMovements : [],
       config: rawConfig,
       reservations: rawReservations,
-      closings,
+      closings: can(SENSITIVE.closings) ? closings : [],
     };
   }
 
@@ -216,10 +219,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @Public()
   @SubscribeMessage("sync:request")
   async handleSyncRequest(@ConnectedSocket() client: Socket) {
-    if (!(await authenticateSocket(client, this.authService))) {
+    const user = await authenticateSocket(client, this.authService);
+    if (!user) {
       return { ok: true, state: await this.getPublicState(), authRequired: true };
     }
-    const fullState = await this.getFullState();
+    const fullState = await this.getFullState(user);
     return { ok: true, state: fullState };
   }
 
@@ -251,6 +255,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("salle.order", "gestion.tables")
   @SubscribeMessage("tables:transfer")
   async handleTableTransfer(
+    @ConnectedSocket() client: Socket,
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: TransferTableDto
   ) {
     try {
@@ -263,7 +268,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.server.to(STAFF_ROOM).emit("tables:transferred", {
         sourceTableNumber: res.sourceNumber,
         targetTableNumber: res.targetNumber,
-        server: data.staffName || res.server,
+        server: client.data.user.name,
       });
 
       return { ok: true, order: formattedOrder };
@@ -275,6 +280,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("salle.order", "gestion.tables")
   @SubscribeMessage("tables:merge")
   async handleTableMerge(
+    @ConnectedSocket() client: Socket,
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: MergeTableDto
   ) {
     try {
@@ -288,7 +294,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.server.to(STAFF_ROOM).emit("tables:merged", {
         sourceTableNumber: res.sourceNumber,
         targetTableNumber: res.targetNumber,
-        server: data.staffName || res.server,
+        server: client.data.user.name,
       });
 
       return { ok: true, order: formattedTargetOrder };
@@ -413,7 +419,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         (await this.stockService.returnForVoid(item, voidQty, data.orderId, label, actor.staffId, reason));
       if (restocked) {
         this.server.to(STAFF_ROOM).emit("stock:updated", await this.stockService.findAllIngredients());
-        this.server.to(STAFF_ROOM).emit("stock:movements_updated", await this.stockService.getMovements(60));
+        this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", await this.stockService.getMovements(60));
       }
 
       this.server.to(STAFF_ROOM).emit("order:updated", order);
@@ -532,7 +538,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
     }
     this.server.to(STAFF_ROOM).emit("stock:updated", stockResult.refreshedIngredients);
-    this.server.to(STAFF_ROOM).emit("stock:movements_updated", stockResult.recentMovements);
+    this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", stockResult.recentMovements);
   }
 
   /**
@@ -719,7 +725,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       if (res.closed) this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
       else this.server.to(STAFF_ROOM).emit("order:updated", await this.ordersService.findById(res.orderId));
       if (res.table) this.server.to(STAFF_ROOM).emit("table:updated", res.table);
-      this.server.to(STAFF_ROOM).emit("history:new_entry", res.history);
+      this.server.to(permRooms(SENSITIVE.history)).emit("history:new_entry", res.history);
       // Vente comptoir : déstockage une fois la vente validée (un encaissement refusé ne déstocke rien)
       if (res.soldDirectIds.length > 0) {
         await this.deductStock(res.orderId, res.soldDirectIds).catch((e) => this.logger.error(`Déstockage comptoir : ${e.message}`));
@@ -850,6 +856,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:add_movement")
   async handleAddStockMovement(
+    @ConnectedSocket() client: Socket,
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: StockMovementDto
   ) {
     try {
@@ -859,7 +866,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         quantity: Number(data.quantity),
         unitCost: data.unitCost !== undefined ? Number(data.unitCost) : undefined,
         reason: data.reason,
-        staffId: data.staffId,
+        // Mouvement attribué à la session, jamais à un équipier désigné par le client
+        staffId: client.data.user.staffId,
         orderId: data.orderId,
       });
 
@@ -875,7 +883,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }));
 
       this.server.to(STAFF_ROOM).emit("stock:updated", formattedIngredients);
-      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
+      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
 
       if (result.affectedProducts.length > 0) {
         this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
@@ -895,7 +903,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const ingredients = await this.stockService.findAllIngredients();
       const movements = await this.stockService.getMovements(60);
       this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
-      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
+      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
       return { ok: true, ingredient: created };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -911,7 +919,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const ingredients = await this.stockService.findAllIngredients();
       const movements = await this.stockService.getMovements(60);
       this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
-      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
+      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
       return { ok: true, ingredient: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -982,7 +990,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       this.server.to(STAFF_ROOM).emit("catalog:products_updated", allProducts);
       this.server.to(STAFF_ROOM).emit("stock:updated", allIngredients);
-      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
+      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
       this.server.to(STAFF_ROOM).emit("recipe:updated", parsedRecipes);
 
       return { ok: true, ...result };
@@ -1066,7 +1074,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
 
       // Diffusion temps réel de la nouvelle clôture Z à tous les postes connectés
-      this.server.to(STAFF_ROOM).emit("closing:new_z", zReport);
+      this.server.to(permRooms(SENSITIVE.closings)).emit("closing:new_z", zReport);
       await this.journal.log("Z_CLOSING", { staffId: client.data.user.staffId, name: client.data.user.name }, { reportNumber: zReport.reportNumber, totalNet: zReport.totalNet });
 
       // Recharger l'état de la config et de l'historique
@@ -1088,7 +1096,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         period: String(data?.period || ""),
         closedBy: client.data.user.name,
       });
-      this.server.to(STAFF_ROOM).emit("closing:new_period", closing);
+      this.server.to(permRooms(SENSITIVE.closings)).emit("closing:new_period", closing);
       await this.journal.log("PERIOD_CLOSING", { staffId: client.data.user.staffId, name: client.data.user.name }, {
         reportNumber: closing.reportNumber,
         totalNet: closing.totalNet,
@@ -1113,7 +1121,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage("closing:get_history")
   async handleGetClosingHistory(@MessageBody() data?: { limit?: number }) {
     try {
-      const list = await this.closingService.getClosingsHistory(data?.limit || 50);
+      const list = await this.closingService.getClosingsHistory(Math.min(Number(data?.limit) || 50, 500));
       return { ok: true, closings: list };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -1162,7 +1170,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         Array.isArray(data?.lines) ? data.lines : null,
         data?.refundMethod
       );
-      this.server.to(STAFF_ROOM).emit("history:new_entry", creditNote);
+      this.server.to(permRooms(SENSITIVE.history)).emit("history:new_entry", creditNote);
       await this.journal.log("CREDIT_NOTE", { staffId: client.data.user.staffId, name: client.data.user.name }, {
         ticketNumber: creditNote.ticketNumber,
         refTicketNumber: creditNote.refTicketNumber,

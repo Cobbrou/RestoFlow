@@ -491,7 +491,8 @@ export function useOrderActions(store, {
     updateOrder(orderId, (o) => ({
       ...o,
       items: o.items.map((i) => {
-        if ((course === "suite" || i.course === course) && i.courseStatus === "held") {
+        // Même règle que le serveur : un brouillon part par l'envoi en cuisine, pas par la réclame
+        if ((course === "suite" || i.course === course) && i.courseStatus === "held" && i.status !== "draft") {
           return { ...i, courseStatus: "called", status: "new" };
         }
         return i;

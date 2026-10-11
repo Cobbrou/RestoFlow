@@ -194,19 +194,22 @@ export class StockService {
       throw new NotFoundException(`Ingrédient ${input.ingredientId} non trouvé`);
     }
 
-    const newStock = Math.max(0, ingredient.currentStock + input.quantity);
     const movementId = `mov_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-    // Transaction atomique
-    const [updatedIngredient, movement] = await this.prisma.$transaction([
-      this.prisma.ingredient.update({
+    // 🔒 Incrément atomique : un déstockage de commande concurrent n'est jamais écrasé par une valeur relue avant lui
+    const { updatedIngredient, movement, previousStock } = await this.prisma.$transaction(async (tx) => {
+      let updated = await tx.ingredient.update({
         where: { id: input.ingredientId },
         data: {
-          currentStock: newStock,
+          currentStock: { increment: input.quantity },
           costPerUnit: input.unitCost !== undefined && input.unitCost > 0 ? input.unitCost : ingredient.costPerUnit,
         },
-      }),
-      this.prisma.stockMovement.create({
+      });
+      const before = updated.currentStock - input.quantity;
+      if (updated.currentStock < 0) {
+        updated = await tx.ingredient.update({ where: { id: input.ingredientId }, data: { currentStock: 0 } });
+      }
+      const created = await tx.stockMovement.create({
         data: {
           id: movementId,
           ingredientId: input.ingredientId,
@@ -217,8 +220,10 @@ export class StockService {
           staffId: input.staffId || null,
           reason: input.reason || null,
         },
-      }),
-    ]);
+      });
+      return { updatedIngredient: updated, movement: created, previousStock: before };
+    });
+    const newStock = updatedIngredient.currentStock;
 
     // Rupture en cascade : si newStock <= 0, basculer tous les produits dépendants critiques en available: false
     const affectedProducts: string[] = [];
@@ -232,7 +237,7 @@ export class StockService {
           affectedProducts.push(item.productId);
         }
       }
-    } else if (ingredient.currentStock <= 0 && newStock > 0) {
+    } else if (previousStock <= 0 && newStock > 0) {
       // Si on revient en stock positif, réactiver les produits si tous leurs ingrédients critiques sont OK
       for (const item of ingredient.recipeItems) {
         if (!item.product.available) {
