@@ -42,7 +42,7 @@ export default function Gestion(props) {
   }
   const merged = { ...ctx, ...props };
   const { hasStocks } = useModules();
-  const { view, setView, currentStaff, roles } = merged;
+  const { view: requestedView, setView, currentStaff, roles } = merged;
 
   const tabs = [
     { id: "tables",        label: "Tables",               icon: Table2 },
@@ -81,10 +81,8 @@ export default function Gestion(props) {
 
   const visibleTabs = tabs.filter((t) => canAccessSubtab(t.id));
 
-  // Auto-redirection si la vue active n'est pas autorisée
-  if (visibleTabs.length > 0 && !canAccessSubtab(view)) {
-    setView(visibleTabs[0].id);
-  }
+  // Vue demandée non autorisée : premier onglet accessible (dérivé, sans setState pendant le rendu)
+  const view = canAccessSubtab(requestedView) ? requestedView : visibleTabs[0]?.id;
 
   return (
     <div className="p-5">
