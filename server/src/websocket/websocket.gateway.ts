@@ -476,17 +476,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {
     try {
       // 1. Décompte automatique et atomique des stocks (Axe 2 & 5)
-      const stockResult = await this.stockService.deductForOrder(data.orderId);
-      if (stockResult) {
-        for (const msg of stockResult.stockAlerts) {
-          this.server.to(STAFF_ROOM).emit("stock:alert", { message: msg });
-        }
-        if (stockResult.affectedProducts.length > 0) {
-          this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
-        }
-        this.server.to(STAFF_ROOM).emit("stock:updated", stockResult.refreshedIngredients);
-        this.server.to(STAFF_ROOM).emit("stock:movements_updated", stockResult.recentMovements);
-      }
+      await this.deductStock(data.orderId);
 
       // 2. Passage des articles de la commande en statut "new"
       const { order, rawOrder } = await this.ordersService.sendKitchen(data.orderId, data.serverName);
@@ -510,6 +500,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
+  }
+
+  /** Déstockage des lignes envoyées (ou vendues au comptoir) et diffusion des stocks à jour */
+  private async deductStock(orderId: string, itemIds?: string[]) {
+    const stockResult = await this.stockService.deductForOrder(orderId, itemIds);
+    if (!stockResult) return;
+    for (const msg of stockResult.stockAlerts) {
+      this.server.to(STAFF_ROOM).emit("stock:alert", { message: msg });
+    }
+    if (stockResult.affectedProducts.length > 0) {
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
+    }
+    this.server.to(STAFF_ROOM).emit("stock:updated", stockResult.refreshedIngredients);
+    this.server.to(STAFF_ROOM).emit("stock:movements_updated", stockResult.recentMovements);
   }
 
   /**
@@ -695,6 +699,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
       if (res.table) this.server.to(STAFF_ROOM).emit("table:updated", res.table);
       this.server.to(STAFF_ROOM).emit("history:new_entry", res.history);
+      // Vente comptoir : déstockage une fois la vente validée (un encaissement refusé ne déstocke rien)
+      if (res.soldDirectIds.length > 0) {
+        await this.deductStock(res.orderId, res.soldDirectIds).catch((e) => this.logger.error(`Déstockage comptoir : ${e.message}`));
+      }
 
       // Impression automatique du ticket de caisse si configurée
       this.attemptAutoCaissePrint(res.history).catch(this.printFailed(client, "du ticket de caisse"));

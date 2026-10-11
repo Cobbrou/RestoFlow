@@ -178,6 +178,27 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
     });
   });
 
+  describe("processCheckout (vente comptoir)", () => {
+    it("vend les brouillons d'une commande comptoir sans envoi en cuisine, et les renvoie pour déstockage", async () => {
+      mockPrisma.orderItem = { updateMany: vi.fn() };
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: "c1", type: "counter", pickupNumber: 3, tableId: null,
+        items: [{ id: "x", name: "Café", price: 2, qty: 2, status: "draft", vatRate: 10 }],
+      });
+      const res = await billingService.processCheckout({ orderId: "c1", payments: [{ amount: 4, method: "especes" }] });
+      expect(res.history.total).toBe(4);
+      expect(res.soldDirectIds).toEqual(["x"]);
+      expect(mockPrisma.orderItem.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["x"] } }, data: { status: "served" } });
+    });
+
+    it("refuse toujours une commande en salle dont rien n'est envoyé", async () => {
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: "t1", type: "dine_in", tableId: "tb1", items: [{ id: "y", price: 2, qty: 1, status: "draft" }],
+      });
+      await expect(billingService.processCheckout({ orderId: "t1", payments: [{ amount: 2, method: "carte" }] })).rejects.toThrow("Aucun article");
+    });
+  });
+
   describe("refundTicket (avoir partiel)", () => {
     // Ticket de 26 € brut, remise 10 % → 23,40 € : plat 20 € (10 %) + vin 6 € (20 %)
     const orig = {

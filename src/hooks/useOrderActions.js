@@ -299,7 +299,10 @@ export function useOrderActions(store, {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return null;
     const table    = tables.find((t) => t.id === order.tableId);
-    const paidItems = order.items.filter((i) => i.status !== "draft");
+    // Comptoir : les articles saisis sont vendus directement (le serveur les passe en "servi")
+    const paidItems = order.type === "counter"
+      ? order.items.map((i) => (i.status === "draft" ? { ...i, status: "served" } : i))
+      : order.items.filter((i) => i.status !== "draft");
     const subtotal = meta?.subtotal ?? paidItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
     const discount = meta?.discount ?? order.discount ?? null;
     const total = meta?.total ?? paidItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);

@@ -26,7 +26,8 @@ export function heldToRelease(
  * Modes de service hors salle et module qui les active. La livraison (plateformes, site) s'ajoutera ici
  * avec son propre module ; les canaux externes créeront leurs commandes via createOffPremise.
  */
-export const OFF_PREMISE_MODULES: Record<string, string> = { takeaway: "enableTakeaway" };
+// null : mode toujours disponible (vente comptoir : bar, café, sans envoi en cuisine)
+export const OFF_PREMISE_MODULES: Record<string, string | null> = { takeaway: "enableTakeaway", counter: null };
 // Canaux saisis depuis la caisse ; "online" et les plateformes arriveront par leurs propres intégrations
 const POS_CHANNELS = ["pos", "phone"];
 
@@ -35,7 +36,7 @@ export const isOffPremise = (order: { type?: string | null }) => !!order.type &&
 /** Libellé d'une commande pour les bons, toasts et tickets : "Table 4" ou "Emporter #12 · Dupont" */
 export function orderLabel(order: any): string {
   if (!isOffPremise(order)) return `Table ${order.table?.number ?? "?"}`;
-  const kind = order.type === "takeaway" ? "Emporter" : "Livraison";
+  const kind = order.type === "takeaway" ? "Emporter" : order.type === "counter" ? "Comptoir" : "Livraison";
   return [`${kind} #${order.pickupNumber ?? "?"}`, order.customerName].filter(Boolean).join(" · ");
 }
 
@@ -184,10 +185,12 @@ export class OrdersService {
     pickupAt?: number | string | null;
   }) {
     const moduleKey = OFF_PREMISE_MODULES[data?.type];
-    if (!moduleKey) throw new BadRequestException("Mode de service inconnu");
-    const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
-    const modules = cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {};
-    if (!modules[moduleKey]) throw new BadRequestException("Module désactivé dans la configuration");
+    if (moduleKey === undefined) throw new BadRequestException("Mode de service inconnu");
+    if (moduleKey) {
+      const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
+      const modules = cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {};
+      if (!modules[moduleKey]) throw new BadRequestException("Module désactivé dans la configuration");
+    }
 
     const channel = data.channel || "pos";
     if (!POS_CHANNELS.includes(channel)) throw new BadRequestException("Canal de commande invalide");

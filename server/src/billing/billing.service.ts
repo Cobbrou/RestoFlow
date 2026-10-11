@@ -345,6 +345,13 @@ export class BillingService {
     });
     if (claimed.count === 0) throw new ConflictException("Cette commande a déjà été encaissée");
 
+    // Vente comptoir : pas d'envoi en cuisine, les articles saisis sont vendus et servis à l'encaissement
+    const soldDirectIds = order.type === "counter" ? order.items.filter((i) => i.status === "draft").map((i) => i.id) : [];
+    if (soldDirectIds.length > 0) {
+      await tx.orderItem.updateMany({ where: { id: { in: soldDirectIds } }, data: { status: "served" } });
+      for (const i of order.items) if (soldDirectIds.includes(i.id)) i.status = "served";
+    }
+
     // 🔒 Montants recalculés depuis la base : sous-total, remise et TVA du client sont ignorés
     const paidItems = order.items.filter((i) => i.status !== "draft");
     if (paidItems.length === 0) throw new BadRequestException("Aucun article envoyé à encaisser");
@@ -426,6 +433,7 @@ export class BillingService {
       orderId: order.id,
       history: toClientHistory(historyRecord),
       table: updatedTable,
+      soldDirectIds, // à déstocker après validation (vente comptoir)
     };
   }
 }

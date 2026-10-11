@@ -326,7 +326,7 @@ export function orderLabel(order, tables = []) {
     const number = order?.table?.number ?? tables.find((t) => t.id === order?.tableId)?.number;
     return `Table ${number ?? "?"}`;
   }
-  const kind = order.type === "takeaway" ? "Emporter" : "Livraison";
+  const kind = order.type === "takeaway" ? "Emporter" : order.type === "counter" ? "Comptoir" : "Livraison";
   return [`${kind} #${order.pickupNumber ?? "…"}`, order.customerName].filter(Boolean).join(" · ");
 }
 

@@ -366,14 +366,15 @@ export class StockService {
     return deductionMap;
   }
 
-  async deductForOrder(orderId: string) {
+  // itemIds : lignes déjà vendues à déstocker (vente comptoir) ; par défaut, les brouillons partant en cuisine
+  async deductForOrder(orderId: string, itemIds?: string[]) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, table: true },
     });
     if (!order) return null;
 
-    const draftItems = order.items.filter((i) => i.status === "draft");
+    const draftItems = order.items.filter((i) => (itemIds ? itemIds.includes(i.id) : i.status === "draft"));
     if (draftItems.length === 0) return null;
 
     const deductionMap = await this.ingredientNeeds(draftItems);

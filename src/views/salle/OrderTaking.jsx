@@ -106,6 +106,11 @@ export default function OrderTaking({
   const readyItems   = items.filter((i) => i.status === "ready");
   const hasReady     = readyItems.length > 0;
   const allServedNoDraft = items.length > 0 && items.every((i) => i.status === "served");
+  // Vente comptoir : pas d'envoi en cuisine, les articles saisis s'encaissent directement
+  const isCounter = order?.type === "counter";
+  const payableOrder = isCounter && order
+    ? { ...order, items: items.map((i) => (i.status === "draft" ? { ...i, status: "served" } : i)) }
+    : order;
 
   const filtered = products.filter(
     (p) =>
@@ -340,7 +345,7 @@ export default function OrderTaking({
           </button>
         )}
 
-        {draftItems.length > 0 && !confirmSend && (
+        {draftItems.length > 0 && !confirmSend && !isCounter && (
           <button onClick={() => setConfirmSend(true)} className="rf-tap w-full py-3.5 rounded-xl font-bold text-sm text-white shadow-md" style={{ background: "#C1440E" }}>
             ENVOYER EN CUISINE
           </button>
@@ -366,7 +371,13 @@ export default function OrderTaking({
           </div>
         )}
 
-        {allServedNoDraft ? (
+        {isCounter ? (
+          items.length > 0 && (
+            <button onClick={() => setPaying(true)} className="rf-tap w-full py-3.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-1.5 shadow-md" style={{ background: "#7C3AED" }}>
+              <Receipt size={14} /> Encaisser · {money(total)}
+            </button>
+          )
+        ) : allServedNoDraft ? (
           <button onClick={() => setPaying(true)} className="rf-tap w-full py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm" style={{ background: "#2B2622" }}>
             <Receipt size={14} /> {table ? "Encaisser & libérer la table" : "Encaisser"}
           </button>
@@ -402,7 +413,7 @@ export default function OrderTaking({
     <>
       {paying && order && (
         <PaymentModal
-          order={order}
+          order={payableOrder}
           table={table}
           config={config}
           onCancel={() => setPaying(false)}
