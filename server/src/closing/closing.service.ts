@@ -18,6 +18,15 @@ export interface FecExportOptions {
   closingId?: string;
 }
 
+/**
+ * Couverts d'un ticket : saisis à l'ouverture de la table ; à défaut (vente à emporter, ancien ticket), 1.
+ * Un avoir ne retire pas de couverts : les clients sont bien venus.
+ */
+export function ticketCovers(ticket: { type?: string | null; covers?: number | null }): number {
+  if (ticket.type === "CREDIT_NOTE") return 0;
+  return ticket.covers != null && ticket.covers > 0 ? ticket.covers : 1;
+}
+
 @Injectable()
 export class ClosingService {
   constructor(
@@ -194,14 +203,7 @@ export class ClosingService {
       serverSalesMap[srv].tickets += 1;
       serverSalesMap[srv].total += ticket.total;
 
-      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
-      try {
-        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
-        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
-        coversCount += mainItems.length > 0 ? mainItems.length : 1;
-      } catch {
-        coversCount += 1;
-      }
+      coversCount += ticketCovers(ticket);
     }
 
     const vatBreakdown = Object.keys(vatMap).map((k) => ({
@@ -347,14 +349,7 @@ export class ClosingService {
         paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
       }
 
-      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
-      try {
-        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
-        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
-        coversCount += mainItems.length > 0 ? mainItems.length : 1;
-      } catch {
-        coversCount += 1;
-      }
+      coversCount += ticketCovers(ticket);
     }
 
     const round2 = (n: number) => Math.round(n * 100) / 100;

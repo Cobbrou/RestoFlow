@@ -37,7 +37,7 @@ export default function OrderTaking({
   currentStaff, roles = [],
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
-  onQty, onRemove, onVoid, onNote,
+  onQty, onRemove, onVoid, onNote, onSetCovers,
   onSend, onServe, onCheckout, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
   onCallCourse,
@@ -498,7 +498,7 @@ export default function OrderTaking({
         <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-black/10">
           <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5 shrink-0"><ArrowLeft size={16} /></button>
           <div className="min-w-0 flex-1">
-            <h2 className="rf-display text-base font-semibold text-[#2B2622] truncate">{table ? `${title} · ${table.seats} pers.` : title}</h2>
+            <h2 className="rf-display text-base font-semibold text-[#2B2622] truncate flex items-center gap-2">{title}{order && table && <CoversStepper covers={order.covers} onChange={onSetCovers} />}</h2>
             <p className="text-[11px] text-[#6B6355]">{subtitle}</p>
           </div>
           {order && table && (
@@ -561,7 +561,7 @@ export default function OrderTaking({
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5"><ArrowLeft size={16} /></button>
           <div>
-            <h2 className="rf-display text-lg font-semibold text-[#2B2622]">{table ? `${title} — ${table.seats} personnes` : title}</h2>
+            <h2 className="rf-display text-lg font-semibold text-[#2B2622] flex items-center gap-2">{title}{order && table && <CoversStepper covers={order.covers} onChange={onSetCovers} />}</h2>
             <p className="text-xs text-[#6B6355]">{subtitle}</p>
           </div>
         </div>
@@ -696,6 +696,19 @@ function ProductCard({ p, isMobile, onTap, portionsLeft, config, now, canManageA
         </div>
       </div>
     </button>
+  );
+}
+
+// Couverts de la table, corrigeables pendant le service (statistiques du Z)
+function CoversStepper({ covers, onChange }) {
+  const set = (n) => n >= 1 && n <= 99 && onChange?.(n);
+  const btn = "rf-tap w-6 h-6 rounded-full bg-black/5 text-sm font-bold leading-none";
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#6B6355] shrink-0">
+      <button type="button" className={btn} onClick={() => set((covers || 1) - 1)} aria-label="Retirer un couvert">−</button>
+      <span className="min-w-[3.5rem] text-center">{covers ? `${covers} couv.` : "? couv."}</span>
+      <button type="button" className={btn} onClick={() => set((covers || 0) + 1)} aria-label="Ajouter un couvert">+</button>
+    </span>
   );
 }
 

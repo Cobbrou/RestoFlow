@@ -102,6 +102,13 @@ export class TablesService {
       where: { id: sourceOrder.id },
       data: { status: "closed" },
     });
+    // Les couverts des deux tables s'additionnent (null si aucune n'était renseignée)
+    if (sourceOrder.covers != null || targetOrder.covers != null) {
+      await this.prisma.order.update({
+        where: { id: targetOrder.id },
+        data: { covers: (sourceOrder.covers || 0) + (targetOrder.covers || 0) },
+      });
+    }
 
     const updatedSource = await this.prisma.table.update({
       where: { id: sourceTableId },

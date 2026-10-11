@@ -24,6 +24,20 @@ describe("OrdersService : article déjà envoyé en cuisine", () => {
   });
 });
 
+describe("OrdersService.setCovers", () => {
+  it("refuse une valeur hors de 1 à 99 ou une commande encaissée", async () => {
+    const prisma: any = {
+      order: { updateMany: vi.fn().mockResolvedValue({ count: 0 }), findUnique: vi.fn().mockResolvedValue({ id: "o1", items: [] }) },
+    };
+    const service = new OrdersService(prisma);
+    await expect(service.setCovers("o1", 0)).rejects.toThrow(BadRequestException);
+    await expect(service.setCovers("o1", 2.5)).rejects.toThrow(BadRequestException);
+    await expect(service.setCovers("o1", 3)).rejects.toThrow("déjà encaissée");
+    prisma.order.updateMany.mockResolvedValue({ count: 1 });
+    expect((await service.setCovers("o1", 3))?.id).toBe("o1");
+  });
+});
+
 describe("OrdersService.voidItem", () => {
   let service: OrdersService;
   let prisma: any;

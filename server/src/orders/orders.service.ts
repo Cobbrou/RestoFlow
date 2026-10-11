@@ -42,6 +42,10 @@ export function orderLabel(order: any): string {
 // Tolérance sur l'horodatage client d'un ajout rejoué depuis la file hors-ligne
 const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
 
+// Couverts : entier de 1 à 99, sinon non renseigné
+const validCovers = (n: unknown): number | null =>
+  typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
+
 @Injectable()
 export class OrdersService {
   constructor(private prisma: PrismaService) {}
@@ -62,6 +66,7 @@ export class OrdersService {
       customerPhone: order.customerPhone ?? null,
       pickupAt: order.pickupAt ? new Date(order.pickupAt).getTime() : null,
       pickupNumber: order.pickupNumber ?? null,
+      covers: order.covers ?? null,
       externalRef: order.externalRef ?? null,
       table: order.table ? {
         id: order.table.id,
@@ -113,7 +118,7 @@ export class OrdersService {
     return this.formatOrder(order);
   }
 
-  async createOrEnsure(tableId: string, serverName = "Service", orderId?: string) {
+  async createOrEnsure(tableId: string, serverName = "Service", orderId?: string, covers?: number) {
     let table = await this.prisma.table.findUnique({ where: { id: tableId } });
     if (!table) {
       const num = parseInt(tableId.replace("tbl_", ""), 10);
@@ -147,12 +152,22 @@ export class OrdersService {
           tableId: resolvedTableId,
           server: serverName || "Service",
           status: "open",
+          covers: validCovers(covers),
         },
         include: { items: true, table: true },
       });
     }
 
     return this.formatOrder(order);
+  }
+
+  /** Correction du nombre de couverts d'une commande ouverte */
+  async setCovers(orderId: string, covers: number) {
+    const value = validCovers(covers);
+    if (value == null) throw new BadRequestException("Nombre de couverts invalide (1 à 99)");
+    const res = await this.prisma.order.updateMany({ where: { id: orderId, status: "open" }, data: { covers: value } });
+    if (res.count === 0) throw new NotFoundException("Commande introuvable ou déjà encaissée");
+    return this.findById(orderId);
   }
 
   /**

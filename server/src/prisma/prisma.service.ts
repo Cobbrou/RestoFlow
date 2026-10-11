@@ -4,7 +4,7 @@ import { PrismaClient } from "@prisma/client";
 // Colonnes d'un ticket figées dès sa création (seul closedInZId peut être renseigné, une fois, par le Z)
 const FROZEN_TICKET_COLUMNS =
   "id, orderId, ticketNumber, tableNumber, orderType, channel, orderLabel, server, items, total, subtotal, discount, vatDetails, paymentMethod, " +
-  "payments, sequenceNumber, previousHash, signature, type, refTicketNumber, reason, createdAt";
+  "payments, tip, covers, sequenceNumber, previousHash, signature, type, refTicketNumber, reason, createdAt";
 
 /**
  * Inaltérabilité NF525 au niveau base : tickets, rapports Z et journal JET sont en ajout seul.

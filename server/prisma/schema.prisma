@@ -147,6 +147,7 @@ model Order {
   customerPhone String?
   pickupAt      DateTime? // Heure de retrait / livraison souhaitée
   pickupNumber  Int?      // Numéro d'appel du jour, attribué par le serveur
+  covers        Int?      // Couverts saisis à l'ouverture de la table (null : non renseigné)
   externalRef   String?   // Identifiant de la commande chez le canal externe (plateforme, site)
   items     OrderItem[]
 
@@ -210,6 +211,7 @@ model OrderHistory {
   signature      String?  // Hash SHA-256 de ce ticket
   closedInZId    String?  // Référence au rapport Z dans lequel ce ticket a été clôturé
   tip            Float?   @default(0) // Pourboire perçu (hors CA soumis à TVA)
+  covers         Int?     // Couverts de la commande (statistiques du Z, ticket moyen par couvert)
   type           String   @default("SALE") // "SALE" | "CREDIT_NOTE" (avoir, montants négatifs)
   refTicketNumber String? // Ticket d'origine annulé par cet avoir
   reason         String?  // Motif obligatoire d'un avoir

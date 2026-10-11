@@ -28,6 +28,7 @@ type TicketDraft = {
   paymentMethod: string;
   payments: string;
   tip: number;
+  covers?: number | null;
   type: "SALE" | "CREDIT_NOTE";
   refTicketNumber: string | null;
   reason: string | null;
@@ -292,6 +293,7 @@ export class BillingService {
       paymentMethod: finalMethod,
       payments: JSON.stringify(paymentList),
       tip: toEuros(tipCents),
+      covers: order.covers ?? null,
       type: "SALE",
       refTicketNumber: null,
       reason: null,

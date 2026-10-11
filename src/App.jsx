@@ -3,6 +3,7 @@ import GlobalStyle from "./components/GlobalStyle.jsx";
 import TopNav from "./components/TopNav.jsx";
 import ToastStack from "./components/ToastStack.jsx";
 import PinPadModal from "./components/PinPadModal.jsx";
+import CoversPicker from "./components/CoversPicker.jsx";
 
 import FloorPlan from "./views/salle/FloorPlan.jsx";
 import OrderTaking from "./views/salle/OrderTaking.jsx";
@@ -83,6 +84,7 @@ export default function App() {
   });
 
   const [pendingTableToOpen, setPendingTableToOpen] = useState(null);
+  const [coversPrompt, setCoversPrompt] = useState(null); // { table, staff } : table libre en cours d'ouverture
 
   // ── Navigation basée sur les droits ────────────────────────
   const [role, setRole] = useState(() => {
@@ -164,7 +166,7 @@ export default function App() {
 
   const {
     getActiveOrder, ensureOrderForTable, createOffPremiseOrder, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem, voidItem,
-    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder,
+    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder, setOrderCovers,
     toggleAlert, startPrep, markReady, handleCallCourse, handleChangeItemCourse, handleTransferTable,
     handleMergeTable, handleCreateReservation, handleUpdateReservationStatus, handleAssignReservationTable,
     handleDeleteReservation,
@@ -186,8 +188,20 @@ export default function App() {
       return;
     }
 
+    // Table libre : on demande d'abord les couverts (ticket moyen par couvert au Z)
+    if (!getActiveOrder(table.id)) {
+      setCoversPrompt({ table, staff: currentStaff });
+      return;
+    }
     setActiveTableId(table.id);
-    ensureOrderForTable(table.id);
+    setServerView("commande");
+  };
+
+  const openTableWithCovers = (covers) => {
+    const { table, staff } = coversPrompt;
+    setCoversPrompt(null);
+    setActiveTableId(table.id);
+    ensureOrderForTable(table.id, staff, covers);
     setServerView("commande");
   };
 
@@ -225,9 +239,12 @@ export default function App() {
 
     if (pendingTableToOpen) {
       if (hasPermission(staffMember, currentRoleObj, "salle.order")) {
-        setActiveTableId(pendingTableToOpen.id);
-        ensureOrderForTable(pendingTableToOpen.id, staffMember);
-        setServerView("commande");
+        if (getActiveOrder(pendingTableToOpen.id)) {
+          setActiveTableId(pendingTableToOpen.id);
+          setServerView("commande");
+        } else {
+          setCoversPrompt({ table: pendingTableToOpen, staff: staffMember });
+        }
       } else {
         pushToast("Vous n'avez pas accès à la prise de commande", "warn");
       }
@@ -254,7 +271,7 @@ export default function App() {
     emit("reservation:update_status", { id: reservation.id, status: "seated" });
 
     setActiveTableId(table.id);
-    ensureOrderForTable(table.id);
+    ensureOrderForTable(table.id, null, reservation.guests || null);
     setRole("serveur");
     setServerView("commande");
     setIsReservationModalOpen(false);
@@ -343,6 +360,8 @@ export default function App() {
         }
       />
 
+      <CoversPicker table={coversPrompt?.table} onPick={openTableWithCovers} onClose={() => setCoversPrompt(null)} />
+
       {/* ── Vue Salle ── */}
       {role === "serveur" && serverView === "plan" && (
         <ErrorBoundary label="Plan de salle">
@@ -382,6 +401,7 @@ export default function App() {
             onRemove={(itemId) => removeItem(activeOrder.id, itemId)}
             onVoid={(itemId, qty, reason, done) => voidItem(activeOrder.id, itemId, qty, reason, done)}
             onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
+            onSetCovers={(n) => setOrderCovers(activeOrder.id, n)}
             onSend={() => sendToKitchen(activeOrder.id)}
             onServe={() => serveAndMaybeFree(activeOrder.id)}
             onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}

@@ -23,7 +23,7 @@ export function useOrderActions(store, {
   };
 
   const ensureOrderForTable = useCallback(
-    (tableId, overrideStaff = null) => {
+    (tableId, overrideStaff = null, covers = null) => {
       let order = getActiveOrder(tableId);
       if (!order) {
         const staffObj = overrideStaff || currentStaff;
@@ -32,11 +32,12 @@ export function useOrderActions(store, {
           id: uid("ord"),
           tableId,
           server: serverName,
+          covers,
           createdAt: Date.now(),
           items: [],
         };
         setOrders((prev) => [...prev, order]);
-        emit("order:create_or_ensure", { orderId: order.id, tableId, server: serverName });
+        emit("order:create_or_ensure", { orderId: order.id, tableId, server: serverName, covers });
       }
       return order;
     },
@@ -387,6 +388,11 @@ export function useOrderActions(store, {
     return receipt;
   };
 
+  const setOrderCovers = (orderId, covers) => {
+    updateOrder(orderId, (o) => ({ ...o, covers }));
+    emit("order:set_covers", { orderId, covers });
+  };
+
   const toggleAlert = (tableId) => {
     setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, alert: !t.alert } : t)));
     emit("tables:toggle_alert", { tableId });
@@ -600,6 +606,7 @@ export function useOrderActions(store, {
     handleApplyDiscount,
     handleRemoveDiscount,
     checkoutOrder,
+    setOrderCovers,
     toggleAlert,
     startPrep,
     markReady,

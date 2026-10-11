@@ -130,7 +130,8 @@ export default function ClosingManager({
       openedAt: lastZ ? lastZ.closedAt : (unclosedTickets[0]?.createdAt || Date.now()),
       generatedAt: Date.now(),
       ticketsCount: unclosedTickets.length,
-      coversCount: unclosedTickets.length * 2,
+      // Même règle que ticketCovers (server/src/closing/closing.service.ts)
+      coversCount: unclosedTickets.reduce((s, t) => s + (t.type === "CREDIT_NOTE" ? 0 : t.covers > 0 ? t.covers : 1), 0),
       totalGross: Math.round(totalGross * 100) / 100,
       totalDiscounts: Math.round(totalDiscounts * 100) / 100,
       totalNet: Math.round(totalNet * 100) / 100,
@@ -372,9 +373,13 @@ export default function ClosingManager({
                 <div className="bg-white p-4 rounded-2xl border border-black/10 shadow-sm col-span-2 md:col-span-1">
                   <span className="text-[11px] font-bold text-[#8A8378] uppercase">Tickets & Couverts</span>
                   <p className="rf-display text-2xl font-bold text-[#2B2622] mt-1">
-                    {xReport.ticketsCount} <span className="text-sm font-normal text-[#8A8378]">tickets</span>
+                    {xReport.ticketsCount} <span className="text-sm font-normal text-[#8A8378]">tickets</span>{" "}
+                    · {xReport.coversCount || 0} <span className="text-sm font-normal text-[#8A8378]">couverts</span>
                   </p>
-                  <span className="text-[11px] text-[#8A8378]">Panier moyen : {money(xReport.averageTicket)}</span>
+                  <span className="text-[11px] text-[#8A8378]">
+                    Panier moyen : {money(xReport.averageTicket)} · par couvert :{" "}
+                    {money(xReport.coversCount > 0 ? xReport.totalNet / xReport.coversCount : 0)}
+                  </span>
                 </div>
               </div>
 

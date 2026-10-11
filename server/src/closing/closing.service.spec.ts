@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { ClosingService } from "./closing.service";
+import { ClosingService, ticketCovers } from "./closing.service";
+
+describe("ticketCovers", () => {
+  it("prend les couverts saisis, 1 par défaut, 0 pour un avoir", () => {
+    expect(ticketCovers({ type: "SALE", covers: 4 })).toBe(4);
+    expect(ticketCovers({ type: "SALE", covers: null })).toBe(1);
+    expect(ticketCovers({ type: "CREDIT_NOTE", covers: 4 })).toBe(0);
+  });
+});
 
 describe("ClosingService.generateFecExport", () => {
   it("équilibre l'écriture quand le règlement inclut un pourboire", async () => {

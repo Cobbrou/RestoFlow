@@ -302,10 +302,22 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("salle.order")
   @SubscribeMessage("order:create_or_ensure")
   async handleEnsureOrder(
-    @MessageBody() data: { tableId: string; server: string; orderId?: string }
+    @MessageBody() data: { tableId: string; server: string; orderId?: string; covers?: number }
   ) {
     try {
-      const order = await this.ordersService.createOrEnsure(data.tableId, data.server, data.orderId);
+      const order = await this.ordersService.createOrEnsure(data.tableId, data.server, data.orderId, data.covers);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
+      return { ok: true, order };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("salle.order")
+  @SubscribeMessage("order:set_covers")
+  async handleSetCovers(@MessageBody() data: { orderId: string; covers: number }) {
+    try {
+      const order = await this.ordersService.setCovers(data.orderId, data.covers);
       this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
