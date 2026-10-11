@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 
 let globalAudioCtx = null;
 const audioListeners = new Set();
@@ -96,20 +96,21 @@ export function useBeep() {
 /**
  * Mesure la largeur réelle du conteneur DOM (pas de la fenêtre).
  * Utile pour adapter le layout même dans un iframe étroit.
- * @returns {[React.RefObject, number]}
+ * Ref callback : suit l'élément même s'il est remplacé (écran de chargement puis application).
+ * @returns {[(el: HTMLElement | null) => void, number]}
  */
 export function useContainerWidth() {
-  const ref = useRef(null);
+  const [el, setEl] = useState(null);
   const [width, setWidth] = useState(1024);
   useEffect(() => {
-    if (!ref.current || typeof ResizeObserver === "undefined") return;
+    if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) setWidth(entry.contentRect.width);
     });
-    ro.observe(ref.current);
+    ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-  return [ref, width];
+  }, [el]);
+  return [setEl, width];
 }
 
 /**

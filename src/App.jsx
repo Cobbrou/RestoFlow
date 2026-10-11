@@ -329,6 +329,18 @@ export default function App() {
     ...management,
   };
 
+  // Ni cache local ni réponse du serveur : rien à afficher (aucune donnée de démo côté client)
+  if (!store.ready) {
+    return (
+      <div ref={rootRef} className="rf-root w-full min-h-[720px] flex flex-col items-center justify-center gap-3 p-8 text-center bg-[#FAF6EE] text-[#6B6355]">
+        <GlobalStyle />
+        <div className="w-8 h-8 border-3 border-[#C1440E] border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-semibold">Connexion au serveur…</p>
+        <p className="text-xs max-w-sm">Lors de sa première utilisation, ce terminal doit joindre le serveur du restaurant une fois avant de pouvoir fonctionner hors-ligne.</p>
+      </div>
+    );
+  }
+
   return (
     <RestoFlowProvider value={contextValue}>
       <div
