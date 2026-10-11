@@ -1,21 +1,11 @@
-import React, { createContext, useContext } from "react";
+import { createContext, useContext } from "react";
 
-const RestoFlowContext = createContext(null);
-
-export function RestoFlowProvider({ value, children }) {
-  return (
-    <RestoFlowContext.Provider value={value}>
-      {children}
-    </RestoFlowContext.Provider>
-  );
-}
+export const RestoFlowContext = createContext(null);
 
 export function useRestoFlow() {
   const context = useContext(RestoFlowContext);
   if (!context) {
-    throw new Error("useRestoFlow must be used within a RestoFlowProvider");
+    throw new Error("useRestoFlow doit être utilisé sous <RestoFlowContext>");
   }
   return context;
 }
-
-export default RestoFlowContext;

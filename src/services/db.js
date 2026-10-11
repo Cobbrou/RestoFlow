@@ -181,32 +181,6 @@ export async function clearOfflineActionsFromDB() {
   }
 }
 
-// ── Gestion du cache d'authentification hors-ligne ──────────
-
-export async function saveCachedAuth(currentStaff, sessionToken = null) {
-  try {
-    const db = await getDB();
-    await db.put("auth", currentStaff, "currentStaff");
-    if (sessionToken) {
-      await db.put("auth", sessionToken, "sessionToken");
-    }
-  } catch (err) {
-    console.warn("[IndexedDB] Erreur sauvegarde cache auth :", err);
-  }
-}
-
-export async function loadCachedAuth() {
-  try {
-    const db = await getDB();
-    const currentStaff = await db.get("auth", "currentStaff");
-    const sessionToken = await db.get("auth", "sessionToken");
-    return { currentStaff: currentStaff || null, sessionToken: sessionToken || null };
-  } catch (err) {
-    console.warn("[IndexedDB] Erreur chargement cache auth :", err);
-    return { currentStaff: null, sessionToken: null };
-  }
-}
-
 // ── Cache & Vérification des PINs pour le mode hors-ligne ───
 
 // Droits qui ne doivent jamais pouvoir être obtenus en retrouvant un PIN depuis le cache de la tablette

@@ -34,13 +34,7 @@ import { SlidersHorizontal } from "lucide-react";
  *  - equipe        : rôles, permissions et membres du personnel
  */
 export default function Gestion(props) {
-  let ctx = {};
-  try {
-    ctx = useRestoFlow() || {};
-  } catch {
-    ctx = {};
-  }
-  const merged = { ...ctx, ...props };
+  const merged = { ...useRestoFlow(), ...props };
   const { hasStocks } = useModules();
   const { view: requestedView, setView, currentStaff, roles } = merged;
 

@@ -19,15 +19,8 @@ export const DEFAULT_MODULES_CONFIG = {
  * Hook réactif pour interroger l'activation des modules à la carte.
  */
 export function useModules() {
-  let ctx = {};
-  try {
-    ctx = useRestoFlow() || {};
-  } catch {
-    ctx = {};
-  }
-
   // Objet déjà parsé par le serveur (ConfigService.getConfig)
-  const modules = ctx?.modulesConfig || ctx?.config?.modulesConfig || DEFAULT_MODULES_CONFIG;
+  const modules = useRestoFlow().modulesConfig || DEFAULT_MODULES_CONFIG;
 
   return {
     modules,
