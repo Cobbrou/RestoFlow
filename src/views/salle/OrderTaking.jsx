@@ -13,6 +13,7 @@ import DiscountModal from "./DiscountModal.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 import { useModules } from "../../hooks/useModules.js";
 import { hasPermission } from "../../utils/permissions.js";
+import { toStockQty } from "../../utils/units.js";
 
 const TableActionModal = lazy(() => import("../../components/TableActionModal.jsx"));
 
@@ -141,7 +142,7 @@ export default function OrderTaking({
       if (rc.isCritical && rc.quantity > 0) {
         const ing = ingredients.find((i) => i.id === rc.ingredientId);
         const currentStock = ing ? ing.currentStock : rc.currentStock ?? 0;
-        const possible = Math.floor(currentStock / rc.quantity);
+        const possible = Math.floor(currentStock / toStockQty(rc.quantity, rc.unit, ing?.unit ?? rc.stockUnit));
         if (possible < minPossible) {
           minPossible = Math.max(0, possible);
         }

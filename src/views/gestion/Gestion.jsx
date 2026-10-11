@@ -15,6 +15,7 @@ import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
 import { refundableLines } from "../../utils/refund.js";
+import { toStockQty } from "../../utils/units.js";
 import { useRestoFlow } from "../../context/RestoFlowContext.jsx";
 import { getSocket } from "../../services/socket.js";
 import { useModules } from "../../hooks/useModules.js";
@@ -299,7 +300,7 @@ function ProductManager({ products, ingredients, recipes, onAddProduct, onImport
         criticalCount++;
         const ing = ingredients?.find((i) => i.id === rc.ingredientId);
         const currentStock = ing ? ing.currentStock : rc.currentStock ?? 0;
-        const possible = Math.floor(currentStock / rc.quantity);
+        const possible = Math.floor(currentStock / toStockQty(rc.quantity, rc.unit, ing?.unit ?? rc.stockUnit));
         if (possible < minPossible) {
           minPossible = Math.max(0, possible);
         }

@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { money } from "../../utils/index.js";
+import { compatibleUnits, toStockQty } from "../../utils/units.js";
 
 export default function RecipeManager({
   products = [],
@@ -89,11 +90,12 @@ export default function RecipeManager({
     for (const item of activeItems) {
       const ing = ingredients.find((i) => i.id === item.ingredientId);
       const costPerUnit = ing?.costPerUnit || 0;
-      const lineCost = Number(item.quantity || 0) * costPerUnit;
+      const stockQty = toStockQty(item.quantity, item.unit, ing?.unit); // dosage dans l'unité du stock
+      const lineCost = stockQty * costPerUnit;
       portionCost += lineCost;
 
-      if (item.isCritical && item.quantity > 0 && ing) {
-        const possible = Math.floor(ing.currentStock / item.quantity);
+      if (item.isCritical && stockQty > 0 && ing) {
+        const possible = Math.floor(ing.currentStock / stockQty);
         if (possible < minPortions) {
           minPortions = Math.max(0, possible);
         }
@@ -330,7 +332,7 @@ export default function RecipeManager({
                     {activeItems.map((item, idx) => {
                       const ing = ingredients.find((i) => i.id === item.ingredientId);
                       const cost = ing?.costPerUnit || 0;
-                      const lineCost = (parseFloat(item.quantity) || 0) * cost;
+                      const lineCost = toStockQty(parseFloat(item.quantity) || 0, item.unit, ing?.unit) * cost;
 
                       return (
                         <tr key={item.id || idx} className="hover:bg-black/[.01]">
@@ -358,9 +360,16 @@ export default function RecipeManager({
                             />
                           </td>
                           <td className="py-2.5 px-3 text-[#6B6355] font-medium">
-                            <span className="px-2 py-1 rounded-md bg-black/5 text-[11px] block text-center">
-                              {item.unit || ing?.unit || "u"}
-                            </span>
+                            {/* Dosage dans une unité de la même famille que le stock (g pour un stock en kg…) */}
+                            <select
+                              value={item.unit || ing?.unit || "u"}
+                              onChange={(e) => handleUpdateItem(idx, "unit", e.target.value)}
+                              className="w-full p-1.5 rounded-lg border border-black/15 bg-white text-[11px] font-semibold text-center"
+                            >
+                              {[...new Set([item.unit || ing?.unit, ...compatibleUnits(ing?.unit)].filter(Boolean))].map((u) => (
+                                <option key={u} value={u}>{u}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="py-2.5 px-3 text-[#6B6355]">
                             {cost > 0 ? `${money(cost)} / ${ing?.unit}` : "0 €"}
