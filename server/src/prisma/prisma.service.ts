@@ -31,6 +31,8 @@ export const NF525_TRIGGERS: Record<string, string> = {
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     await this.$connect();
+    // WAL : lectures non bloquées par les écritures concurrentes des tablettes (réglage persistant du fichier)
+    await this.$queryRawUnsafe("PRAGMA journal_mode = WAL");
     // Fichier SQLite absent ou vide (créé à la volée) : on guide plutôt que d'échouer sur les triggers
     const tables = await this.$queryRawUnsafe<{ name: string }[]>(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'OrderHistory'"

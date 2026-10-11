@@ -2,6 +2,28 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import { OrdersService, heldToRelease, orderLabel } from "./orders.service";
 
+describe("OrdersService : article déjà envoyé en cuisine", () => {
+  const sent = { id: "it1", orderId: "o1", status: "new", notes: "sans sel", course: "plat" };
+  let prisma: any;
+  let service: OrdersService;
+
+  beforeEach(() => {
+    prisma = {
+      orderItem: { findFirst: vi.fn().mockResolvedValue(sent), findUnique: vi.fn().mockResolvedValue(sent), update: vi.fn() },
+      order: { findUnique: vi.fn().mockResolvedValue({ id: "o1", items: [] }) },
+    };
+    service = new OrdersService(prisma);
+  });
+
+  it("refuse de changer la note ou la suite, accepte le rejeu à l'identique", async () => {
+    await expect(service.setNote("o1", "it1", "bien cuit")).rejects.toThrow(BadRequestException);
+    await expect(service.changeItemCourse("it1", "dessert")).rejects.toThrow(BadRequestException);
+    await service.setNote("o1", "it1", "sans sel");
+    await service.changeItemCourse("it1", "plat");
+    expect(prisma.orderItem.update).toHaveBeenCalledTimes(1); // seul le rejeu de note réécrit la même valeur
+  });
+});
+
 describe("OrdersService.voidItem", () => {
   let service: OrdersService;
   let prisma: any;

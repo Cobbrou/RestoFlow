@@ -839,6 +839,23 @@ export default function CaisseSettingsManager({
                 className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
               />
             </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#6B6355] mb-1">
+                Compte Pourboires
+              </label>
+              <input
+                type="text"
+                value={formData.fecExportConfig?.accountTips || "468600"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fecExportConfig: { ...prev.fecExportConfig, accountTips: e.target.value },
+                  }))
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-black/15 text-sm font-semibold outline-none focus:border-[#C1440E]"
+              />
+            </div>
           </div>
         </div>
       )}

@@ -1,7 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { computeDiscountCents, computeVatBreakdown, effectivePrice, isHappyHourActive } from "./pricing";
+import { computeDiscountCents, computeVatBreakdown, effectivePrice, isHappyHourActive, menuVatSplit } from "./pricing";
 
 describe("pricing (calculs serveur en centimes)", () => {
+  it("menu plat + verre de vin : ventilé au prorata des composants", () => {
+    const split = menuVatSplit([{ price: 18, vatRate: 10 }, { price: 6, vatRate: 20 }]);
+    expect(split).toEqual([{ rate: 10, weight: 1800 }, { rate: 20, weight: 600 }]);
+    expect(menuVatSplit([{ price: 18, vatRate: 10 }, { price: 3, vatRate: 10 }])).toBeNull();
+
+    // Menu vendu 20 € (au lieu de 24 € à la carte) : 15 € à 10 %, 5 € à 20 %
+    const res = computeVatBreakdown([{ price: 20, qty: 1, vatRate: 10, vatSplit: JSON.stringify(split) }]);
+    expect(res.rates.map((r) => [r.rate, r.ttc])).toEqual([[10, 15], [20, 5]]);
+    expect(res.totalTTC).toBe(20);
+  });
+
   it("3 x 3,33 € à 10 % : 9,99 TTC sans dérive", () => {
     const res = computeVatBreakdown([{ price: 3.33, qty: 3, vatRate: 10 }]);
     expect(res.totalTTC).toBe(9.99);

@@ -24,7 +24,7 @@ import { CatalogService } from "../catalog/catalog.service";
 import { JournalService } from "../journal/journal.service";
 import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
-import { WsAuthGuard, authenticateSocket } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, authenticateSocket, STAFF_ROOM } from "../auth/guards/ws-auth.guard";
 import { Public } from "../auth/decorators/public.decorator";
 import { ALLOWED_ORIGINS } from "../cors";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
@@ -67,7 +67,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.logger.log(`Client connected: ${client.id}`);
     try {
       // Sans session : uniquement de quoi afficher l'écran de connexion PIN
-      if (!authenticateSocket(client, this.authService)) {
+      if (!(await authenticateSocket(client, this.authService))) {
         client.emit("sync:init", await this.getPublicState());
         client.emit("auth:required");
         return;
@@ -216,7 +216,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @Public()
   @SubscribeMessage("sync:request")
   async handleSyncRequest(@ConnectedSocket() client: Socket) {
-    if (!authenticateSocket(client, this.authService)) {
+    if (!(await authenticateSocket(client, this.authService))) {
       return { ok: true, state: await this.getPublicState(), authRequired: true };
     }
     const fullState = await this.getFullState();
@@ -236,11 +236,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Tables & Salle Dynamique ────────────────────────────────────────
 
+  @RequirePermissions("salle.alerts", "salle.order")
   @SubscribeMessage("tables:toggle_alert")
   async handleToggleAlert(@MessageBody() data: { tableId: string }) {
     try {
       const updated = await this.tablesService.toggleAlert(data.tableId);
-      this.server.emit("table:updated", updated);
+      this.server.to(STAFF_ROOM).emit("table:updated", updated);
       return { ok: true, table: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -256,10 +257,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const res = await this.tablesService.transferTable(data.sourceTableId, data.targetTableId);
       const formattedOrder = this.ordersService.formatOrder(res.order);
 
-      this.server.emit("table:updated", res.sourceTable);
-      this.server.emit("table:updated", res.targetTable);
-      this.server.emit("order:updated", formattedOrder);
-      this.server.emit("tables:transferred", {
+      this.server.to(STAFF_ROOM).emit("table:updated", res.sourceTable);
+      this.server.to(STAFF_ROOM).emit("table:updated", res.targetTable);
+      this.server.to(STAFF_ROOM).emit("order:updated", formattedOrder);
+      this.server.to(STAFF_ROOM).emit("tables:transferred", {
         sourceTableNumber: res.sourceNumber,
         targetTableNumber: res.targetNumber,
         server: data.staffName || res.server,
@@ -280,11 +281,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const res = await this.tablesService.mergeTables(data.sourceTableId, data.targetTableId);
       const formattedTargetOrder = this.ordersService.formatOrder(res.targetOrder);
 
-      this.server.emit("order:closed", { orderId: res.closedOrderId });
-      this.server.emit("order:updated", formattedTargetOrder);
-      this.server.emit("table:updated", res.sourceTable);
-      this.server.emit("table:updated", res.targetTable);
-      this.server.emit("tables:merged", {
+      this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.closedOrderId });
+      this.server.to(STAFF_ROOM).emit("order:updated", formattedTargetOrder);
+      this.server.to(STAFF_ROOM).emit("table:updated", res.sourceTable);
+      this.server.to(STAFF_ROOM).emit("table:updated", res.targetTable);
+      this.server.to(STAFF_ROOM).emit("tables:merged", {
         sourceTableNumber: res.sourceNumber,
         targetTableNumber: res.targetNumber,
         server: data.staffName || res.server,
@@ -298,13 +299,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Cycle de Vie des Commandes (OrdersService) ──────────────────────
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:create_or_ensure")
   async handleEnsureOrder(
     @MessageBody() data: { tableId: string; server: string; orderId?: string }
   ) {
     try {
       const order = await this.ordersService.createOrEnsure(data.tableId, data.server, data.orderId);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -317,42 +319,45 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleCreateOffPremise(@MessageBody() data: any) {
     try {
       const order = await this.ordersService.createOffPremise(data);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:add_item")
   async handleAddItem(@MessageBody() data: any) {
     try {
       const order = await this.ordersService.addItem(data);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:change_qty")
   async handleChangeQty(
     @MessageBody() data: { orderId: string; itemId: string; delta: number }
   ) {
     try {
       const order = await this.ordersService.changeQty(data.orderId, data.itemId, data.delta);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:remove_item")
   async handleRemoveItem(@MessageBody() data: { orderId: string; itemId: string }) {
     try {
       const order = await this.ordersService.removeItem(data.orderId, data.itemId);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -378,12 +383,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         item.status === "new" &&
         (await this.stockService.returnForVoid(item, voidQty, data.orderId, label, actor.staffId, reason));
       if (restocked) {
-        this.server.emit("stock:updated", await this.stockService.findAllIngredients());
-        this.server.emit("stock:movements_updated", await this.stockService.getMovements(60));
+        this.server.to(STAFF_ROOM).emit("stock:updated", await this.stockService.findAllIngredients());
+        this.server.to(STAFF_ROOM).emit("stock:movements_updated", await this.stockService.getMovements(60));
       }
 
-      this.server.emit("order:updated", order);
-      this.server.emit("kitchen:item_voided", {
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("kitchen:item_voided", {
         orderId: data.orderId,
         tableNumber,
         label,
@@ -405,9 +410,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         reason,
       });
 
-      this.attemptAutoVoidPrint(label, voidQty, item.name, reason, actor.name).catch((e) =>
-        this.logger.warn(`Échec de l'impression réseau du bon d'annulation: ${e.message}`)
-      );
+      this.attemptAutoVoidPrint(label, voidQty, item.name, reason, actor.name).catch(this.printFailed(client, "du bon d'annulation"));
 
       return { ok: true, order };
     } catch (err: any) {
@@ -423,24 +426,40 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!kitchenPrinter) return;
     const rawText = `\x1b\x40\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${label.toUpperCase()}\nPar: ${by}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
       `${qty}x ${name}\nMotif: ${reason}\n\n\n\x1d\x56\x01`;
-    await this.printerService.sendRaw(kitchenPrinter.ip, kitchenPrinter.port || 9100, Buffer.from(rawText, "latin1"));
+    await this.printOrThrow(kitchenPrinter, rawText);
   }
 
+  private async printOrThrow(printer: any, rawText: string) {
+    const res = await this.printerService.sendRaw(printer.ip, printer.port || 9100, Buffer.from(rawText, "latin1"));
+    if (!res.success) throw new Error(`${printer.name || printer.ip} : ${res.error}`);
+  }
+
+  // Échec d'impression : journal serveur + toast sur le poste qui a déclenché l'action
+  private printFailed(client: Socket, what: string) {
+    return (e: Error) => {
+      this.logger.warn(`Échec de l'impression ${what}: ${e.message}`);
+      client.emit("printer:error", { message: `Impression ${what} impossible (${e.message})` });
+    };
+  }
+
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:set_note")
   async handleSetNote(
     @MessageBody() data: { orderId: string; itemId: string; note: string }
   ) {
     try {
       const order = await this.ordersService.setNote(data.orderId, data.itemId, data.note);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("salle.send_kitchen")
   @SubscribeMessage("order:send_kitchen")
   async handleSendKitchen(
+    @ConnectedSocket() client: Socket,
     @MessageBody() data: { orderId: string; serverName?: string }
   ) {
     try {
@@ -448,29 +467,32 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const stockResult = await this.stockService.deductForOrder(data.orderId);
       if (stockResult) {
         for (const msg of stockResult.stockAlerts) {
-          this.server.emit("stock:alert", { message: msg });
+          this.server.to(STAFF_ROOM).emit("stock:alert", { message: msg });
         }
         if (stockResult.affectedProducts.length > 0) {
-          this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
+          this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
         }
-        this.server.emit("stock:updated", stockResult.refreshedIngredients);
-        this.server.emit("stock:movements_updated", stockResult.recentMovements);
+        this.server.to(STAFF_ROOM).emit("stock:updated", stockResult.refreshedIngredients);
+        this.server.to(STAFF_ROOM).emit("stock:movements_updated", stockResult.recentMovements);
       }
 
       // 2. Passage des articles de la commande en statut "new"
       const { order, rawOrder } = await this.ordersService.sendKitchen(data.orderId, data.serverName);
-      this.server.emit("order:updated", order);
-      this.server.emit("kitchen:new_ticket", {
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("kitchen:new_ticket", {
         orderId: rawOrder.id,
         tableNumber: rawOrder.table?.number,
         label: orderLabel(rawOrder),
         server: rawOrder.server,
       });
 
-      // 3. Impression Réseau Automatique & Silencieuse (Axe 4 Option A)
-      this.attemptAutoKitchenPrint(order).catch((e) =>
-        this.logger.warn(`Échec de l'impression réseau automatique cuisine: ${e.message}`)
-      );
+      // 3. Impression réseau : uniquement les articles qui viennent de partir (hors suites en attente)
+      const sentIds = new Set(rawOrder.items.filter((i: any) => i.status === "draft").map((i: any) => i.id));
+      this.attemptAutoKitchenPrint(
+        order,
+        order.items.filter((i: any) => sentIds.has(i.id) && i.courseStatus !== "held"),
+        "BON DE CUISINE"
+      ).catch(this.printFailed(client, "du bon cuisine"));
 
       return { ok: true, order };
     } catch (err: any) {
@@ -478,39 +500,53 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  private async attemptAutoKitchenPrint(order: any) {
+  /**
+   * Imprime un bon par poste : articles "bar" vers l'imprimante bar (sinon cuisine), le reste vers la cuisine
+   */
+  private async attemptAutoKitchenPrint(order: any, items: any[], title: string) {
+    if (items.length === 0) return;
     const cfg = await this.configService.getConfig();
-    const kitchenPrinter = cfg.printers?.find(
-      (p: any) => p.type === "kitchen" && p.interface === "network" && p.enabled && p.ip
-    );
-    if (kitchenPrinter) {
-      this.logger.log(`Impression automatique du bon cuisine vers ${kitchenPrinter.ip}:${kitchenPrinter.port || 9100}`);
-      const rawText = `\x1b\x40\x1b\x61\x01--- BON DE CUISINE ---\n${orderLabel(order).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${order.server}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
-        order.items
+    const findPrinter = (type: string) =>
+      cfg.printers?.find((p: any) => p.type === type && p.interface === "network" && p.enabled && p.ip);
+    const kitchenPrinter = findPrinter("kitchen");
+    const barPrinter = findPrinter("bar") || kitchenPrinter;
+    const errors: string[] = [];
+
+    for (const [printer, stationItems] of [
+      [kitchenPrinter, items.filter((i) => i.station !== "bar")],
+      [barPrinter, items.filter((i) => i.station === "bar")],
+    ] as [any, any[]][]) {
+      if (!printer || stationItems.length === 0) continue;
+      this.logger.log(`Impression automatique du bon (${stationItems.length} article(s)) vers ${printer.ip}:${printer.port || 9100}`);
+      const rawText = `\x1b\x40\x1b\x61\x01--- ${title} ---\n${orderLabel(order).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${order.server}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
+        stationItems
           .map((i: any) => `${i.qty}x ${i.name} ${i.notes ? `(${i.notes})` : ""}${i.options ? `\n   > ${i.options}` : ""}`)
           .join("\n") +
         `\n\n\n\x1d\x56\x01`;
-      await this.printerService.sendRaw(kitchenPrinter.ip, kitchenPrinter.port || 9100, Buffer.from(rawText, "latin1"));
+      await this.printOrThrow(printer, rawText).catch((e) => errors.push(e.message));
     }
+    if (errors.length > 0) throw new Error(errors.join(" ; "));
   }
 
+  @RequirePermissions("cuisine.status")
   @SubscribeMessage("order:start_prep")
   async handleStartPrep(@MessageBody() data: { orderId: string; station?: string }) {
     try {
       const order = await this.ordersService.startPrep(data.orderId, data.station);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("cuisine.status")
   @SubscribeMessage("order:mark_ready")
   async handleMarkReady(@MessageBody() data: { orderId: string; station?: string }) {
     try {
       const order = await this.ordersService.markReady(data.orderId, data.station);
-      this.server.emit("order:updated", order);
-      this.server.emit("server:order_ready", {
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("server:order_ready", {
         orderId: order.id,
         tableNumber: order.table?.number,
         label: orderLabel(order),
@@ -522,24 +558,27 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.serve")
   @SubscribeMessage("order:serve")
   async handleServe(@MessageBody() data: { orderId: string; course?: string }) {
     try {
       const order = await this.ordersService.serve(data.orderId, data.course);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("salle.send_kitchen")
   @SubscribeMessage("order:call_course")
   async handleCallCourse(
+    @ConnectedSocket() client: Socket,
     @MessageBody() data: { orderId: string; course: string; serverName?: string }
   ) {
     try {
       const res = await this.ordersService.callCourse(data.orderId, data.course, data.serverName);
-      this.server.emit("order:updated", res.order);
+      this.server.to(STAFF_ROOM).emit("order:updated", res.order);
 
       const courseLabel =
         data.course === "plat"
@@ -550,7 +589,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           ? "Suite"
           : data.course;
 
-      this.server.emit("kitchen:call_course", {
+      this.server.to(STAFF_ROOM).emit("kitchen:call_course", {
         orderId: res.rawOrder.id,
         tableNumber: res.rawOrder.table?.number || "?",
         label: orderLabel(res.rawOrder),
@@ -561,19 +600,27 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         timestamp: Date.now(),
       });
 
+      const calledIds = new Set(res.calledIds);
+      this.attemptAutoKitchenPrint(
+        res.order,
+        res.order.items.filter((i: any) => calledIds.has(i.id)),
+        `RECLAME ${courseLabel.toUpperCase()}`
+      ).catch(this.printFailed(client, "de la réclame"));
+
       return { ok: true, order: res.order, calledCount: res.calledCount };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:change_item_course")
   async handleChangeItemCourse(
     @MessageBody() data: { itemId: string; course: string; courseStatus?: string }
   ) {
     try {
       const order = await this.ordersService.changeItemCourse(data.itemId, data.course, data.courseStatus);
-      this.server.emit("order:updated", order);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -588,7 +635,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       const res = await this.billingService.applyDiscount(data.orderId, data.discount);
       const formatted = this.ordersService.formatOrder(res.order);
-      this.server.emit("order:updated", formatted);
+      this.server.to(STAFF_ROOM).emit("order:updated", formatted);
       await this.journal.log("DISCOUNT_APPLY", { staffId: client.data.user.staffId, name: client.data.user.name }, { orderId: data.orderId, discount: formatted.discount });
       return { ok: true, order: formatted };
     } catch (err: any) {
@@ -602,7 +649,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       const res = await this.billingService.removeDiscount(data.orderId);
       const formatted = this.ordersService.formatOrder(res.order);
-      this.server.emit("order:updated", formatted);
+      this.server.to(STAFF_ROOM).emit("order:updated", formatted);
       await this.journal.log("DISCOUNT_REMOVE", { staffId: client.data.user.staffId, name: client.data.user.name }, { orderId: data.orderId });
       return { ok: true, order: formatted };
     } catch (err: any) {
@@ -617,16 +664,28 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CheckoutDto
   ) {
     try {
-      const res = await this.billingService.processCheckout({ ...data, serverName: client.data.user.name });
+      // Rejeu hors-ligne : le ticket porte l'équipier d'origine, le journal garde aussi la session qui rejoue
+      const session = client.data.user;
+      const operator =
+        data.operatorId && data.operatorId !== session.staffId
+          ? await this.prisma.staff.findUnique({ where: { id: data.operatorId }, select: { id: true, name: true } })
+          : null;
+      const res = await this.billingService.processCheckout({ ...data, serverName: operator?.name || session.name });
+      if (operator) {
+        await this.journal.log("CHECKOUT_REPLAY", { staffId: session.staffId, name: session.name }, {
+          orderId: data.orderId,
+          ticketNumber: res.history?.ticketNumber,
+          operatorId: operator.id,
+          operatorName: operator.name,
+        });
+      }
 
-      this.server.emit("order:closed", { orderId: res.orderId });
-      if (res.table) this.server.emit("table:updated", res.table);
-      this.server.emit("history:new_entry", res.history);
+      this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
+      if (res.table) this.server.to(STAFF_ROOM).emit("table:updated", res.table);
+      this.server.to(STAFF_ROOM).emit("history:new_entry", res.history);
 
       // Impression automatique du ticket de caisse si configurée
-      this.attemptAutoCaissePrint(res.history).catch((e) =>
-        this.logger.warn(`Échec de l'impression réseau automatique caisse: ${e.message}`)
-      );
+      this.attemptAutoCaissePrint(res.history).catch(this.printFailed(client, "du ticket de caisse"));
 
       return { ok: true, history: res.history, table: res.table };
     } catch (err: any) {
@@ -641,13 +700,24 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     );
     if (caissePrinter) {
       this.logger.log(`Impression automatique facturette vers ${caissePrinter.ip}:${caissePrinter.port || 9100}`);
-      const rawText = `\x1b\x40\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\nSIRET: ${cfg.siret || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString()}\n\n\x1b\x61\x00` +
+      const eur = (n: any) => `${Number(n || 0).toFixed(2)}E`;
+      const discount = Number(historyRecord.subtotal || 0) - Number(historyRecord.total || 0);
+      const vatLines = (historyRecord.vatDetails?.rates || [])
+        .map((r: any) => `TVA ${String(r.rate).padEnd(4)}% HT ${eur(r.ht).padStart(9)}  TVA ${eur(r.vat).padStart(8)}`)
+        .join("\n");
+      const paidCash = (historyRecord.payments || []).some((p: any) => p.method === "especes") || historyRecord.paymentMethod === "especes";
+      const rawText = `\x1b\x40\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
         historyRecord.items
           .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
           .join("\n") +
-        (historyRecord.tip > 0 ? `\nPourboire: ${Number(historyRecord.tip).toFixed(2)}E` : "") +
-        `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01\x1b\x70\x00\x19\xfa`;
-      await this.printerService.sendRaw(caissePrinter.ip, caissePrinter.port || 9100, Buffer.from(rawText, "latin1"));
+        (discount > 0.004 ? `\nRemise: -${eur(discount)}` : "") +
+        `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\x1b\x61\x00` +
+        (vatLines ? `${vatLines}\n` : "") +
+        (historyRecord.tip > 0 ? `Pourboire (hors TVA): ${eur(historyRecord.tip)}\n` : "") +
+        `\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01` +
+        // Tiroir-caisse : uniquement si une partie est réglée en espèces
+        (paidCash ? `\x1b\x70\x00\x19\xfa` : "");
+      await this.printOrThrow(caissePrinter, rawText);
     }
   }
 
@@ -674,7 +744,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  @RequirePermissions("caisse.settings")
+  // Addition imprimée par un serveur (caisse.checkout) ou test depuis les réglages
+  @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("printer:send_raw")
   async handlePrinterSendRaw(@MessageBody() data: { ip: string; port?: number; buffer: number[] | string }) {
     try {
@@ -702,7 +773,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleUpdateConfig(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
       const updated = await this.configService.updateConfig(data);
-      this.server.emit("config:updated", updated);
+      this.server.to(STAFF_ROOM).emit("config:updated", updated);
       await this.journal.log("CONFIG_UPDATE", { staffId: client.data.user.staffId, name: client.data.user.name }, { fields: Object.keys(data || {}) });
       return { ok: true, config: updated };
     } catch (err: any) {
@@ -715,8 +786,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleUpdateModules(@ConnectedSocket() client: Socket, @MessageBody() data: { modules: any }) {
     try {
       const updated = await this.configService.updateModulesConfig(data.modules);
-      this.server.emit("config:modules_updated", updated.modulesConfig);
-      this.server.emit("config:updated", updated);
+      this.server.to(STAFF_ROOM).emit("config:modules_updated", updated.modulesConfig);
+      this.server.to(STAFF_ROOM).emit("config:updated", updated);
       await this.journal.log("CONFIG_UPDATE", { staffId: client.data.user.staffId, name: client.data.user.name }, { fields: ["modulesConfig"] });
       return { ok: true, modulesConfig: updated.modulesConfig };
     } catch (err: any) {
@@ -762,11 +833,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
       }));
 
-      this.server.emit("stock:updated", formattedIngredients);
-      this.server.emit("stock:movements_updated", movements);
+      this.server.to(STAFF_ROOM).emit("stock:updated", formattedIngredients);
+      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
 
       if (result.affectedProducts.length > 0) {
-        this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
+        this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
       }
 
       return { ok: true, movement: result.movement, ingredient: result.ingredient };
@@ -782,8 +853,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const created = await this.stockService.createIngredient(data);
       const ingredients = await this.stockService.findAllIngredients();
       const movements = await this.stockService.getMovements(60);
-      this.server.emit("stock:updated", ingredients);
-      this.server.emit("stock:movements_updated", movements);
+      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
+      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
       return { ok: true, ingredient: created };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -798,8 +869,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const updated = await this.stockService.updateIngredient(id, rest);
       const ingredients = await this.stockService.findAllIngredients();
       const movements = await this.stockService.getMovements(60);
-      this.server.emit("stock:updated", ingredients);
-      this.server.emit("stock:movements_updated", movements);
+      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
+      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
       return { ok: true, ingredient: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -812,7 +883,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       await this.stockService.deleteIngredient(data.id);
       const ingredients = await this.stockService.findAllIngredients();
-      this.server.emit("stock:updated", ingredients);
+      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
       return { ok: true, id: data.id };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -825,7 +896,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       await this.stockService.restoreIngredient(data.id);
       const ingredients = await this.stockService.findAllIngredients();
-      this.server.emit("stock:updated", ingredients);
+      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
       return { ok: true, id: data.id };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -838,7 +909,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       await this.recipesService.saveRecipe(data.productId, data.items);
       const parsedRecipes = await this.recipesService.listItems();
-      this.server.emit("recipe:updated", parsedRecipes);
+      this.server.to(STAFF_ROOM).emit("recipe:updated", parsedRecipes);
       return { ok: true, recipes: parsedRecipes };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -851,7 +922,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       const created = await this.catalogService.createProduct(data);
       const allProducts = await this.catalogService.getProducts();
-      this.server.emit("catalog:products_updated", allProducts);
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", allProducts);
       return { ok: true, product: created };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -868,10 +939,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const movements = await this.stockService.getMovements(60);
       const parsedRecipes = await this.recipesService.listItems();
 
-      this.server.emit("catalog:products_updated", allProducts);
-      this.server.emit("stock:updated", allIngredients);
-      this.server.emit("stock:movements_updated", movements);
-      this.server.emit("recipe:updated", parsedRecipes);
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", allProducts);
+      this.server.to(STAFF_ROOM).emit("stock:updated", allIngredients);
+      this.server.to(STAFF_ROOM).emit("stock:movements_updated", movements);
+      this.server.to(STAFF_ROOM).emit("recipe:updated", parsedRecipes);
 
       return { ok: true, ...result };
     } catch (err: any) {
@@ -886,7 +957,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const { id, ...rest } = data;
       const updated = await this.catalogService.updateProduct(id, rest);
       const allProducts = await this.catalogService.getProducts();
-      this.server.emit("catalog:products_updated", allProducts);
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", allProducts);
       return { ok: true, product: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -899,7 +970,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       await this.catalogService.deleteProduct(data.id);
       const allProducts = await this.catalogService.getProducts();
-      this.server.emit("catalog:products_updated", allProducts);
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", allProducts);
       return { ok: true, id: data.id };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -919,9 +990,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         data: { available: !p.available },
       });
 
-      this.server.emit("catalog:products_updated", await this.catalogService.getProducts());
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
       // Annonce « 86 » à tous les postes (salle comprise) pour ne plus vendre le plat
-      this.server.emit("catalog:product_86", { name: updated.name, available: updated.available, by: client.data.user?.name });
+      this.server.to(STAFF_ROOM).emit("catalog:product_86", { name: updated.name, available: updated.available, by: client.data.user?.name });
       return { ok: true, product: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -954,12 +1025,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
 
       // Diffusion temps réel de la nouvelle clôture Z à tous les postes connectés
-      this.server.emit("closing:new_z", zReport);
+      this.server.to(STAFF_ROOM).emit("closing:new_z", zReport);
       await this.journal.log("Z_CLOSING", { staffId: client.data.user.staffId, name: client.data.user.name }, { reportNumber: zReport.reportNumber, totalNet: zReport.totalNet });
 
       // Recharger l'état de la config et de l'historique
       const updatedConfig = await this.configService.getConfig();
-      this.server.emit("config:updated", updatedConfig);
+      this.server.to(STAFF_ROOM).emit("config:updated", updatedConfig);
 
       return { ok: true, closing: zReport };
     } catch (err: any) {
@@ -1011,7 +1082,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleRefund(@ConnectedSocket() client: Socket, @MessageBody() data: { historyId: string; reason: string }) {
     try {
       const creditNote = await this.billingService.refundTicket(data?.historyId, data?.reason, client.data.user.name);
-      this.server.emit("history:new_entry", creditNote);
+      this.server.to(STAFF_ROOM).emit("history:new_entry", creditNote);
       await this.journal.log("CREDIT_NOTE", { staffId: client.data.user.staffId, name: client.data.user.name }, {
         ticketNumber: creditNote.ticketNumber,
         refTicketNumber: creditNote.refTicketNumber,

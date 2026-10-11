@@ -11,6 +11,8 @@ ExecStart=/usr/bin/node --env-file=.env dist/src/main.js
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
+# Numéros d'appel, happy hour et heures imprimées dépendent du fuseau
+Environment=TZ=Europe/Paris
 
 [Install]
 WantedBy=multi-user.target

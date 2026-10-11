@@ -22,4 +22,9 @@ export class CheckoutDto {
   @IsNumber()
   @Min(0)
   tip?: number;
+
+  // Équipier ayant encaissé sur la tablette (diffère de la session en cas de rejeu hors-ligne)
+  @IsOptional()
+  @IsString()
+  operatorId?: string;
 }

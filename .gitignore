@@ -148,4 +148,6 @@ vite.config.ts.timestamp-*
 # SQLite local (données, hashs de PIN, clé NF525)
 server/prisma/*.db
 server/prisma/*.db-journal
+server/prisma/*.db-wal
+server/prisma/*.db-shm
 server/backups/

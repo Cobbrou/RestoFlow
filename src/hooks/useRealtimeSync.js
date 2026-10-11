@@ -75,6 +75,11 @@ export function useRealtimeSync(store, { pushToast, beep, soundOn, onAuthRequire
       "recipe:updated": setRecipes,
       "stock:movements_updated": setStockMovements,
       "catalog:products_updated": setProducts,
+      // Envoyé uniquement au poste qui a déclenché l'impression automatique
+      "printer:error": ({ message }) => {
+        pushToast(`🖨️ ${message}`, "warn");
+        ring(620);
+      },
       "stock:alert": ({ message }) => {
         pushToast(message, "warn");
         ring(620);

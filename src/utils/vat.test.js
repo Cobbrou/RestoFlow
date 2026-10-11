@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { calculateVatBreakdown } from "./vat.js";
+import { calculateVatBreakdown, menuVatSplit } from "./vat.js";
 
 describe("TVA & Fiscalité - calculateVatBreakdown", () => {
+  it("ventile un menu mixte comme le serveur (copie de pricing.ts)", () => {
+    const vatSplit = menuVatSplit([{ price: 18, vatRate: 10 }, { price: 6, vatRate: 20 }]);
+    const res = calculateVatBreakdown([{ name: "Menu", price: 20, qty: 1, vatRate: 10, vatSplit, status: "served" }]);
+    expect(res.rates.map((r) => [r.rate, r.ttc])).toEqual([[10, 15], [20, 5]]);
+  });
+
   it("calcule correctement la ventilation pour un produit unique à 10%", () => {
     const items = [{ name: "Plat du jour", price: 15.0, qty: 1, vatRate: 10, status: "served" }];
     const res = calculateVatBreakdown(items);
