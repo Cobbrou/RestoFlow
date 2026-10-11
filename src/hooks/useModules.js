@@ -26,8 +26,8 @@ export function useModules() {
     ctx = {};
   }
 
-  const raw = ctx?.modulesConfig || ctx?.config?.modulesConfig || DEFAULT_MODULES_CONFIG;
-  const modules = typeof raw === "string" ? JSON.parse(raw) : (raw || DEFAULT_MODULES_CONFIG);
+  // Objet déjà parsé par le serveur (ConfigService.getConfig)
+  const modules = ctx?.modulesConfig || ctx?.config?.modulesConfig || DEFAULT_MODULES_CONFIG;
 
   return {
     modules,

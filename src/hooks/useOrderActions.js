@@ -253,8 +253,7 @@ export function useOrderActions(store, {
 
   const sendToKitchen = (orderId) => {
     const serverName = currentStaff ? currentStaff.name.split(" ")[0] : "Service";
-    const rawModules = config?.modulesConfig;
-    const modules = (typeof rawModules === "string" ? JSON.parse(rawModules) : rawModules) || {};
+    const modules = config?.modulesConfig || {};
     updateOrder(orderId, (o) => {
       const released = heldToRelease(o.items, modules.enableCoursePacing ?? true);
       return {
