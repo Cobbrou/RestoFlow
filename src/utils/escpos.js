@@ -15,7 +15,7 @@ export const ESC = 0x1b;
 export const GS = 0x1d;
 
 export const COMMANDS = {
-  INIT: [ESC, 0x40], // Réinitialisation imprimante
+  INIT: [ESC, 0x40, ESC, 0x74, 0x10], // Réinitialisation imprimante + table WPC1252 (accents)
   ALIGN_LEFT: [ESC, 0x61, 0x00],
   ALIGN_CENTER: [ESC, 0x61, 0x01],
   ALIGN_RIGHT: [ESC, 0x61, 0x02],
@@ -466,8 +466,22 @@ export function generateZReportText(zData = {}, config = {}, width = 42) {
 /**
  * Crée un Blob binaire ESC/POS téléchargeable ou injectable vers un port d'imprimante
  */
+// Caractères de Windows-1252 hors latin1 (0x80-0x9F) ; copie de server/src/printer/printer.service.ts
+const CP1252_EXTRA = {
+  "€": 0x80, "‚": 0x82, "„": 0x84, "…": 0x85, "‘": 0x91, "’": 0x92, "“": 0x93, "”": 0x94,
+  "•": 0x95, "–": 0x96, "—": 0x97, "Œ": 0x8c, "œ": 0x9c, "Ÿ": 0x9f,
+};
+
+/** Texte vers octets Windows-1252 (é, à, œ, €…) ; caractère non imprimable (emoji…) remplacé par "?" */
+export function encodeCp1252(text) {
+  return Uint8Array.from(Array.from(text), (ch) => {
+    const code = ch.codePointAt(0);
+    if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) return code;
+    return CP1252_EXTRA[ch] ?? 0x3f;
+  });
+}
+
 export function buildEscPosBinary(text, options = {}) {
-  const encoder = new TextEncoder();
   const chunks = [];
 
   // Init
@@ -482,7 +496,7 @@ export function buildEscPosBinary(text, options = {}) {
   }
 
   // Encodage du texte brut
-  const textBytes = encoder.encode(text + "\n\n\n");
+  const textBytes = encodeCp1252(text + "\n\n\n");
   chunks.push(textBytes);
 
   // Coupe

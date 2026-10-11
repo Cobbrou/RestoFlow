@@ -85,7 +85,7 @@ export class ManagementGateway {
   @RequirePermissions("gestion.staff")
   @SubscribeMessage("staff:create")
   async createStaff(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
-    const res = await this.broadcast("staff:list", () => this.management.createStaff(data));
+    const res = await this.broadcast("staff:list", () => this.management.createStaff(data, client.data.user));
     if (res.ok) await this.journal.log("STAFF_CREATE", this.actor(client), { name: data?.name, roleId: data?.roleId });
     return res;
   }
@@ -94,7 +94,7 @@ export class ManagementGateway {
   @SubscribeMessage("staff:update")
   async updateStaff(@ConnectedSocket() client: Socket, @MessageBody() data: { id: string; data: any }) {
     const res = await this.broadcast("staff:list", () =>
-      this.management.updateStaff(data?.id, data?.data, client.data.user.staffId)
+      this.management.updateStaff(data?.id, data?.data, client.data.user)
     );
     if (res.ok) {
       const { pin, ...changes } = data?.data || {};
@@ -106,7 +106,7 @@ export class ManagementGateway {
   @RequirePermissions("gestion.staff")
   @SubscribeMessage("staff:delete")
   async deleteStaff(@ConnectedSocket() client: Socket, @MessageBody() data: { id: string }) {
-    const res = await this.broadcast("staff:list", () => this.management.deleteStaff(data?.id, client.data.user.staffId));
+    const res = await this.broadcast("staff:list", () => this.management.deleteStaff(data?.id, client.data.user));
     if (res.ok) await this.journal.log("STAFF_DELETE", this.actor(client), { staffId: data?.id });
     return res;
   }
@@ -115,7 +115,7 @@ export class ManagementGateway {
   @RequirePermissions("gestion.staff")
   @SubscribeMessage("role:create")
   async createRole(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
-    const res = await this.broadcast("roles:list", () => this.management.createRole(data));
+    const res = await this.broadcast("roles:list", () => this.management.createRole(data, client.data.user));
     if (res.ok) await this.journal.log("ROLE_CREATE", this.actor(client), { name: data?.name, permissions: data?.permissions });
     return res;
   }
@@ -123,7 +123,7 @@ export class ManagementGateway {
   @RequirePermissions("gestion.staff")
   @SubscribeMessage("role:update")
   async updateRole(@ConnectedSocket() client: Socket, @MessageBody() data: { id: string; data: any }) {
-    const res = await this.broadcast("roles:list", () => this.management.updateRole(data?.id, data?.data));
+    const res = await this.broadcast("roles:list", () => this.management.updateRole(data?.id, data?.data, client.data.user));
     if (res.ok) await this.journal.log("ROLE_UPDATE", this.actor(client), { roleId: data?.id, changes: data?.data });
     return res;
   }

@@ -13,6 +13,26 @@ export interface PrinterSendResult {
   error?: string;
 }
 
+/** Initialisation ESC/POS + table de caractères WPC1252 (ESC t 16), à envoyer en tête de chaque ticket */
+export const ESCPOS_INIT = "\x1b\x40\x1b\x74\x10";
+
+// Caractères de Windows-1252 hors latin1 (0x80-0x9F) ; copie dans src/utils/escpos.js
+const CP1252_EXTRA: Record<string, number> = {
+  "€": 0x80, "‚": 0x82, "„": 0x84, "…": 0x85, "‘": 0x91, "’": 0x92, "“": 0x93, "”": 0x94,
+  "•": 0x95, "–": 0x96, "—": 0x97, "Œ": 0x8c, "œ": 0x9c, "Ÿ": 0x9f,
+};
+
+/** Texte vers octets Windows-1252 (é, à, œ, €…) ; caractère non imprimable (emoji…) remplacé par "?" */
+export function encodeCp1252(text: string): Buffer {
+  return Buffer.from(
+    Array.from(text, (ch) => {
+      const code = ch.codePointAt(0)!;
+      if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) return code;
+      return CP1252_EXTRA[ch] ?? 0x3f;
+    })
+  );
+}
+
 @Injectable()
 export class PrinterService {
   private readonly logger = new Logger(PrinterService.name);

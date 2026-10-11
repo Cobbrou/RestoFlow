@@ -232,26 +232,6 @@ export class StockService {
           affectedProducts.push(item.productId);
         }
       }
-
-      // Cascade to menus: disable any menu containing a now-unavailable product
-      if (affectedProducts.length > 0) {
-        const menusRaw = await this.prisma.menu.findMany();
-        for (const menu of menusRaw) {
-          try {
-            const groups = JSON.parse(menu.groups || '[]');
-            const menuProductIds = groups.flatMap((g: any) =>
-              (g.choices || g.options || []).map((c: any) => c.id || c.productId).filter(Boolean)
-            );
-            const hasDisabledProduct = menuProductIds.some((pid: string) => affectedProducts.includes(pid));
-            if (hasDisabledProduct && menu.available) {
-              await this.prisma.menu.update({
-                where: { id: menu.id },
-                data: { available: false },
-              });
-            }
-          } catch {}
-        }
-      }
     } else if (ingredient.currentStock <= 0 && newStock > 0) {
       // Si on revient en stock positif, réactiver les produits si tous leurs ingrédients critiques sont OK
       for (const item of ingredient.recipeItems) {
@@ -422,25 +402,7 @@ export class StockService {
             });
             affectedProducts.push(cr.productId);
           }
-
-          if (affectedProducts.length > 0) {
-            const menusRaw = await tx.menu.findMany();
-            for (const menu of menusRaw) {
-              try {
-                const groups = JSON.parse(menu.groups || '[]');
-                const menuProductIds = groups.flatMap((g: any) =>
-                  (g.choices || g.options || []).map((c: any) => c.id || c.productId).filter(Boolean)
-                );
-                const hasDisabledProduct = menuProductIds.some((pid: string) => affectedProducts.includes(pid));
-                if (hasDisabledProduct && menu.available) {
-                  await tx.menu.update({
-                    where: { id: menu.id },
-                    data: { available: false },
-                  });
-                }
-              } catch {}
-            }
-          }
+          // Les menus restent disponibles : le choix épuisé est grisé dans le composeur de menu
         } else if (newStock <= current.minThreshold) {
           stockAlerts.push(`🟡 Seuil critique : ${current.name} (reste ${newStock} ${current.unit})`);
         }

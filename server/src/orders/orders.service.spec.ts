@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BadRequestException } from "@nestjs/common";
-import { OrdersService, heldToRelease, orderLabel } from "./orders.service";
+import { OrdersService, checkMenuComposition, heldToRelease, orderLabel } from "./orders.service";
 
 describe("OrdersService : article déjà envoyé en cuisine", () => {
   const sent = { id: "it1", orderId: "o1", status: "new", notes: "sans sel", course: "plat" };
@@ -170,5 +170,54 @@ describe("OrdersService.createOffPremise (emporter)", () => {
 
   it("libellé : la salle garde « Table N »", () => {
     expect(orderLabel({ type: "dine_in", table: { number: 4 } })).toBe("Table 4");
+  });
+});
+
+describe("OrdersService.sendKitchen", () => {
+  it("n'envoie que les brouillons qu'il a lui-même basculés (double appui, deux terminaux)", async () => {
+    const order = { id: "o1", status: "open", items: [{ id: "a", status: "draft" }, { id: "b", status: "draft" }, { id: "c", status: "new" }] };
+    const prisma: any = {
+      order: { findUnique: vi.fn().mockResolvedValue(order), update: vi.fn() },
+      restaurantConfig: { findUnique: vi.fn().mockResolvedValue(null) },
+      // "b" a déjà été réclamé par un envoi concurrent
+      orderItem: { updateMany: vi.fn(({ where }) => ({ count: where.id === "b" ? 0 : 1 })) },
+    };
+    const { sentIds } = await new OrdersService(prisma).sendKitchen("o1");
+    expect(sentIds).toEqual(["a"]);
+  });
+
+  it("refuse une commande encaissée", async () => {
+    const prisma: any = { order: { findUnique: vi.fn().mockResolvedValue({ id: "o1", status: "closed", items: [] }) } };
+    await expect(new OrdersService(prisma).sendKitchen("o1")).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe("Menus : composition validée contre la formule", () => {
+  const groups = [
+    { title: "Plat", count: 1, productIds: ["p1", "p2"] },
+    { title: "Dessert", count: 1, productIds: ["p3"] },
+  ];
+
+  it("accepte un choix par étape parmi ceux proposés", () => {
+    expect(checkMenuComposition(groups, [{ productIds: ["p2"] }, { productIds: ["p3"] }])).toBe(groups);
+  });
+
+  it("refuse une étape manquante, un produit hors formule ou un nombre de choix faux", () => {
+    expect(() => checkMenuComposition(groups, [{ productIds: ["p1"] }])).toThrow("incomplète");
+    expect(() => checkMenuComposition(groups, [{ productIds: ["p9"] }, { productIds: ["p3"] }])).toThrow("Plat");
+    expect(() => checkMenuComposition(groups, [{ productIds: ["p1", "p2"] }, { productIds: ["p3"] }])).toThrow("Plat");
+    expect(() => checkMenuComposition(groups, null)).toThrow(BadRequestException);
+  });
+
+  it("addItem traite « menu_… » comme un menu même si le client envoie isMenu: false", async () => {
+    const prisma: any = {
+      order: { findUnique: vi.fn().mockResolvedValue({ id: "o1", status: "open", items: [] }) },
+      menu: { findUnique: vi.fn().mockResolvedValue({ id: "m1", name: "Menu", price: 15, groups: JSON.stringify(groups) }) },
+      orderItem: { create: vi.fn() },
+    };
+    await expect(
+      new OrdersService(prisma).addItem({ orderId: "o1", product: { id: "menu_m1", name: "x", price: 1, isMenu: false } })
+    ).rejects.toThrow("incomplète");
+    expect(prisma.orderItem.create).not.toHaveBeenCalled();
   });
 });

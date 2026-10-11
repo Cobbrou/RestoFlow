@@ -17,7 +17,7 @@ import { BillingService } from "../billing/billing.service";
 import { ConfigService } from "../config/config.service";
 import { StockService } from "../stock/stock.service";
 import { TablesService } from "../tables/tables.service";
-import { PrinterService } from "../printer/printer.service";
+import { PrinterService, ESCPOS_INIT, encodeCp1252 } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
@@ -453,13 +453,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       (p: any) => p.type === "kitchen" && p.interface === "network" && p.enabled && p.ip
     );
     if (!kitchenPrinter) return;
-    const rawText = `\x1b\x40\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${label.toUpperCase()}\nPar: ${by}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
+    const rawText = `${ESCPOS_INIT}\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${label.toUpperCase()}\nPar: ${by}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
       `${qty}x ${name}\nMotif: ${reason}\n\n\n\x1d\x56\x01`;
     await this.printOrThrow(kitchenPrinter, rawText);
   }
 
   private async printOrThrow(printer: any, rawText: string) {
-    const res = await this.printerService.sendRaw(printer.ip, printer.port || 9100, Buffer.from(rawText, "latin1"));
+    const res = await this.printerService.sendRaw(printer.ip, printer.port || 9100, encodeCp1252(rawText));
     if (!res.success) throw new Error(`${printer.name || printer.ip} : ${res.error}`);
   }
 
@@ -492,12 +492,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody() data: { orderId: string; serverName?: string }
   ) {
     try {
-      // 1. Décompte automatique et atomique des stocks (Axe 2 & 5)
-      await this.deductStock(data.orderId);
-
-      // 2. Passage des articles de la commande en statut "new"
-      const { order, rawOrder } = await this.ordersService.sendKitchen(data.orderId, data.serverName);
+      // 1. Passage des brouillons en statut "new" (chaque ligne n'est réclamée que par un seul envoi)
+      const { order, rawOrder, sentIds: sentList } = await this.ordersService.sendKitchen(data.orderId, data.serverName);
       this.server.to(STAFF_ROOM).emit("order:updated", order);
+      // Rien de nouveau (double appui, envoi concurrent) : ni déstockage, ni bon
+      if (sentList.length === 0) return { ok: true, order };
+
+      // 2. Déstockage des seules lignes envoyées ici ; un échec n'annule pas l'envoi déjà parti en cuisine
+      await this.deductStock(data.orderId, sentList).catch((e) => this.logger.error(`Déstockage envoi cuisine : ${e.message}`));
       this.server.to(STAFF_ROOM).emit("kitchen:new_ticket", {
         orderId: rawOrder.id,
         tableNumber: rawOrder.table?.number,
@@ -506,7 +508,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
 
       // 3. Impression réseau : uniquement les articles qui viennent de partir (hors suites en attente)
-      const sentIds = new Set(rawOrder.items.filter((i: any) => i.status === "draft").map((i: any) => i.id));
+      const sentIds = new Set(sentList);
       this.attemptAutoKitchenPrint(
         order,
         order.items.filter((i: any) => sentIds.has(i.id) && i.courseStatus !== "held"),
@@ -551,7 +553,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     ] as [any, any[]][]) {
       if (!printer || stationItems.length === 0) continue;
       this.logger.log(`Impression automatique du bon (${stationItems.length} article(s)) vers ${printer.ip}:${printer.port || 9100}`);
-      const rawText = `\x1b\x40\x1b\x61\x01--- ${title} ---\n${orderLabel(order).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${order.server}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
+      const rawText = `${ESCPOS_INIT}\x1b\x61\x01--- ${title} ---\n${orderLabel(order).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${order.server}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
         stationItems
           .map((i: any) => `${i.qty}x ${i.name} ${i.notes ? `(${i.notes})` : ""}${i.options ? `\n   > ${i.options}` : ""}`)
           .join("\n") +
@@ -745,7 +747,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         .map((r: any) => `TVA ${String(r.rate).padEnd(4)}% HT ${eur(r.ht).padStart(9)}  TVA ${eur(r.vat).padStart(8)}`)
         .join("\n");
       const paidCash = (historyRecord.payments || []).some((p: any) => p.method === "especes") || historyRecord.paymentMethod === "especes";
-      const rawText = `\x1b\x40\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
+      const rawText = `${ESCPOS_INIT}\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
         historyRecord.items
           .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
           .join("\n") +
