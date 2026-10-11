@@ -410,9 +410,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         reason,
       });
 
-      this.attemptAutoVoidPrint(label, voidQty, item.name, reason, actor.name).catch((e) =>
-        this.logger.warn(`Échec de l'impression réseau du bon d'annulation: ${e.message}`)
-      );
+      this.attemptAutoVoidPrint(label, voidQty, item.name, reason, actor.name).catch(this.printFailed(client, "du bon d'annulation"));
 
       return { ok: true, order };
     } catch (err: any) {
@@ -428,7 +426,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!kitchenPrinter) return;
     const rawText = `\x1b\x40\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${label.toUpperCase()}\nPar: ${by}\nHeure: ${new Date().toLocaleTimeString()}\n\n\x1b\x61\x00` +
       `${qty}x ${name}\nMotif: ${reason}\n\n\n\x1d\x56\x01`;
-    await this.printerService.sendRaw(kitchenPrinter.ip, kitchenPrinter.port || 9100, Buffer.from(rawText, "latin1"));
+    await this.printOrThrow(kitchenPrinter, rawText);
+  }
+
+  private async printOrThrow(printer: any, rawText: string) {
+    const res = await this.printerService.sendRaw(printer.ip, printer.port || 9100, Buffer.from(rawText, "latin1"));
+    if (!res.success) throw new Error(`${printer.name || printer.ip} : ${res.error}`);
+  }
+
+  // Échec d'impression : journal serveur + toast sur le poste qui a déclenché l'action
+  private printFailed(client: Socket, what: string) {
+    return (e: Error) => {
+      this.logger.warn(`Échec de l'impression ${what}: ${e.message}`);
+      client.emit("printer:error", { message: `Impression ${what} impossible (${e.message})` });
+    };
   }
 
   @RequirePermissions("salle.order")
@@ -448,6 +459,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("salle.send_kitchen")
   @SubscribeMessage("order:send_kitchen")
   async handleSendKitchen(
+    @ConnectedSocket() client: Socket,
     @MessageBody() data: { orderId: string; serverName?: string }
   ) {
     try {
@@ -480,7 +492,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         order,
         order.items.filter((i: any) => sentIds.has(i.id) && i.courseStatus !== "held"),
         "BON DE CUISINE"
-      ).catch((e) => this.logger.warn(`Échec de l'impression réseau automatique cuisine: ${e.message}`));
+      ).catch(this.printFailed(client, "du bon cuisine"));
 
       return { ok: true, order };
     } catch (err: any) {
@@ -498,6 +510,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       cfg.printers?.find((p: any) => p.type === type && p.interface === "network" && p.enabled && p.ip);
     const kitchenPrinter = findPrinter("kitchen");
     const barPrinter = findPrinter("bar") || kitchenPrinter;
+    const errors: string[] = [];
 
     for (const [printer, stationItems] of [
       [kitchenPrinter, items.filter((i) => i.station !== "bar")],
@@ -510,8 +523,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           .map((i: any) => `${i.qty}x ${i.name} ${i.notes ? `(${i.notes})` : ""}${i.options ? `\n   > ${i.options}` : ""}`)
           .join("\n") +
         `\n\n\n\x1d\x56\x01`;
-      await this.printerService.sendRaw(printer.ip, printer.port || 9100, Buffer.from(rawText, "latin1"));
+      await this.printOrThrow(printer, rawText).catch((e) => errors.push(e.message));
     }
+    if (errors.length > 0) throw new Error(errors.join(" ; "));
   }
 
   @RequirePermissions("cuisine.status")
@@ -559,6 +573,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("salle.send_kitchen")
   @SubscribeMessage("order:call_course")
   async handleCallCourse(
+    @ConnectedSocket() client: Socket,
     @MessageBody() data: { orderId: string; course: string; serverName?: string }
   ) {
     try {
@@ -590,7 +605,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         res.order,
         res.order.items.filter((i: any) => calledIds.has(i.id)),
         `RECLAME ${courseLabel.toUpperCase()}`
-      ).catch((e) => this.logger.warn(`Échec de l'impression réseau de la réclame: ${e.message}`));
+      ).catch(this.printFailed(client, "de la réclame"));
 
       return { ok: true, order: res.order, calledCount: res.calledCount };
     } catch (err: any) {
@@ -649,16 +664,28 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CheckoutDto
   ) {
     try {
-      const res = await this.billingService.processCheckout({ ...data, serverName: client.data.user.name });
+      // Rejeu hors-ligne : le ticket porte l'équipier d'origine, le journal garde aussi la session qui rejoue
+      const session = client.data.user;
+      const operator =
+        data.operatorId && data.operatorId !== session.staffId
+          ? await this.prisma.staff.findUnique({ where: { id: data.operatorId }, select: { id: true, name: true } })
+          : null;
+      const res = await this.billingService.processCheckout({ ...data, serverName: operator?.name || session.name });
+      if (operator) {
+        await this.journal.log("CHECKOUT_REPLAY", { staffId: session.staffId, name: session.name }, {
+          orderId: data.orderId,
+          ticketNumber: res.history?.ticketNumber,
+          operatorId: operator.id,
+          operatorName: operator.name,
+        });
+      }
 
       this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
       if (res.table) this.server.to(STAFF_ROOM).emit("table:updated", res.table);
       this.server.to(STAFF_ROOM).emit("history:new_entry", res.history);
 
       // Impression automatique du ticket de caisse si configurée
-      this.attemptAutoCaissePrint(res.history).catch((e) =>
-        this.logger.warn(`Échec de l'impression réseau automatique caisse: ${e.message}`)
-      );
+      this.attemptAutoCaissePrint(res.history).catch(this.printFailed(client, "du ticket de caisse"));
 
       return { ok: true, history: res.history, table: res.table };
     } catch (err: any) {
@@ -673,13 +700,24 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     );
     if (caissePrinter) {
       this.logger.log(`Impression automatique facturette vers ${caissePrinter.ip}:${caissePrinter.port || 9100}`);
-      const rawText = `\x1b\x40\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\nSIRET: ${cfg.siret || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString()}\n\n\x1b\x61\x00` +
+      const eur = (n: any) => `${Number(n || 0).toFixed(2)}E`;
+      const discount = Number(historyRecord.subtotal || 0) - Number(historyRecord.total || 0);
+      const vatLines = (historyRecord.vatDetails?.rates || [])
+        .map((r: any) => `TVA ${String(r.rate).padEnd(4)}% HT ${eur(r.ht).padStart(9)}  TVA ${eur(r.vat).padStart(8)}`)
+        .join("\n");
+      const paidCash = (historyRecord.payments || []).some((p: any) => p.method === "especes") || historyRecord.paymentMethod === "especes";
+      const rawText = `\x1b\x40\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
         historyRecord.items
           .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
           .join("\n") +
-        (historyRecord.tip > 0 ? `\nPourboire: ${Number(historyRecord.tip).toFixed(2)}E` : "") +
-        `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01\x1b\x70\x00\x19\xfa`;
-      await this.printerService.sendRaw(caissePrinter.ip, caissePrinter.port || 9100, Buffer.from(rawText, "latin1"));
+        (discount > 0.004 ? `\nRemise: -${eur(discount)}` : "") +
+        `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\x1b\x61\x00` +
+        (vatLines ? `${vatLines}\n` : "") +
+        (historyRecord.tip > 0 ? `Pourboire (hors TVA): ${eur(historyRecord.tip)}\n` : "") +
+        `\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01` +
+        // Tiroir-caisse : uniquement si une partie est réglée en espèces
+        (paidCash ? `\x1b\x70\x00\x19\xfa` : "");
+      await this.printOrThrow(caissePrinter, rawText);
     }
   }
 

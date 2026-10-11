@@ -27,10 +27,46 @@ export function computeDiscountCents(subtotalCents: number, discount?: DiscountI
   return Math.min(subtotalCents, cents);
 }
 
+export interface VatShare {
+  rate: number;
+  weight: number; // prix du composant en centimes
+}
+
 export interface PricedItem {
   price: number;
   qty: number;
   vatRate?: number | null;
+  vatSplit?: string | VatShare[] | null; // menu mêlant plusieurs taux (ex. plat 10 % + vin 20 %)
+}
+
+/**
+ * Ventilation d'un menu au prorata des prix de ses composants (copie dans src/utils/vat.js).
+ * null si tous les composants partagent le même taux : le menu garde alors un taux unique.
+ */
+export function menuVatSplit(components: { price: number; vatRate?: number | null }[]): VatShare[] | null {
+  const byRate = new Map<number, number>();
+  for (const c of components) {
+    const rate = c.vatRate != null ? Number(c.vatRate) : 10;
+    byRate.set(rate, (byRate.get(rate) || 0) + Math.max(0, toCents(c.price)));
+  }
+  const shares = [...byRate].map(([rate, weight]) => ({ rate, weight })).filter((s) => s.weight > 0);
+  return shares.length > 1 ? shares : null;
+}
+
+/** Montant d'une ligne réparti par taux, en centimes (ajustement au centime sur le dernier taux) */
+function splitLine(lineCents: number, rate: number, vatSplit: PricedItem["vatSplit"]): [number, number][] {
+  let shares: VatShare[] = [];
+  try {
+    shares = typeof vatSplit === "string" ? JSON.parse(vatSplit) : vatSplit || [];
+  } catch {}
+  const totalWeight = Array.isArray(shares) ? shares.reduce((s, x) => s + (Number(x.weight) || 0), 0) : 0;
+  if (totalWeight <= 0) return [[rate, lineCents]];
+  let left = lineCents;
+  return shares.map((s, i) => {
+    const cents = i === shares.length - 1 ? left : Math.round((lineCents * (Number(s.weight) || 0)) / totalWeight);
+    left -= cents;
+    return [Number(s.rate), cents];
+  });
 }
 
 /**
@@ -43,7 +79,9 @@ export function computeVatBreakdown(items: PricedItem[], discount?: DiscountInpu
   for (const it of items) {
     const lineCents = toCents(it.price) * (it.qty || 1);
     const rate = it.vatRate != null ? Number(it.vatRate) : 10;
-    byRate.set(rate, (byRate.get(rate) || 0) + lineCents);
+    for (const [r, cents] of splitLine(lineCents, rate, it.vatSplit)) {
+      byRate.set(r, (byRate.get(r) || 0) + cents);
+    }
     subtotalCents += lineCents;
   }
 

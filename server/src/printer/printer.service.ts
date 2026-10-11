@@ -39,7 +39,9 @@ export class PrinterService {
       const finish = (result: PrinterSendResult) => {
         if (!resolved) {
           resolved = true;
-          socket.destroy();
+          // Succès : end() vide le tampon puis ferme proprement (destroy() pouvait tronquer la fin du ticket)
+          if (result.success) socket.end();
+          else socket.destroy();
           resolve(result);
         }
       };
@@ -58,6 +60,9 @@ export class PrinterService {
           }
         });
       });
+
+      // Après end(), l'imprimante peut tarder à fermer : on ne laisse pas traîner la connexion
+      socket.on("finish", () => setTimeout(() => socket.destroy(), timeoutMs).unref());
 
       socket.on("timeout", () => {
         this.logger.warn(`Délai d'attente dépassé (timeout) pour l'imprimante ${ip}:${port}`);

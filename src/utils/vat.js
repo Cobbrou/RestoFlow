@@ -7,6 +7,42 @@
  */
 
 /**
+ * Ventilation d'un menu au prorata des prix de ses composants (copie de menuVatSplit, server/src/billing/pricing.ts).
+ * @returns {Array|null} [{ rate, weight }] (poids en centimes), null si un seul taux
+ */
+export function menuVatSplit(components = []) {
+  const byRate = new Map();
+  for (const c of components) {
+    const rate = c?.vatRate != null ? Number(c.vatRate) : 10;
+    byRate.set(rate, (byRate.get(rate) || 0) + Math.max(0, Math.round((Number(c?.price) || 0) * 100)));
+  }
+  const shares = [...byRate].map(([rate, weight]) => ({ rate, weight })).filter((s) => s.weight > 0);
+  return shares.length > 1 ? shares : null;
+}
+
+// Montant d'une ligne (en euros) réparti par taux, au centime près (reste sur le dernier taux)
+function splitLine(amount, rate, vatSplit) {
+  let shares = vatSplit;
+  if (typeof shares === "string") {
+    try {
+      shares = JSON.parse(shares);
+    } catch {
+      shares = [];
+    }
+  }
+  if (!Array.isArray(shares)) shares = [];
+  const totalWeight = shares.reduce((s, x) => s + (Number(x.weight) || 0), 0);
+  if (totalWeight <= 0) return [[rate, amount]];
+  const cents = Math.round(amount * 100);
+  let left = cents;
+  return shares.map((s, i) => {
+    const part = i === shares.length - 1 ? left : Math.round((cents * (Number(s.weight) || 0)) / totalWeight);
+    left -= part;
+    return [Number(s.rate), part / 100];
+  });
+}
+
+/**
  * Calcule la ventilation complète de la TVA pour une liste d'articles avec prise en compte
  * de la remise globale au prorata des assiettes fiscales.
  *
@@ -50,10 +86,10 @@ export function calculateVatBreakdown(items = [], discount = null) {
     }
 
     const itemTotal = (item.price || 0) * (item.qty || 1);
-    if (!byRate[rate]) {
-      byRate[rate] = { rawTtc: 0 };
+    for (const [r, amount] of splitLine(itemTotal, rate, item.vatSplit)) {
+      if (!byRate[r]) byRate[r] = { rawTtc: 0 };
+      byRate[r].rawTtc += amount;
     }
-    byRate[rate].rawTtc += itemTotal;
   }
 
   // Si aucun article

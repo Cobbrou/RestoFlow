@@ -209,28 +209,39 @@ export async function loadCachedAuth() {
 
 // ── Cache & Vérification des PINs pour le mode hors-ligne ───
 
-async function hashPin(pin, salt = "restoflow_pin_salt_v1") {
-  if (typeof crypto !== "undefined" && crypto.subtle) {
-    const enc = new TextEncoder();
-    const data = enc.encode(`${salt}:${pin}`);
-    const hashBuf = await crypto.subtle.digest("SHA-256", data);
-    return Array.from(new Uint8Array(hashBuf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-  let h = 0;
-  const str = `${salt}:${pin}`;
-  for (let i = 0; i < str.length; i++) {
-    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-  }
-  return h.toString(16);
+// Droits qui ne doivent jamais pouvoir être obtenus en retrouvant un PIN depuis le cache de la tablette
+const SENSITIVE_PERMISSIONS = ["gestion.staff", "caisse.settings", "caisse.close", "caisse.fec"];
+
+export function canCachePinOffline(staff) {
+  const permissions = staff?.permissions || staff?.role?.permissions || [];
+  return staff?.roleId !== "admin" && !permissions.some((p) => SENSITIVE_PERMISSIONS.includes(p));
+}
+
+// PBKDF2 salé par équipier : ralentit l'essai des 10 000 PIN possibles (sans le rendre impossible)
+// ponytail: un PIN à 4 chiffres reste devinable hors-ligne, d'où l'exclusion des comptes sensibles
+async function hashPin(pin, salt) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: enc.encode(salt), iterations: 200000 },
+    key,
+    256
+  );
+  return Array.from(new Uint8Array(bits))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export async function saveStaffOfflinePin(staffId, pin, staff) {
   try {
     const db = await getDB();
-    const pinHash = await hashPin(pin);
-    await db.put("auth", { staffId, pinHash, staff, updatedAt: Date.now() }, `staff_pin_${staffId}`);
+    if (!canCachePinOffline(staff)) {
+      await db.delete("auth", `staff_pin_${staffId}`);
+      return;
+    }
+    const salt = crypto.randomUUID();
+    const pinHash = await hashPin(pin, salt);
+    await db.put("auth", { staffId, salt, pinHash, staff, updatedAt: Date.now() }, `staff_pin_${staffId}`);
   } catch (err) {
     console.warn("[IndexedDB] Erreur sauvegarde PIN offline :", err);
   }
@@ -240,8 +251,9 @@ export async function verifyStaffOfflinePin(staffId, candidatePin) {
   try {
     const db = await getDB();
     const record = await db.get("auth", `staff_pin_${staffId}`);
-    if (!record) return null;
-    const candidateHash = await hashPin(candidatePin);
+    // Ancien format (SHA-256 à sel fixe, sans champ salt) : ignoré, recréé à la prochaine connexion en ligne
+    if (!record?.salt || !canCachePinOffline(record.staff)) return null;
+    const candidateHash = await hashPin(candidatePin, record.salt);
     if (record.pinHash === candidateHash) {
       return record.staff;
     }

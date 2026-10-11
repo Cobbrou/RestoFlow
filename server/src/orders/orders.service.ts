@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { effectivePrice, normalizeOptionGroups, resolveOptions, toCents, toEuros, OptionPick } from "../billing/pricing";
+import { effectivePrice, menuVatSplit, normalizeOptionGroups, resolveOptions, toCents, toEuros, OptionPick } from "../billing/pricing";
 
 const COURSE_RANK: Record<string, number> = { entree: 1, plat: 2, dessert: 3 };
 
@@ -84,6 +84,7 @@ export class OrdersService {
         courseStatus: it.courseStatus || "direct",
         station: it.station || "kitchen",
         vatRate: it.vatRate ?? 10,
+        vatSplit: it.vatSplit ? (typeof it.vatSplit === "string" ? JSON.parse(it.vatSplit) : it.vatSplit) : null,
         options: it.options || "",
       })),
     };
@@ -312,12 +313,17 @@ export class OrdersService {
     } else {
       // Options des composants (cuisson du burger…) : composition[g].options[i] = picks de productIds[i]
       const parts: string[] = [];
+      const components: { price: number; vatRate: number }[] = [];
       let extraCents = 0;
       for (const g of Array.isArray(data.composition) ? data.composition : []) {
         const ids: string[] = Array.isArray(g?.productIds) ? g.productIds : [];
         for (const [i, pid] of ids.entries()) {
-          const p = await this.prisma.product.findUnique({ where: { id: pid }, select: { name: true, options: true } });
+          const p = await this.prisma.product.findUnique({
+            where: { id: pid },
+            select: { name: true, options: true, price: true, vatRate: true },
+          });
           if (!p) continue;
+          components.push(p);
           try {
             const r = resolveOptions(normalizeOptionGroups(JSON.parse(p.options || "[]")), g.options?.[i]);
             extraCents += r.extraCents;
@@ -327,6 +333,7 @@ export class OrdersService {
           }
         }
       }
+      const split = menuVatSplit(components);
       await this.prisma.orderItem.create({
         data: {
           id: newItemId,
@@ -334,7 +341,9 @@ export class OrdersService {
           productId: data.product.id,
           name,
           price: toEuros(toCents(price) + extraCents),
-          vatRate,
+          // Menu à taux unique (tout à 10 %, ou tout à 20 %) : taux du composant ; menu mixte : ventilation au prorata
+          vatRate: split ? vatRate : (components[0]?.vatRate ?? vatRate),
+          vatSplit: split ? JSON.stringify(split) : null,
           qty: 1,
           notes: "",
           options: parts.join(" | ") || null,
@@ -367,7 +376,7 @@ export class OrdersService {
     if (productId.startsWith("menu_")) {
       const menu = await this.prisma.menu.findUnique({ where: { id: productId.slice(5) } });
       if (!menu) throw new NotFoundException("Menu introuvable");
-      // ponytail: menu facturé à 10 % en bloc, ventiler par composant si un menu inclut de l'alcool
+      // Taux par défaut ; addItem le remplace par celui des composants (ou une ventilation si menu mixte)
       return { dbProduct: null, name: menu.name, price: menu.price, vatRate: 10 };
     }
 

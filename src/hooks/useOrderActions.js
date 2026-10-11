@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { uid } from "../data/seed.js";
 import { getProductEffectivePrice, resolveOptions, resolveMenuOptions, heldToRelease, isOffPremise, orderLabel } from "../utils/index.js";
 import { getSocket } from "../services/socket.js";
+import { menuVatSplit } from "../utils/vat.js";
 
 /**
  * Actions de service : prise de commande, encaissement, cuisine, suites, transfert / fusion de tables
@@ -155,6 +156,12 @@ export function useOrderActions(store, {
     const station = "kitchen";
     const lineId = uid("it");
     const { label: options, extra } = resolveMenuOptions(composition, store.products);
+    // Même ventilation TVA que le serveur : taux unique des composants, ou répartition au prorata si mixte
+    const components = (composition || [])
+      .flatMap((g) => g?.productIds || [])
+      .map((pid) => store.products.find((p) => p.id === pid))
+      .filter(Boolean);
+    const vatSplit = menuVatSplit(components);
 
     setOrders((prev) =>
       prev.map((o) => {
@@ -168,7 +175,8 @@ export function useOrderActions(store, {
               productId: menuProduct.id,
               name: menuProduct.name,
               price: Math.round((menuProduct.price + extra) * 100) / 100,
-              vatRate: 10,
+              vatRate: vatSplit ? 10 : (components[0]?.vatRate ?? 10),
+              vatSplit,
               qty: 1,
               notes: "",
               options,
@@ -373,6 +381,7 @@ export function useOrderActions(store, {
       paymentMethod: finalMethod,
       payments: paymentList,
       tip: Number(meta?.tip || 0),
+      operatorId: currentStaff?.id,
     });
 
     return receipt;
