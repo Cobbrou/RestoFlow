@@ -63,12 +63,27 @@ export default function PinPadModal({
     setIsVerifying(true);
     setError("");
 
+    // Mode 100% hors-ligne : vérification via le hash stocké dans IndexedDB
+    const verifyOffline = async () => {
+      const offlineStaff = await verifyStaffOfflinePin(selectedStaff.id, candidatePin);
+      setIsVerifying(false);
+      if (offlineStaff) {
+        onSuccess(offlineStaff, "offline-token");
+        onClose();
+      } else {
+        setError("Code PIN incorrect ou équipier non encore synchronisé hors-ligne");
+        setTimeout(() => setPin(""), 600);
+      }
+    };
+
     const socket = getSocket();
     if (socket && socket.connected) {
-      socket.emit(
+      // Serveur muet malgré un socket « connecté » : repli hors-ligne au lieu d'un pavé bloqué
+      socket.timeout(8000).emit(
         "auth:verify_pin",
         { pin: candidatePin, staffId: selectedStaff.id },
-        async (res) => {
+        async (err, res) => {
+          if (err) return verifyOffline();
           setIsVerifying(false);
           if (res?.ok && res?.staff) {
             await saveStaffOfflinePin(selectedStaff.id, candidatePin, res.staff);
@@ -87,6 +102,7 @@ export default function PinPadModal({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pin: candidatePin, staffId: selectedStaff.id }),
+          signal: AbortSignal.timeout(8000),
         });
         const res = await response.json();
         setIsVerifying(false);
@@ -101,16 +117,7 @@ export default function PinPadModal({
           return;
         }
       } catch {
-        // Mode 100% hors-ligne : vérification via le hash stocké dans IndexedDB
-        const offlineStaff = await verifyStaffOfflinePin(selectedStaff.id, candidatePin);
-        setIsVerifying(false);
-        if (offlineStaff) {
-          onSuccess(offlineStaff, "offline-token");
-          onClose();
-        } else {
-          setError("Code PIN incorrect ou équipier non encore synchronisé hors-ligne");
-          setTimeout(() => setPin(""), 600);
-        }
+        await verifyOffline();
       }
     }
   };
