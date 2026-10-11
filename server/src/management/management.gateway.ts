@@ -1,7 +1,8 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket } from "@nestjs/websockets";
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server, Socket } from "socket.io";
-import { WsAuthGuard, STAFF_ROOM } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, STAFF_ROOM, authenticateSocket } from "../auth/guards/ws-auth.guard";
+import { AuthService } from "../auth/auth.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
 import { ClientActionInterceptor } from "../websocket/client-action.interceptor";
@@ -22,12 +23,19 @@ export class ManagementGateway {
 
   constructor(
     private management: ManagementService,
-    private journal: JournalService
+    private journal: JournalService,
+    private authService: AuthService
   ) {}
 
   private async broadcast(event: string, mutation: () => Promise<any>) {
     try {
       const list = await mutation();
+      // Équipe ou rôles modifiés : droits relus pour chaque poste connecté, un compte désactivé sort de la room
+      if (event === "staff:list" || event === "roles:list") {
+        for (const s of await this.server.in(STAFF_ROOM).fetchSockets()) {
+          if (!(await authenticateSocket(s as any, this.authService))) s.emit("auth:required");
+        }
+      }
       this.server.to(STAFF_ROOM).emit(event, list);
       return { ok: true };
     } catch (err: any) {

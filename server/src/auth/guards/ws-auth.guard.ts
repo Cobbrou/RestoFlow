@@ -8,13 +8,14 @@ import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 export const STAFF_ROOM = "staff";
 
 /**
- * Extrait et vérifie le jeton de session d'un socket (handshake ou header Authorization)
+ * Extrait et vérifie le jeton de session d'un socket (handshake ou header Authorization),
+ * puis relit en base le statut actif et les droits de l'équipier
  */
-export function authenticateSocket(client: Socket, authService: AuthService): SessionPayload | null {
+export async function authenticateSocket(client: Socket, authService: AuthService): Promise<SessionPayload | null> {
   const header = client.handshake?.headers?.authorization;
   const token =
     client.handshake?.auth?.token || (header?.startsWith("Bearer ") ? header.slice(7) : null);
-  const user = token ? authService.verifyToken(token) : null;
+  const user = await authService.refreshSession(token ? authService.verifyToken(token) : null);
   client.data.user = user;
   // 🔒 Seuls les sockets authentifiés reçoivent les diffusions (room STAFF_ROOM)
   if (user) client.join(STAFF_ROOM);
@@ -31,7 +32,7 @@ export class WsAuthGuard implements CanActivate {
     private authService: AuthService
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -39,12 +40,8 @@ export class WsAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const client: Socket = context.switchToWs().getClient();
-    let user: SessionPayload | null = client.data?.user || null;
-
-    // Session expirée en cours de connexion : on revérifie le jeton
-    if (!user || Date.now() > user.exp) {
-      user = authenticateSocket(client, this.authService);
-    }
+    // À chaque action : jeton revérifié (expiration) et droits relus en base (désactivation, changement de rôle)
+    const user = await authenticateSocket(client, this.authService);
 
     if (!user) {
       this.logger.warn(`Tentative d'accès non authentifié sur socket ${client.id}`);

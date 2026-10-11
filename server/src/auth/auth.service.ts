@@ -66,6 +66,20 @@ export class AuthService {
     }
   }
 
+  /**
+   * Session à jour : le jeton prouve l'identité, mais le statut actif et les droits sont relus en base
+   * (un équipier désactivé ou changé de rôle est pris en compte immédiatement, sans attendre l'expiration)
+   */
+  async refreshSession(user: SessionPayload | null): Promise<SessionPayload | null> {
+    if (!user) return null;
+    const staff = await this.prisma.staff.findFirst({
+      where: { id: user.staffId, active: true },
+      include: { role: true },
+    });
+    if (!staff) return null;
+    return { ...user, name: staff.name, roleId: staff.roleId, permissions: JSON.parse(staff.role?.permissions || "[]") };
+  }
+
   async verifyPin(pin: string, staffId?: string) {
     if (!pin || pin.length < 4) {
       throw new UnauthorizedException("Code PIN invalide (4 chiffres requis)");

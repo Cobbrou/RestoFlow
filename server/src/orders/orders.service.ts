@@ -451,6 +451,12 @@ export class OrdersService {
   }
 
   async setNote(orderId: string, itemId: string, note: string) {
+    const item = await this.prisma.orderItem.findFirst({ where: { id: itemId, orderId } });
+    if (!item) throw new NotFoundException("Article introuvable");
+    // Rejeu idempotent : même note, rien à faire
+    if (item.status !== "draft" && (item.notes || "") !== (note || "")) {
+      throw new BadRequestException("Article déjà envoyé en cuisine : la note ne peut plus être modifiée");
+    }
     await this.prisma.orderItem.update({
       where: { id: itemId },
       data: { notes: note },
@@ -611,14 +617,20 @@ export class OrdersService {
   async changeItemCourse(itemId: string, course: string, courseStatus?: string) {
     const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
     if (!item) throw new NotFoundException("Article introuvable");
-
-    await this.prisma.orderItem.update({
-      where: { id: itemId },
-      data: {
-        course,
-        courseStatus: courseStatus || (course === "entree" || course === "boisson" || course === "direct" ? "direct" : "held"),
-      },
-    });
+    if (item.status !== "draft") {
+      // Rejeu idempotent (même suite) accepté sans rien modifier
+      if (item.course !== course) {
+        throw new BadRequestException("Article déjà envoyé en cuisine : la suite ne peut plus être modifiée");
+      }
+    } else {
+      await this.prisma.orderItem.update({
+        where: { id: itemId },
+        data: {
+          course,
+          courseStatus: courseStatus || (course === "entree" || course === "boisson" || course === "direct" ? "direct" : "held"),
+        },
+      });
+    }
 
     const updated = await this.prisma.order.findUnique({
       where: { id: item.orderId },

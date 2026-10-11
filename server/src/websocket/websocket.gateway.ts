@@ -67,7 +67,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.logger.log(`Client connected: ${client.id}`);
     try {
       // Sans session : uniquement de quoi afficher l'écran de connexion PIN
-      if (!authenticateSocket(client, this.authService)) {
+      if (!(await authenticateSocket(client, this.authService))) {
         client.emit("sync:init", await this.getPublicState());
         client.emit("auth:required");
         return;
@@ -216,7 +216,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @Public()
   @SubscribeMessage("sync:request")
   async handleSyncRequest(@ConnectedSocket() client: Socket) {
-    if (!authenticateSocket(client, this.authService)) {
+    if (!(await authenticateSocket(client, this.authService))) {
       return { ok: true, state: await this.getPublicState(), authRequired: true };
     }
     const fullState = await this.getFullState();
@@ -236,6 +236,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Tables & Salle Dynamique ────────────────────────────────────────
 
+  @RequirePermissions("salle.alerts", "salle.order")
   @SubscribeMessage("tables:toggle_alert")
   async handleToggleAlert(@MessageBody() data: { tableId: string }) {
     try {
@@ -298,6 +299,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Cycle de Vie des Commandes (OrdersService) ──────────────────────
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:create_or_ensure")
   async handleEnsureOrder(
     @MessageBody() data: { tableId: string; server: string; orderId?: string }
@@ -324,6 +326,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:add_item")
   async handleAddItem(@MessageBody() data: any) {
     try {
@@ -335,6 +338,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:change_qty")
   async handleChangeQty(
     @MessageBody() data: { orderId: string; itemId: string; delta: number }
@@ -348,6 +352,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:remove_item")
   async handleRemoveItem(@MessageBody() data: { orderId: string; itemId: string }) {
     try {
@@ -426,6 +431,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     await this.printerService.sendRaw(kitchenPrinter.ip, kitchenPrinter.port || 9100, Buffer.from(rawText, "latin1"));
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:set_note")
   async handleSetNote(
     @MessageBody() data: { orderId: string; itemId: string; note: string }
@@ -439,6 +445,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.send_kitchen")
   @SubscribeMessage("order:send_kitchen")
   async handleSendKitchen(
     @MessageBody() data: { orderId: string; serverName?: string }
@@ -507,6 +514,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("cuisine.status")
   @SubscribeMessage("order:start_prep")
   async handleStartPrep(@MessageBody() data: { orderId: string; station?: string }) {
     try {
@@ -518,6 +526,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("cuisine.status")
   @SubscribeMessage("order:mark_ready")
   async handleMarkReady(@MessageBody() data: { orderId: string; station?: string }) {
     try {
@@ -535,6 +544,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.serve")
   @SubscribeMessage("order:serve")
   async handleServe(@MessageBody() data: { orderId: string; course?: string }) {
     try {
@@ -546,6 +556,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.send_kitchen")
   @SubscribeMessage("order:call_course")
   async handleCallCourse(
     @MessageBody() data: { orderId: string; course: string; serverName?: string }
@@ -587,6 +598,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:change_item_course")
   async handleChangeItemCourse(
     @MessageBody() data: { itemId: string; course: string; courseStatus?: string }
