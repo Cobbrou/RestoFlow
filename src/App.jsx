@@ -10,7 +10,7 @@ import OrderTaking from "./views/salle/OrderTaking.jsx";
 import CuisineShell from "./views/cuisine/CuisineShell.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 
-import { RestoFlowProvider } from "./context/RestoFlowContext.jsx";
+import { RestoFlowContext } from "./context/RestoFlowContext.jsx";
 
 // ⚛️ Code Splitting (Axe 3) : Chargement à la demande des modules secondaires
 const Dashboard = lazy(() => import("./views/gestion/Dashboard.jsx"));
@@ -38,7 +38,6 @@ import { setSocketToken, clearSessionToken } from "./services/socket.js";
 import { emitOrQueue } from "./services/emitOrQueue.js";
 import { canAccessTab, getDefaultTabForStaff, hasPermission } from "./utils/permissions.js";
 import PwaInstallPrompt from "./components/PwaInstallPrompt.jsx";
-import { saveCachedAuth } from "./services/db.js";
 
 /**
  * App — Composant racine de RestoFlow.
@@ -132,11 +131,12 @@ export default function App() {
     try {
       localStorage.removeItem("rf_active_staff");
     } catch {}
-    saveCachedAuth(null);
     setIsPinModalOpen(true);
   }, [pushToast]);
 
   useRealtimeSync(store, { pushToast, beep, soundOn, onAuthRequired: handleAuthRequired });
+
+  const currentRole = roles.find((r) => r.id === currentStaff?.roleId);
 
   // Vérification et redirection stricte RBAC
   useEffect(() => {
@@ -145,12 +145,10 @@ export default function App() {
       return;
     }
 
-    const currentRoleObj = roles.find((r) => r.id === currentStaff.roleId);
-    if (!canAccessTab(currentStaff, currentRoleObj, role)) {
-      const defaultTab = getDefaultTabForStaff(currentStaff, currentRoleObj);
-      setRole(defaultTab);
+    if (!canAccessTab(currentStaff, currentRole, role)) {
+      setRole(getDefaultTabForStaff(currentStaff, currentRole));
     }
-  }, [currentStaff, roles, role]);
+  }, [currentStaff, currentRole, role]);
 
   // Émission avec repli hors-ligne ; refus serveur => toast puis réconciliation avec la base
   const emit = (eventType, payload, onAck) =>
@@ -166,7 +164,7 @@ export default function App() {
 
   const {
     getActiveOrder, ensureOrderForTable, createOffPremiseOrder, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem, voidItem,
-    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder, partialCheckout, setOrderCovers,
+    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder, partialCheckout, cancelOffPremiseOrder, setOrderCovers,
     toggleAlert, startPrep, markReady, handleCallCourse, handleChangeItemCourse, handleTransferTable,
     handleMergeTable, handleCreateReservation, handleUpdateReservationStatus, handleAssignReservationTable,
     handleDeleteReservation,
@@ -182,8 +180,7 @@ export default function App() {
       return;
     }
 
-    const currentRoleObj = roles.find((r) => r.id === currentStaff.roleId);
-    if (!hasPermission(currentStaff, currentRoleObj, "salle.order")) {
+    if (!hasPermission(currentStaff, currentRole, "salle.order")) {
       pushToast("Accès refusé : vous n'avez pas l'autorisation de prendre des commandes", "warn");
       return;
     }
@@ -207,8 +204,7 @@ export default function App() {
 
   // Commande hors salle : existante (bandeau du plan) ou nouvelle (formulaire Emporter)
   const openOffPremise = (orderOrData) => {
-    const currentRoleObj = roles.find((r) => r.id === currentStaff?.roleId);
-    if (!currentStaff || !hasPermission(currentStaff, currentRoleObj, "salle.order")) {
+    if (!currentStaff || !hasPermission(currentStaff, currentRole, "salle.order")) {
       pushToast("Accès refusé : vous n'avez pas l'autorisation de prendre des commandes", "warn");
       return;
     }
@@ -228,7 +224,6 @@ export default function App() {
     try {
       localStorage.setItem("rf_active_staff", JSON.stringify(staffMember));
     } catch {}
-    saveCachedAuth(staffMember);
 
     const currentRoleObj = roles.find((r) => r.id === staffMember.roleId);
     const targetTab = getDefaultTabForStaff(staffMember, currentRoleObj);
@@ -259,7 +254,6 @@ export default function App() {
     try {
       localStorage.removeItem("rf_active_staff");
     } catch {}
-    saveCachedAuth(null);
     setIsPinModalOpen(true);
   };
 
@@ -279,7 +273,7 @@ export default function App() {
   };
 
   // Rappel du Z : un ticket sans Z depuis plus de 20 h (le Z de la veille a été oublié)
-  const canCloseZ = hasPermission(currentStaff, roles.find((r) => r.id === currentStaff?.roleId), "caisse.close");
+  const canCloseZ = hasPermission(currentStaff, currentRole, "caisse.close");
   const zOverdueSince = useMemo(() => {
     if (!canCloseZ) return null;
     const oldest = Math.min(...history.filter((h) => !h.closedInZId).map((h) => new Date(h.createdAt).getTime()));
@@ -296,8 +290,7 @@ export default function App() {
   const orderTarget = activeTable ? activeTable.id : activeOrder;
 
   const handleSetRole = (r) => {
-    const currentRoleObj = roles.find((roleItem) => roleItem.id === currentStaff?.roleId);
-    if (!canAccessTab(currentStaff, currentRoleObj, r)) {
+    if (!canAccessTab(currentStaff, currentRole, r)) {
       pushToast("Vous n'avez pas accès à ce poste de travail", "warn");
       return;
     }
@@ -329,8 +322,20 @@ export default function App() {
     ...management,
   };
 
+  // Ni cache local ni réponse du serveur : rien à afficher (aucune donnée de démo côté client)
+  if (!store.ready) {
+    return (
+      <div ref={rootRef} className="rf-root w-full min-h-[720px] flex flex-col items-center justify-center gap-3 p-8 text-center bg-[#FAF6EE] text-[#6B6355]">
+        <GlobalStyle />
+        <div className="w-8 h-8 border-3 border-[#C1440E] border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-semibold">Connexion au serveur…</p>
+        <p className="text-xs max-w-sm">Lors de sa première utilisation, ce terminal doit joindre le serveur du restaurant une fois avant de pouvoir fonctionner hors-ligne.</p>
+      </div>
+    );
+  }
+
   return (
-    <RestoFlowProvider value={contextValue}>
+    <RestoFlowContext value={contextValue}>
       <div
       ref={rootRef}
       className="rf-root w-full min-h-[720px] rounded-2xl overflow-hidden border border-black/10 shadow-xl"
@@ -426,6 +431,10 @@ export default function App() {
             onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
             onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
             onPartialCheckout={(lines, payments, amount) => partialCheckout(activeOrder.id, lines, payments, amount)}
+            onCancelOrder={() => {
+              cancelOffPremiseOrder(activeOrder.id);
+              setServerView("plan");
+            }}
             onBackToPlan={() => setServerView("plan")}
             onCallCourse={(courseOrOrderId, maybeCourse) => {
               const course = maybeCourse || courseOrOrderId;
@@ -452,7 +461,7 @@ export default function App() {
             onReady={markReady}
             onToggleProductAvailable={
               ["cuisine.status", "gestion.tables", "gestion.products"].some((p) =>
-                hasPermission(currentStaff, roles.find((r) => r.id === currentStaff?.roleId), p)
+                hasPermission(currentStaff, currentRole, p)
               )
                 ? management.onToggleProductAvailable
                 : null
@@ -521,6 +530,6 @@ export default function App() {
       {/* ── Notification PWA & Invitation à l'installation ── */}
       <PwaInstallPrompt />
       </div>
-    </RestoFlowProvider>
+    </RestoFlowContext>
   );
 }

@@ -164,6 +164,26 @@ export class OrdersService {
     return this.formatOrder(order);
   }
 
+  /**
+   * Annulation d'une commande hors salle (emporter, comptoir) créée par erreur.
+   * Seulement si rien n'est parti en cuisine ni encaissé : sinon, annuler d'abord les articles envoyés (avec motif).
+   * La commande est conservée en statut "cancelled" (trace), jamais supprimée.
+   */
+  async cancelOffPremise(orderId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { items: true, table: true } });
+    if (!order) throw new NotFoundException("Commande introuvable");
+    if (order.status === "cancelled") return { order: this.formatOrder(order), label: orderLabel(order) }; // rejeu
+    if (!isOffPremise(order)) throw new BadRequestException("Seule une commande à emporter ou comptoir peut être annulée");
+    if (order.status !== "open") throw new BadRequestException("Commande déjà encaissée : émettez un avoir");
+    if ((order.paidTotal || 0) > 0) throw new BadRequestException("Commande déjà en partie encaissée");
+    if (order.items.some((i) => i.status !== "draft")) {
+      throw new BadRequestException("Des articles sont partis en cuisine : annulez-les d'abord (avec motif)");
+    }
+    const res = await this.prisma.order.updateMany({ where: { id: orderId, status: "open" }, data: { status: "cancelled" } });
+    if (res.count === 0) throw new BadRequestException("Commande déjà encaissée ou annulée");
+    return { order: this.formatOrder({ ...order, status: "cancelled" }), label: orderLabel(order) };
+  }
+
   /** Correction du nombre de couverts d'une commande ouverte */
   async setCovers(orderId: string, covers: number) {
     const value = validCovers(covers);

@@ -26,7 +26,7 @@ export default function CuisineShell({
   onReady,
   onToggleProductAvailable,
 }) {
-  const now = useNow();
+  const now = useNow(15000); // couleur des tickets ; le chrono à la seconde vit dans TicketTimer
   const { hasMultiStation } = useModules();
   const { isSuspended, unlock } = useAudioState();
   const [printOrder, setPrintOrder] = useState(null); // { order, table, defaultTab } | null
@@ -198,7 +198,6 @@ export default function CuisineShell({
         <KitchenByTable
           tables={tables}
           orders={orders}
-          now={now}
           products={products}
           stationFilter={stationFilter}
           isItemForStation={isItemForStation}
@@ -385,8 +384,8 @@ function KitchenBoard({
 
 /* ── Timer de ticket ───────────────────────────────────────── */
 
-function TicketTimer({ startTs, now, ready }) {
-  const elapsedMs = now - startTs;
+function TicketTimer({ startTs, ready }) {
+  const elapsedMs = useNow() - startTs;
   const level = timerLevel(elapsedMs);
   const meta = TIMER_LEVELS[level];
   return (
@@ -471,7 +470,7 @@ function KitchenTicket({
       </div>
 
       <div className="flex items-center gap-2 mb-2">
-        <TicketTimer startTs={startTs} now={now} ready={ready} />
+        <TicketTimer startTs={startTs} ready={ready} />
         <span className="rf-mono text-[11px] opacity-70">{order.server}</span>
         {level === "critical" && !ready && (
           <span className="ml-auto text-[#C1361B] font-bold flex items-center gap-0.5 text-[11px]">
@@ -622,7 +621,6 @@ function KitchenTicket({
 function KitchenByTable({
   tables,
   orders,
-  now,
   products,
   isItemForStation,
   onPrintTicket,
@@ -710,7 +708,6 @@ function KitchenByTable({
                 <div className="mb-2">
                   <TicketTimer
                     startTs={kitchenStartTs(openOrder)}
-                    now={now}
                     ready={orderKitchenStatus(openOrder) === "ready"}
                   />
                 </div>

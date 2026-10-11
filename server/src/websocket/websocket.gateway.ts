@@ -314,6 +314,23 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @RequirePermissions("salle.order")
+  @SubscribeMessage("order:cancel_offpremise")
+  async handleCancelOffPremise(@ConnectedSocket() client: Socket, @MessageBody() data: { orderId: string }) {
+    try {
+      const { order, label } = await this.ordersService.cancelOffPremise(data?.orderId);
+      this.server.to(STAFF_ROOM).emit("order:closed", { orderId: order.id });
+      await this.journal.log("ORDER_CANCEL", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+        orderId: order.id,
+        label,
+        draftItems: order.items.length,
+      });
+      return { ok: true, orderId: order.id };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("salle.order")
   @SubscribeMessage("order:set_covers")
   async handleSetCovers(@MessageBody() data: { orderId: string; covers: number }) {
     try {

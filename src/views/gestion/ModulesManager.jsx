@@ -26,10 +26,9 @@ export default function ModulesManager({
   onUpdateModules,
   pushToast,
 }) {
-  const initialModules = config?.modulesConfig || DEFAULT_MODULES_CONFIG;
   const [modules, setModules] = useState(() => ({
     ...DEFAULT_MODULES_CONFIG,
-    ...(typeof initialModules === "string" ? JSON.parse(initialModules) : initialModules),
+    ...config?.modulesConfig,
   }));
 
   const [hasChanges, setHasChanges] = useState(false);

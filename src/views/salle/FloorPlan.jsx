@@ -27,7 +27,7 @@ export default function FloorPlan({
   onOpenTableAction,
   isMobile,
 }) {
-  const now = useNow();
+  const now = useNow(30000); // durées affichées à la minute
   const { hasReservations, hasTakeaway } = useModules();
   const takeaway = onOpenOffPremise && <TakeawayBar orders={orders} onOpen={onOpenOffPremise} hasTakeaway={hasTakeaway} />;
   const todayStr = new Date().toISOString().slice(0, 10);

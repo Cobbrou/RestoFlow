@@ -253,8 +253,7 @@ export function useOrderActions(store, {
 
   const sendToKitchen = (orderId) => {
     const serverName = currentStaff ? currentStaff.name.split(" ")[0] : "Service";
-    const rawModules = config?.modulesConfig;
-    const modules = (typeof rawModules === "string" ? JSON.parse(rawModules) : rawModules) || {};
+    const modules = config?.modulesConfig || {};
     updateOrder(orderId, (o) => {
       const released = heldToRelease(o.items, modules.enableCoursePacing ?? true);
       return {
@@ -417,6 +416,13 @@ export function useOrderActions(store, {
       operatorId: currentStaff?.id,
     });
     pushToast(`Ticket émis : ${payments[0]?.label || "convive"} (${amount.toFixed(2)} €)`, "server");
+  };
+
+  // Commande à emporter / comptoir créée par erreur (rien d'envoyé ni d'encaissé) : annulée, trace conservée côté serveur
+  const cancelOffPremiseOrder = (orderId) => {
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    emit("order:cancel_offpremise", { orderId });
+    pushToast("Commande annulée", "server");
   };
 
   const setOrderCovers = (orderId, covers) => {
@@ -638,6 +644,7 @@ export function useOrderActions(store, {
     handleRemoveDiscount,
     checkoutOrder,
     partialCheckout,
+    cancelOffPremiseOrder,
     setOrderCovers,
     toggleAlert,
     startPrep,

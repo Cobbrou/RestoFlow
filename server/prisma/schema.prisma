@@ -135,7 +135,7 @@ model Order {
   serverId  String?
   serverRef Staff?      @relation(fields: [serverId], references: [id])
   server    String      // Cached server display name (e.g. "Léa")
-  status    String      @default("open") // "open" | "closed"
+  status    String      @default("open") // "open" | "closed" | "cancelled" (hors salle créée par erreur)
   createdAt DateTime    @default(now())
   sentAt    DateTime?
   discount  String?     // JSON string { type: "percent"|"fixed", value: number, reason?: string, code?: string, amount: number }

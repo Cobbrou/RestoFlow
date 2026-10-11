@@ -21,6 +21,7 @@ const ACTION_LABELS = {
   "order:discount:remove": "Remise retirée",
   "order:checkout": "Encaissement",
   "order:set_covers": "Nombre de couverts",
+  "order:cancel_offpremise": "Annulation de commande",
   "tables:toggle_alert": "Alerte de table",
   "reservation:create": "Nouvelle réservation",
   "reservation:update_status": "Statut de réservation",

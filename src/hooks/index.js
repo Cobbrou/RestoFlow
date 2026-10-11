@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 
 let globalAudioCtx = null;
 const audioListeners = new Set();
@@ -96,32 +96,35 @@ export function useBeep() {
 /**
  * Mesure la largeur réelle du conteneur DOM (pas de la fenêtre).
  * Utile pour adapter le layout même dans un iframe étroit.
- * @returns {[React.RefObject, number]}
+ * Ref callback : suit l'élément même s'il est remplacé (écran de chargement puis application).
+ * @returns {[(el: HTMLElement | null) => void, number]}
  */
 export function useContainerWidth() {
-  const ref = useRef(null);
+  const [el, setEl] = useState(null);
   const [width, setWidth] = useState(1024);
   useEffect(() => {
-    if (!ref.current || typeof ResizeObserver === "undefined") return;
+    if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) setWidth(entry.contentRect.width);
     });
-    ro.observe(ref.current);
+    ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-  return [ref, width];
+  }, [el]);
+  return [setEl, width];
 }
 
 /**
- * Horloge en temps réel — se met à jour toutes les secondes.
+ * Horloge en temps réel. Chaque tic re-rend le composant appelant : sur un gros écran,
+ * prendre un intervalle long (affichage à la minute) et isoler les chronos à la seconde dans une feuille.
+ * @param {number} intervalMs
  * @returns {number} Timestamp courant en ms
  */
-export function useNow() {
+export function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(t);
-  }, []);
+  }, [intervalMs]);
   return now;
 }
 
