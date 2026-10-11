@@ -114,15 +114,17 @@ export function useContainerWidth() {
 }
 
 /**
- * Horloge en temps réel — se met à jour toutes les secondes.
+ * Horloge en temps réel. Chaque tic re-rend le composant appelant : sur un gros écran,
+ * prendre un intervalle long (affichage à la minute) et isoler les chronos à la seconde dans une feuille.
+ * @param {number} intervalMs
  * @returns {number} Timestamp courant en ms
  */
-export function useNow() {
+export function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(t);
-  }, []);
+  }, [intervalMs]);
   return now;
 }
 

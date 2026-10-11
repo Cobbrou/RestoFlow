@@ -46,7 +46,7 @@ export default function OrderTaking({
   onTransferTable,
   onMergeTable,
 }) {
-  const now = useNow();
+  const now = useNow(30000); // affichage à la minute (ouverture, happy hour)
   const { hasSuites: suitesModule, hasStocks, hasDiscounts } = useModules();
   // Dernière commande connue : le libellé reste juste après l'encaissement (commande retirée, ticket affiché)
   const lastOrderRef = useRef(order);
