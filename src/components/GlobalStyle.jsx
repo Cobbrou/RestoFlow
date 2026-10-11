@@ -3,7 +3,6 @@
  * de RestoFlow directement dans le DOM via une balise <style>.
  *
  * On centralise ici tout ce qui ne peut pas être exprimé en classes Tailwind :
- *  - Import des polices Google Fonts
  *  - Classes de famille typographique (.rf-display, .rf-mono, .rf-black)
  *  - Thèmes clair / sombre (.rf-light, .rf-dark)
  *  - Animations @keyframes (pop, ticket, toast, flash…)
@@ -13,11 +12,9 @@
 export default function GlobalStyle() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Archivo+Black&family=Libre+Franklin:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
-
-      /* ── Typographie ─────────────────────────────────────── */
-      .rf-root    { font-family: 'Libre Franklin', system-ui, sans-serif; }
-      .rf-display { font-family: 'Fraunces', serif; }
+      /* ── Typographie (polices embarquées, importées dans main.jsx) ── */
+      .rf-root    { font-family: 'Libre Franklin Variable', system-ui, sans-serif; }
+      .rf-display { font-family: 'Fraunces Variable', serif; }
       .rf-mono    { font-family: 'IBM Plex Mono', monospace; }
       .rf-black   { font-family: 'Archivo Black', sans-serif; }
 
