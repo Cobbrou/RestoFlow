@@ -4,7 +4,7 @@ import { PrismaClient } from "@prisma/client";
 // Colonnes d'un ticket figées dès sa création (seul closedInZId peut être renseigné, une fois, par le Z)
 const FROZEN_TICKET_COLUMNS =
   "id, orderId, ticketNumber, tableNumber, orderType, channel, orderLabel, server, items, total, subtotal, discount, vatDetails, paymentMethod, " +
-  "payments, sequenceNumber, previousHash, signature, type, refTicketNumber, reason, createdAt";
+  "payments, tip, covers, sequenceNumber, previousHash, signature, type, refTicketNumber, reason, createdAt";
 
 /**
  * Inaltérabilité NF525 au niveau base : tickets, rapports Z et journal JET sont en ajout seul.
@@ -21,6 +21,10 @@ export const NF525_TRIGGERS: Record<string, string> = {
     BEGIN SELECT RAISE(ABORT, 'NF525 : rapport Z inaltérable'); END`,
   nf525_z_no_delete: `CREATE TRIGGER IF NOT EXISTS nf525_z_no_delete BEFORE DELETE ON DailyClosing
     BEGIN SELECT RAISE(ABORT, 'NF525 : rapport Z inaltérable'); END`,
+  nf525_period_no_update: `CREATE TRIGGER IF NOT EXISTS nf525_period_no_update BEFORE UPDATE ON PeriodClosing
+    BEGIN SELECT RAISE(ABORT, 'NF525 : clôture périodique inaltérable'); END`,
+  nf525_period_no_delete: `CREATE TRIGGER IF NOT EXISTS nf525_period_no_delete BEFORE DELETE ON PeriodClosing
+    BEGIN SELECT RAISE(ABORT, 'NF525 : clôture périodique inaltérable'); END`,
   nf525_jet_no_update: `CREATE TRIGGER IF NOT EXISTS nf525_jet_no_update BEFORE UPDATE ON EventLog
     BEGIN SELECT RAISE(ABORT, 'NF525 : journal inaltérable'); END`,
   nf525_jet_no_delete: `CREATE TRIGGER IF NOT EXISTS nf525_jet_no_delete BEFORE DELETE ON EventLog

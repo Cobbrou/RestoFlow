@@ -20,6 +20,15 @@ export function menuVatSplit(components = []) {
   return shares.length > 1 ? shares : null;
 }
 
+/**
+ * Net (centimes) d'une partie de note, remise au prorata ; la partie qui solde la note prend le reste.
+ * Copie de partialNetCents (server/src/billing/pricing.ts) : le serveur refuse tout écart.
+ */
+export function partialNetCents({ grossCents, fullSubCents, fullTotalCents, alreadyCents, completes }) {
+  if (completes) return fullTotalCents - alreadyCents;
+  return fullSubCents > 0 ? Math.round((grossCents * fullTotalCents) / fullSubCents) : 0;
+}
+
 // Montant d'une ligne (en euros) réparti par taux, au centime près (reste sur le dernier taux)
 function splitLine(amount, rate, vatSplit) {
   let shares = vatSplit;

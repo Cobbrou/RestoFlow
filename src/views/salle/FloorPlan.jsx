@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNow } from "../../hooks/index.js";
-import { Users, Clock, Lock, CalendarClock, ArrowRightLeft, ShoppingBag, Plus, Phone } from "lucide-react";
+import { Users, Clock, Lock, CalendarClock, ArrowRightLeft, ShoppingBag, Plus, Phone, Coffee } from "lucide-react";
 import { tableStatus, STATUS_META, orderTotal, elapsed, isOffPremise, orderLabel, formatPickup } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
 import { useModules } from "../../hooks/useModules.js";
@@ -29,7 +29,7 @@ export default function FloorPlan({
 }) {
   const now = useNow();
   const { hasReservations, hasTakeaway } = useModules();
-  const takeaway = hasTakeaway && onOpenOffPremise && <TakeawayBar orders={orders} onOpen={onOpenOffPremise} />;
+  const takeaway = onOpenOffPremise && <TakeawayBar orders={orders} onOpen={onOpenOffPremise} hasTakeaway={hasTakeaway} />;
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayReservations = reservations.filter((r) => r.date === todayStr && r.status !== "cancelled");
 
@@ -240,8 +240,8 @@ function Legend() {
   );
 }
 
-/* ── Vente à emporter : commandes hors salle ouvertes + création ── */
-function TakeawayBar({ orders, onOpen }) {
+/* ── Hors salle : vente comptoir, vente à emporter (commandes ouvertes + création) ── */
+function TakeawayBar({ orders, onOpen, hasTakeaway }) {
   const [creating, setCreating] = useState(false);
   const open = orders
     .filter(isOffPremise)
@@ -249,13 +249,23 @@ function TakeawayBar({ orders, onOpen }) {
 
   return (
     <div className="flex items-center gap-2 overflow-x-auto rf-scrollbar pb-3 mb-1">
+      {/* Comptoir (bar, café) : pas d'envoi en cuisine, encaissement direct */}
       <button
-        onClick={() => setCreating(true)}
+        onClick={() => onOpen({ type: "counter" })}
         className="rf-tap shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
-        style={{ background: "#0891B2" }}
+        style={{ background: "#7C3AED" }}
       >
-        <ShoppingBag size={14} /> <Plus size={12} /> Emporter
+        <Coffee size={14} /> <Plus size={12} /> Comptoir
       </button>
+      {hasTakeaway && (
+        <button
+          onClick={() => setCreating(true)}
+          className="rf-tap shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm"
+          style={{ background: "#0891B2" }}
+        >
+          <ShoppingBag size={14} /> <Plus size={12} /> Emporter
+        </button>
+      )}
       {open.map((o) => {
         const ready = o.items.some((i) => i.status === "ready");
         return (
@@ -267,7 +277,7 @@ function TakeawayBar({ orders, onOpen }) {
           >
             <span className="block text-xs font-bold text-[#2B2622] whitespace-nowrap">{orderLabel(o)}</span>
             <span className="block text-[10px] text-[#6B6355] whitespace-nowrap">
-              {o.pickupAt ? `Retrait ${formatPickup(o.pickupAt)}` : "Dès que prêt"}
+              {o.type === "counter" ? "À encaisser" : o.pickupAt ? `Retrait ${formatPickup(o.pickupAt)}` : "Dès que prêt"}
               {o.channel === "phone" && " · Tél."}
               {ready ? " · Prête" : ""}
             </span>

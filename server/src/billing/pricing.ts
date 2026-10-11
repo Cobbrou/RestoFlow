@@ -124,6 +124,22 @@ export function computeVatBreakdown(items: PricedItem[], discount?: DiscountInpu
   };
 }
 
+/**
+ * Net (centimes) d'une partie d'une note (ticket par convive, avoir partiel) : remise d'origine au prorata.
+ * La partie qui solde la note prend exactement le reste, pour que la somme des parties égale la note.
+ * Copie dans src/utils/vat.js.
+ */
+export function partialNetCents(p: {
+  grossCents: number;
+  fullSubCents: number;
+  fullTotalCents: number;
+  alreadyCents: number;
+  completes: boolean;
+}): number {
+  if (p.completes) return p.fullTotalCents - p.alreadyCents;
+  return p.fullSubCents > 0 ? Math.round((p.grossCents * p.fullTotalCents) / p.fullSubCents) : 0;
+}
+
 export interface HappyHourConfig {
   enabled?: boolean;
   startTime?: string;

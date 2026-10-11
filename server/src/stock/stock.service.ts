@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { orderLabel } from "../orders/orders.service";
+import { toStockQty } from "../recipes/units";
 
 export interface StockMovementInput {
   ingredientId: string;
@@ -352,7 +353,8 @@ export class StockService {
     for (const pq of productQuantities) {
       const recipes = recipeItems.filter((r) => r.productId === pq.productId);
       for (const rc of recipes) {
-        const totalQtyToDeduct = rc.quantity * pq.qty;
+        // Dosage converti dans l'unité du stock (ex. 150 g pour un stock en kg)
+        const totalQtyToDeduct = toStockQty(rc.quantity, rc.unit, rc.ingredient.unit) * pq.qty;
         const existing = deductionMap.get(rc.ingredientId) || {
           qty: 0,
           ingredient: rc.ingredient,
@@ -366,14 +368,15 @@ export class StockService {
     return deductionMap;
   }
 
-  async deductForOrder(orderId: string) {
+  // itemIds : lignes déjà vendues à déstocker (vente comptoir) ; par défaut, les brouillons partant en cuisine
+  async deductForOrder(orderId: string, itemIds?: string[]) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, table: true },
     });
     if (!order) return null;
 
-    const draftItems = order.items.filter((i) => i.status === "draft");
+    const draftItems = order.items.filter((i) => (itemIds ? itemIds.includes(i.id) : i.status === "draft"));
     if (draftItems.length === 0) return null;
 
     const deductionMap = await this.ingredientNeeds(draftItems);

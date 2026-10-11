@@ -302,10 +302,22 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @RequirePermissions("salle.order")
   @SubscribeMessage("order:create_or_ensure")
   async handleEnsureOrder(
-    @MessageBody() data: { tableId: string; server: string; orderId?: string }
+    @MessageBody() data: { tableId: string; server: string; orderId?: string; covers?: number }
   ) {
     try {
-      const order = await this.ordersService.createOrEnsure(data.tableId, data.server, data.orderId);
+      const order = await this.ordersService.createOrEnsure(data.tableId, data.server, data.orderId, data.covers);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
+      return { ok: true, order };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("salle.order")
+  @SubscribeMessage("order:set_covers")
+  async handleSetCovers(@MessageBody() data: { orderId: string; covers: number }) {
+    try {
+      const order = await this.ordersService.setCovers(data.orderId, data.covers);
       this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
@@ -464,17 +476,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {
     try {
       // 1. Décompte automatique et atomique des stocks (Axe 2 & 5)
-      const stockResult = await this.stockService.deductForOrder(data.orderId);
-      if (stockResult) {
-        for (const msg of stockResult.stockAlerts) {
-          this.server.to(STAFF_ROOM).emit("stock:alert", { message: msg });
-        }
-        if (stockResult.affectedProducts.length > 0) {
-          this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
-        }
-        this.server.to(STAFF_ROOM).emit("stock:updated", stockResult.refreshedIngredients);
-        this.server.to(STAFF_ROOM).emit("stock:movements_updated", stockResult.recentMovements);
-      }
+      await this.deductStock(data.orderId);
 
       // 2. Passage des articles de la commande en statut "new"
       const { order, rawOrder } = await this.ordersService.sendKitchen(data.orderId, data.serverName);
@@ -498,6 +500,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
+  }
+
+  /** Déstockage des lignes envoyées (ou vendues au comptoir) et diffusion des stocks à jour */
+  private async deductStock(orderId: string, itemIds?: string[]) {
+    const stockResult = await this.stockService.deductForOrder(orderId, itemIds);
+    if (!stockResult) return;
+    for (const msg of stockResult.stockAlerts) {
+      this.server.to(STAFF_ROOM).emit("stock:alert", { message: msg });
+    }
+    if (stockResult.affectedProducts.length > 0) {
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
+    }
+    this.server.to(STAFF_ROOM).emit("stock:updated", stockResult.refreshedIngredients);
+    this.server.to(STAFF_ROOM).emit("stock:movements_updated", stockResult.recentMovements);
   }
 
   /**
@@ -680,9 +696,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         });
       }
 
-      this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
+      // Ticket de convive : la note reste ouverte avec les quantités restant à encaisser
+      if (res.closed) this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
+      else this.server.to(STAFF_ROOM).emit("order:updated", await this.ordersService.findById(res.orderId));
       if (res.table) this.server.to(STAFF_ROOM).emit("table:updated", res.table);
       this.server.to(STAFF_ROOM).emit("history:new_entry", res.history);
+      // Vente comptoir : déstockage une fois la vente validée (un encaissement refusé ne déstocke rien)
+      if (res.soldDirectIds.length > 0) {
+        await this.deductStock(res.orderId, res.soldDirectIds).catch((e) => this.logger.error(`Déstockage comptoir : ${e.message}`));
+      }
 
       // Impression automatique du ticket de caisse si configurée
       this.attemptAutoCaissePrint(res.history).catch(this.printFailed(client, "du ticket de caisse"));
@@ -1038,6 +1060,36 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.close")
+  @SubscribeMessage("closing:close_period")
+  async handleClosePeriod(@ConnectedSocket() client: Socket, @MessageBody() data: { type: "MONTH" | "YEAR"; period: string }) {
+    try {
+      const closing = await this.closingService.closePeriod({
+        type: data?.type === "YEAR" ? "YEAR" : "MONTH",
+        period: String(data?.period || ""),
+        closedBy: client.data.user.name,
+      });
+      this.server.to(STAFF_ROOM).emit("closing:new_period", closing);
+      await this.journal.log("PERIOD_CLOSING", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+        reportNumber: closing.reportNumber,
+        totalNet: closing.totalNet,
+      });
+      return { ok: true, closing };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("caisse.close", "caisse.history", "caisse.fec")
+  @SubscribeMessage("closing:get_periods")
+  async handleGetPeriods() {
+    try {
+      return { ok: true, periods: await this.closingService.getPeriodClosings() };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
   @RequirePermissions("caisse.close", "caisse.history")
   @SubscribeMessage("closing:get_history")
   async handleGetClosingHistory(@MessageBody() data?: { limit?: number }) {
@@ -1079,9 +1131,18 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.close")
   @SubscribeMessage("history:refund")
-  async handleRefund(@ConnectedSocket() client: Socket, @MessageBody() data: { historyId: string; reason: string }) {
+  async handleRefund(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { historyId: string; reason: string; lines?: { itemId: string; qty: number }[]; refundMethod?: string }
+  ) {
     try {
-      const creditNote = await this.billingService.refundTicket(data?.historyId, data?.reason, client.data.user.name);
+      const creditNote = await this.billingService.refundTicket(
+        data?.historyId,
+        data?.reason,
+        client.data.user.name,
+        Array.isArray(data?.lines) ? data.lines : null,
+        data?.refundMethod
+      );
       this.server.to(STAFF_ROOM).emit("history:new_entry", creditNote);
       await this.journal.log("CREDIT_NOTE", { staffId: client.data.user.staffId, name: client.data.user.name }, {
         ticketNumber: creditNote.ticketNumber,

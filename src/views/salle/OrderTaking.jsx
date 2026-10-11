@@ -13,6 +13,7 @@ import DiscountModal from "./DiscountModal.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 import { useModules } from "../../hooks/useModules.js";
 import { hasPermission } from "../../utils/permissions.js";
+import { toStockQty } from "../../utils/units.js";
 
 const TableActionModal = lazy(() => import("../../components/TableActionModal.jsx"));
 
@@ -37,8 +38,8 @@ export default function OrderTaking({
   currentStaff, roles = [],
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
-  onQty, onRemove, onVoid, onNote,
-  onSend, onServe, onCheckout, onBackToPlan, onToast,
+  onQty, onRemove, onVoid, onNote, onSetCovers,
+  onSend, onServe, onCheckout, onPartialCheckout, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
   onCallCourse,
   onChangeItemCourse,
@@ -106,6 +107,11 @@ export default function OrderTaking({
   const readyItems   = items.filter((i) => i.status === "ready");
   const hasReady     = readyItems.length > 0;
   const allServedNoDraft = items.length > 0 && items.every((i) => i.status === "served");
+  // Vente comptoir : pas d'envoi en cuisine, les articles saisis s'encaissent directement
+  const isCounter = order?.type === "counter";
+  const payableOrder = isCounter && order
+    ? { ...order, items: items.map((i) => (i.status === "draft" ? { ...i, status: "served" } : i)) }
+    : order;
 
   const filtered = products.filter(
     (p) =>
@@ -136,7 +142,7 @@ export default function OrderTaking({
       if (rc.isCritical && rc.quantity > 0) {
         const ing = ingredients.find((i) => i.id === rc.ingredientId);
         const currentStock = ing ? ing.currentStock : rc.currentStock ?? 0;
-        const possible = Math.floor(currentStock / rc.quantity);
+        const possible = Math.floor(currentStock / toStockQty(rc.quantity, rc.unit, ing?.unit ?? rc.stockUnit));
         if (possible < minPossible) {
           minPossible = Math.max(0, possible);
         }
@@ -340,7 +346,7 @@ export default function OrderTaking({
           </button>
         )}
 
-        {draftItems.length > 0 && !confirmSend && (
+        {draftItems.length > 0 && !confirmSend && !isCounter && (
           <button onClick={() => setConfirmSend(true)} className="rf-tap w-full py-3.5 rounded-xl font-bold text-sm text-white shadow-md" style={{ background: "#C1440E" }}>
             ENVOYER EN CUISINE
           </button>
@@ -366,7 +372,13 @@ export default function OrderTaking({
           </div>
         )}
 
-        {allServedNoDraft ? (
+        {isCounter ? (
+          items.length > 0 && (
+            <button onClick={() => setPaying(true)} className="rf-tap w-full py-3.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-1.5 shadow-md" style={{ background: "#7C3AED" }}>
+              <Receipt size={14} /> Encaisser · {money(total)}
+            </button>
+          )
+        ) : allServedNoDraft ? (
           <button onClick={() => setPaying(true)} className="rf-tap w-full py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-1.5 shadow-sm" style={{ background: "#2B2622" }}>
             <Receipt size={14} /> {table ? "Encaisser & libérer la table" : "Encaisser"}
           </button>
@@ -402,10 +414,11 @@ export default function OrderTaking({
     <>
       {paying && order && (
         <PaymentModal
-          order={order}
+          order={payableOrder}
           table={table}
           config={config}
           onCancel={() => setPaying(false)}
+          onPartialCheckout={onPartialCheckout}
           onConfirm={(method, payments, meta) => {
             checkedOutHereRef.current = true;
             const r = onCheckout(method, payments, meta);
@@ -498,7 +511,7 @@ export default function OrderTaking({
         <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-black/10">
           <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5 shrink-0"><ArrowLeft size={16} /></button>
           <div className="min-w-0 flex-1">
-            <h2 className="rf-display text-base font-semibold text-[#2B2622] truncate">{table ? `${title} · ${table.seats} pers.` : title}</h2>
+            <h2 className="rf-display text-base font-semibold text-[#2B2622] truncate flex items-center gap-2">{title}{order && table && <CoversStepper covers={order.covers} onChange={onSetCovers} />}</h2>
             <p className="text-[11px] text-[#6B6355]">{subtitle}</p>
           </div>
           {order && table && (
@@ -561,7 +574,7 @@ export default function OrderTaking({
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="rf-tap p-2 rounded-full bg-black/5"><ArrowLeft size={16} /></button>
           <div>
-            <h2 className="rf-display text-lg font-semibold text-[#2B2622]">{table ? `${title} — ${table.seats} personnes` : title}</h2>
+            <h2 className="rf-display text-lg font-semibold text-[#2B2622] flex items-center gap-2">{title}{order && table && <CoversStepper covers={order.covers} onChange={onSetCovers} />}</h2>
             <p className="text-xs text-[#6B6355]">{subtitle}</p>
           </div>
         </div>
@@ -696,6 +709,19 @@ function ProductCard({ p, isMobile, onTap, portionsLeft, config, now, canManageA
         </div>
       </div>
     </button>
+  );
+}
+
+// Couverts de la table, corrigeables pendant le service (statistiques du Z)
+function CoversStepper({ covers, onChange }) {
+  const set = (n) => n >= 1 && n <= 99 && onChange?.(n);
+  const btn = "rf-tap w-6 h-6 rounded-full bg-black/5 text-sm font-bold leading-none";
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#6B6355] shrink-0">
+      <button type="button" className={btn} onClick={() => set((covers || 1) - 1)} aria-label="Retirer un couvert">−</button>
+      <span className="min-w-[3.5rem] text-center">{covers ? `${covers} couv.` : "? couv."}</span>
+      <button type="button" className={btn} onClick={() => set((covers || 0) + 1)} aria-label="Ajouter un couvert">+</button>
+    </span>
   );
 }
 

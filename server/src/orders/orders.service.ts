@@ -26,7 +26,8 @@ export function heldToRelease(
  * Modes de service hors salle et module qui les active. La livraison (plateformes, site) s'ajoutera ici
  * avec son propre module ; les canaux externes créeront leurs commandes via createOffPremise.
  */
-export const OFF_PREMISE_MODULES: Record<string, string> = { takeaway: "enableTakeaway" };
+// null : mode toujours disponible (vente comptoir : bar, café, sans envoi en cuisine)
+export const OFF_PREMISE_MODULES: Record<string, string | null> = { takeaway: "enableTakeaway", counter: null };
 // Canaux saisis depuis la caisse ; "online" et les plateformes arriveront par leurs propres intégrations
 const POS_CHANNELS = ["pos", "phone"];
 
@@ -35,12 +36,16 @@ export const isOffPremise = (order: { type?: string | null }) => !!order.type &&
 /** Libellé d'une commande pour les bons, toasts et tickets : "Table 4" ou "Emporter #12 · Dupont" */
 export function orderLabel(order: any): string {
   if (!isOffPremise(order)) return `Table ${order.table?.number ?? "?"}`;
-  const kind = order.type === "takeaway" ? "Emporter" : "Livraison";
+  const kind = order.type === "takeaway" ? "Emporter" : order.type === "counter" ? "Comptoir" : "Livraison";
   return [`${kind} #${order.pickupNumber ?? "?"}`, order.customerName].filter(Boolean).join(" · ");
 }
 
 // Tolérance sur l'horodatage client d'un ajout rejoué depuis la file hors-ligne
 const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
+
+// Couverts : entier de 1 à 99, sinon non renseigné
+const validCovers = (n: unknown): number | null =>
+  typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
 
 @Injectable()
 export class OrdersService {
@@ -62,6 +67,8 @@ export class OrdersService {
       customerPhone: order.customerPhone ?? null,
       pickupAt: order.pickupAt ? new Date(order.pickupAt).getTime() : null,
       pickupNumber: order.pickupNumber ?? null,
+      covers: order.covers ?? null,
+      paidTotal: order.paidTotal || 0,
       externalRef: order.externalRef ?? null,
       table: order.table ? {
         id: order.table.id,
@@ -76,6 +83,7 @@ export class OrdersService {
         name: it.name,
         price: it.price,
         qty: it.qty,
+        paidQty: it.paidQty || 0,
         notes: it.notes || "",
         status: it.status,
         isMenu: it.isMenu,
@@ -113,7 +121,7 @@ export class OrdersService {
     return this.formatOrder(order);
   }
 
-  async createOrEnsure(tableId: string, serverName = "Service", orderId?: string) {
+  async createOrEnsure(tableId: string, serverName = "Service", orderId?: string, covers?: number) {
     let table = await this.prisma.table.findUnique({ where: { id: tableId } });
     if (!table) {
       const num = parseInt(tableId.replace("tbl_", ""), 10);
@@ -147,12 +155,22 @@ export class OrdersService {
           tableId: resolvedTableId,
           server: serverName || "Service",
           status: "open",
+          covers: validCovers(covers),
         },
         include: { items: true, table: true },
       });
     }
 
     return this.formatOrder(order);
+  }
+
+  /** Correction du nombre de couverts d'une commande ouverte */
+  async setCovers(orderId: string, covers: number) {
+    const value = validCovers(covers);
+    if (value == null) throw new BadRequestException("Nombre de couverts invalide (1 à 99)");
+    const res = await this.prisma.order.updateMany({ where: { id: orderId, status: "open" }, data: { covers: value } });
+    if (res.count === 0) throw new NotFoundException("Commande introuvable ou déjà encaissée");
+    return this.findById(orderId);
   }
 
   /**
@@ -169,10 +187,12 @@ export class OrdersService {
     pickupAt?: number | string | null;
   }) {
     const moduleKey = OFF_PREMISE_MODULES[data?.type];
-    if (!moduleKey) throw new BadRequestException("Mode de service inconnu");
-    const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
-    const modules = cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {};
-    if (!modules[moduleKey]) throw new BadRequestException("Module désactivé dans la configuration");
+    if (moduleKey === undefined) throw new BadRequestException("Mode de service inconnu");
+    if (moduleKey) {
+      const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
+      const modules = cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {};
+      if (!modules[moduleKey]) throw new BadRequestException("Module désactivé dans la configuration");
+    }
 
     const channel = data.channel || "pos";
     if (!POS_CHANNELS.includes(channel)) throw new BadRequestException("Canal de commande invalide");
@@ -444,6 +464,10 @@ export class OrdersService {
     const voidQty = qty === undefined || qty === null ? item.qty : Number(qty);
     if (!Number.isInteger(voidQty) || voidQty < 1 || voidQty > item.qty) {
       throw new BadRequestException("Quantité à annuler invalide");
+    }
+    // Une part déjà encaissée sur un ticket de convive ne s'annule plus que par un avoir
+    if (voidQty > item.qty - (item.paidQty || 0)) {
+      throw new BadRequestException("Quantité déjà encaissée sur un ticket : émettez un avoir");
     }
 
     if (voidQty === item.qty) {

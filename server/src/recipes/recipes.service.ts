@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { conversionFactor, toStockQty } from "./units";
 
 export interface RecipeItemPayload {
   ingredientId: string;
@@ -16,7 +17,7 @@ export class RecipesService {
   /** Lignes de fiches techniques au format client (sync:init, recipe:updated) */
   async listItems() {
     const recipes = await this.prisma.recipeItem.findMany({
-      include: { ingredient: { select: { name: true, costPerUnit: true, currentStock: true } } },
+      include: { ingredient: { select: { name: true, costPerUnit: true, currentStock: true, unit: true } } },
     });
     return recipes.map((rc) => ({
       id: rc.id,
@@ -25,6 +26,7 @@ export class RecipesService {
       ingredientName: rc.ingredient.name,
       quantity: rc.quantity,
       unit: rc.unit,
+      stockUnit: rc.ingredient.unit,
       costPerUnit: rc.ingredient.costPerUnit,
       currentStock: rc.ingredient.currentStock,
       isCritical: rc.isCritical,
@@ -51,12 +53,13 @@ export class RecipesService {
 
       const items = product.recipeItems.map((rc) => {
         const ing = rc.ingredient;
-        const lineCost = rc.quantity * ing.costPerUnit;
+        const stockQty = toStockQty(rc.quantity, rc.unit, ing.unit); // dosage dans l'unité du stock
+        const lineCost = stockQty * ing.costPerUnit;
         portionCost += lineCost;
 
         // Portions réalisables avec le stock restant
-        if (rc.isCritical && rc.quantity > 0) {
-          const possible = Math.floor(ing.currentStock / rc.quantity);
+        if (rc.isCritical && stockQty > 0) {
+          const possible = Math.floor(ing.currentStock / stockQty);
           if (possible < minPortionsAvailable) {
             minPortionsAvailable = Math.max(0, possible);
           }
@@ -144,6 +147,18 @@ export class RecipesService {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       throw new NotFoundException(`Produit introuvable : ${productId}`);
+    }
+
+    // Dosage et stock doivent se convertir (g ↔ kg, cl ↔ l…) : sinon le déstockage serait faux
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { id: { in: items.map((i) => i.ingredientId).filter(Boolean) } },
+      select: { id: true, name: true, unit: true },
+    });
+    for (const item of items) {
+      const ing = ingredients.find((i) => i.id === item.ingredientId);
+      if (ing && conversionFactor(item.unit || ing.unit, ing.unit) === null) {
+        throw new BadRequestException(`${ing.name} : dosage en « ${item.unit} » incompatible avec le stock en « ${ing.unit} »`);
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {

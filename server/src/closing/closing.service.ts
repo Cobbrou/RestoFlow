@@ -1,9 +1,11 @@
-import { Injectable, BadRequestException } from "@nestjs/common";
+import { Injectable, BadRequestException, ConflictException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConfigService } from "../config/config.service";
 import * as crypto from "crypto";
 import { GENESIS_TICKET, signTicket } from "../billing/fiscal";
 import { JournalService } from "../journal/journal.service";
+import { orderLabel } from "../orders/orders.service";
+import { GENESIS_PERIOD, PeriodType, aggregateClosings, monthOf, periodBounds, signPeriodClosing } from "./period";
 
 export interface ZClosingInput {
   closedBy: string;
@@ -16,6 +18,15 @@ export interface FecExportOptions {
   startDate?: string;
   endDate?: string;
   closingId?: string;
+}
+
+/**
+ * Couverts d'un ticket : saisis à l'ouverture de la table (répartis entre tickets de convive) ;
+ * à défaut (vente à emporter, ancien ticket), 1. Un avoir ne retire pas de couverts : les clients sont bien venus.
+ */
+export function ticketCovers(ticket: { type?: string | null; covers?: number | null }): number {
+  if (ticket.type === "CREDIT_NOTE") return 0;
+  return ticket.covers != null && ticket.covers >= 0 ? ticket.covers : 1;
 }
 
 @Injectable()
@@ -194,14 +205,7 @@ export class ClosingService {
       serverSalesMap[srv].tickets += 1;
       serverSalesMap[srv].total += ticket.total;
 
-      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
-      try {
-        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
-        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
-        coversCount += mainItems.length > 0 ? mainItems.length : 1;
-      } catch {
-        coversCount += 1;
-      }
+      coversCount += ticketCovers(ticket);
     }
 
     const vatBreakdown = Object.keys(vatMap).map((k) => ({
@@ -254,6 +258,17 @@ export class ClosingService {
   async processZClosing(input: ZClosingInput) {
     if (!input.closedBy) {
       throw new BadRequestException("L'identité du collaborateur effectuant la clôture est obligatoire.");
+    }
+
+    // 0. Pas de Z tant que des articles envoyés restent à encaisser (sinon leur vente glisse sur le Z suivant)
+    const openOrders = await this.prisma.order.findMany({
+      where: { status: "open", items: { some: { status: { not: "draft" } } } },
+      include: { table: true },
+    });
+    if (openOrders.length > 0) {
+      throw new BadRequestException(
+        `Encaissez ou soldez d'abord les commandes ouvertes : ${openOrders.map((o) => orderLabel(o)).join(", ")}`
+      );
     }
 
     const secretKey = await this.getNf525Key();
@@ -347,14 +362,7 @@ export class ClosingService {
         paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
       }
 
-      // Use actual items count as a better proxy for covers (1 main course ≈ 1 cover)
-      try {
-        const items = typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items;
-        const mainItems = items.filter((it: any) => ['plats', 'entrees', 'menus'].includes(it.cat));
-        coversCount += mainItems.length > 0 ? mainItems.length : 1;
-      } catch {
-        coversCount += 1;
-      }
+      coversCount += ticketCovers(ticket);
     }
 
     const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -473,6 +481,94 @@ export class ClosingService {
   }
 
   /**
+   * 3 bis. CLÔTURES MENSUELLES ET ANNUELLES (NF525)
+   * Mois : cumul des Z ouverts dans le mois, une fois le mois terminé et tous ses tickets passés en Z.
+   * Année : cumul des clôtures mensuelles, une fois chaque mois actif de l'année clôturé.
+   */
+  async closePeriod(input: { type: PeriodType; period: string; closedBy: string }) {
+    const { type, period, closedBy } = input;
+    if (!closedBy) throw new BadRequestException("L'identité du collaborateur effectuant la clôture est obligatoire.");
+    const bounds = periodBounds(type, period);
+    if (!bounds) throw new BadRequestException("Période invalide (AAAA-MM pour un mois, AAAA pour une année)");
+    const now = new Date();
+    if (now < bounds.end) throw new BadRequestException("La période n'est pas terminée");
+    if (await this.prisma.periodClosing.findUnique({ where: { type_period: { type, period } } })) {
+      throw new ConflictException(`La période ${period} est déjà clôturée`);
+    }
+
+    const zInPeriod = await this.prisma.dailyClosing.findMany({
+      where: { openedAt: { gte: bounds.start, lt: bounds.end } },
+      orderBy: { sequenceNumber: "asc" },
+    });
+
+    let rows: any[];
+    let first: string | null;
+    let last: string | null;
+    if (type === "MONTH") {
+      const pending = await this.prisma.orderHistory.count({ where: { closedInZId: null, createdAt: { lt: bounds.end } } });
+      if (pending > 0) throw new BadRequestException(`${pending} ticket(s) de la période sans Z : effectuez d'abord le Z`);
+      rows = zInPeriod;
+      first = zInPeriod[0]?.reportNumber ?? null;
+      last = zInPeriod[zInPeriod.length - 1]?.reportNumber ?? null;
+    } else {
+      const months = await this.prisma.periodClosing.findMany({
+        where: { type: "MONTH", period: { startsWith: `${period}-` } },
+        orderBy: { period: "asc" },
+      });
+      const closedMonths = new Set(months.map((m) => m.period));
+      const missing = [...new Set(zInPeriod.map((z) => monthOf(z.openedAt)))].filter((m) => !closedMonths.has(m));
+      if (missing.length > 0) throw new BadRequestException(`Clôturez d'abord les mois : ${missing.join(", ")}`);
+      rows = months;
+      first = months[0]?.reportNumber ?? null;
+      last = months[months.length - 1]?.reportNumber ?? null;
+    }
+
+    const totals = aggregateClosings(rows);
+    // Grand Total perpétuel à la fin de la période : celui du dernier Z ouvert avant la fin
+    const lastZ = await this.prisma.dailyClosing.findFirst({
+      where: { openedAt: { lt: bounds.end } },
+      orderBy: { sequenceNumber: "desc" },
+    });
+    const previous = await this.prisma.periodClosing.findFirst({ orderBy: { sequenceNumber: "desc" } });
+
+    const fields = {
+      sequenceNumber: (previous?.sequenceNumber || 0) + 1,
+      reportNumber: `${type === "MONTH" ? "M" : "A"}-${period}`,
+      type,
+      period,
+      closedAt: now,
+      closedBy,
+      closingsCount: rows.length,
+      ...totals,
+      grandTotal: lastZ?.grandTotal ?? 0,
+      previousHash: previous?.signature || GENESIS_PERIOD,
+    };
+    const created = await this.prisma.periodClosing.create({
+      data: {
+        ...fields,
+        id: `per_${now.getTime()}_${Math.random().toString(36).slice(2, 6)}`,
+        periodStart: bounds.start,
+        periodEnd: bounds.end,
+        firstReport: first,
+        lastReport: last,
+        paymentsBreakdown: JSON.stringify(totals.paymentsBreakdown),
+        vatBreakdown: JSON.stringify(totals.vatBreakdown),
+        signature: signPeriodClosing(fields, await this.getNf525Key()),
+      },
+    });
+    return this.formatPeriod(created);
+  }
+
+  async getPeriodClosings(limit = 60) {
+    const list = await this.prisma.periodClosing.findMany({ orderBy: { sequenceNumber: "desc" }, take: limit });
+    return list.map((p) => this.formatPeriod(p));
+  }
+
+  private formatPeriod(p: any) {
+    return { ...p, paymentsBreakdown: JSON.parse(p.paymentsBreakdown || "{}"), vatBreakdown: JSON.parse(p.vatBreakdown || "[]") };
+  }
+
+  /**
    * 4. VÉRIFICATION D'INTÉGRITÉ DE LA CHAÎNE FISCALE (Audit NF525)
    */
   async verifyFiscalChainIntegrity() {
@@ -562,6 +658,16 @@ export class ClosingService {
       closingsVerified++;
     }
 
+    // 2 bis. Chaîne des clôtures mensuelles et annuelles
+    const allPeriods = await this.prisma.periodClosing.findMany({ orderBy: { sequenceNumber: "asc" } });
+    let previousPeriodHash = GENESIS_PERIOD;
+    allPeriods.forEach((p, i) => {
+      if (p.sequenceNumber !== i + 1) errors.push(`Trou dans la numérotation des clôtures périodiques : n°${i + 1} attendu, n°${p.sequenceNumber} trouvé`);
+      if (p.previousHash !== previousPeriodHash) errors.push(`Rupture de chaînage de la clôture ${p.reportNumber} : previousHash invalide`);
+      if (signPeriodClosing(p, secretKey) !== p.signature) errors.push(`Altération détectée sur la clôture ${p.reportNumber} : empreinte numérique corrompue`);
+      previousPeriodHash = p.signature;
+    });
+
     // 3. Journal des événements techniques (JET)
     const jet = await this.journal.verify();
     errors.push(...jet.errors);
@@ -573,6 +679,7 @@ export class ClosingService {
       status: isValid ? "CONFORME_NF525" : "ANOMALIE_DETECTEE",
       ticketsVerified,
       closingsVerified,
+      periodsVerified: allPeriods.length,
       eventsVerified: jet.eventsVerified,
       totalTickets: allTickets.length,
       totalClosings: allClosings.length,

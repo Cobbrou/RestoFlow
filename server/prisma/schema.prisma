@@ -147,6 +147,8 @@ model Order {
   customerPhone String?
   pickupAt      DateTime? // Heure de retrait / livraison souhaitée
   pickupNumber  Int?      // Numéro d'appel du jour, attribué par le serveur
+  covers        Int?      // Couverts saisis à l'ouverture de la table (null : non renseigné)
+  paidTotal     Float     @default(0) // Déjà encaissé par des tickets partiels (un ticket par convive)
   externalRef   String?   // Identifiant de la commande chez le canal externe (plateforme, site)
   items     OrderItem[]
 
@@ -169,6 +171,7 @@ model OrderItem {
   courseStatus String  @default("direct") // "direct" | "held" | "called"
   station     String   @default("kitchen") // "kitchen" | "bar"
   vatRate     Float    @default(10) // Taux figé à l'ajout, copié du produit (NF525 : ventilation TVA)
+  paidQty     Int      @default(0) // Quantité déjà encaissée sur un ticket partiel (partage par convive)
   vatSplit    String?  // Menu à plusieurs taux : JSON [{ rate, weight }], poids = prix des composants en centimes
   options     String?  // Libellé figé des options choisies, ex. "Saignant · Bacon (+2.00€)" (supplément inclus dans price)
 }
@@ -210,6 +213,7 @@ model OrderHistory {
   signature      String?  // Hash SHA-256 de ce ticket
   closedInZId    String?  // Référence au rapport Z dans lequel ce ticket a été clôturé
   tip            Float?   @default(0) // Pourboire perçu (hors CA soumis à TVA)
+  covers         Int?     // Couverts de la commande (statistiques du Z, ticket moyen par couvert)
   type           String   @default("SALE") // "SALE" | "CREDIT_NOTE" (avoir, montants négatifs)
   refTicketNumber String? // Ticket d'origine annulé par cet avoir
   reason         String?  // Motif obligatoire d'un avoir
@@ -255,6 +259,37 @@ model DailyClosing {
   signature         String   // Signature numérique de scellement
   orderHistoryIds   String   // JSON array des IDs de tickets rattachés
   createdAt         DateTime @default(now())
+}
+
+// Clôtures mensuelles et annuelles (NF525) : cumul des Z de la période, en ajout seul, chaînées et signées
+model PeriodClosing {
+  id                String   @id
+  type              String   // "MONTH" | "YEAR"
+  period            String   // "2026-10" (mois) ou "2026" (année)
+  sequenceNumber    Int      @unique // Numéro séquentiel strict, toutes périodes confondues
+  reportNumber      String   @unique // "M-2026-10" ou "A-2026"
+  periodStart       DateTime
+  periodEnd         DateTime // exclu
+  closedAt          DateTime @default(now())
+  closedBy          String
+  closingsCount     Int      // Nombre de Z (mois) ou de clôtures mensuelles (année) cumulés
+  firstReport       String?  // Premier Z / mois inclus
+  lastReport        String?  // Dernier Z / mois inclus
+  totalGross        Float
+  totalDiscounts    Float
+  totalNet          Float
+  totalHT           Float
+  totalVAT          Float
+  totalTips         Float
+  ticketsCount      Int
+  coversCount       Int
+  paymentsBreakdown String   // JSON { carte, especes, ... }
+  vatBreakdown      String   // JSON [{ rate, ht, vat, ttc }]
+  grandTotal        Float    // Grand Total perpétuel à la fin de la période
+  previousHash      String?
+  signature         String
+
+  @@unique([type, period])
 }
 
 model RestaurantConfig {

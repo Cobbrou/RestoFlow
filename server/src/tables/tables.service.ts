@@ -92,6 +92,9 @@ export class TablesService {
     if (!sourceOrder || !targetOrder) {
       throw new BadRequestException("Les deux tables doivent avoir une commande ouverte pour être fusionnées");
     }
+    if ((sourceOrder.paidTotal || 0) > 0 || (targetOrder.paidTotal || 0) > 0) {
+      throw new BadRequestException("Une des notes est déjà en partie encaissée : fusion impossible");
+    }
 
     await this.prisma.orderItem.updateMany({
       where: { orderId: sourceOrder.id },
@@ -102,6 +105,13 @@ export class TablesService {
       where: { id: sourceOrder.id },
       data: { status: "closed" },
     });
+    // Les couverts des deux tables s'additionnent (null si aucune n'était renseignée)
+    if (sourceOrder.covers != null || targetOrder.covers != null) {
+      await this.prisma.order.update({
+        where: { id: targetOrder.id },
+        data: { covers: (sourceOrder.covers || 0) + (targetOrder.covers || 0) },
+      });
+    }
 
     const updatedSource = await this.prisma.table.update({
       where: { id: sourceTableId },

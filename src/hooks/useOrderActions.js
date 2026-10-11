@@ -23,7 +23,7 @@ export function useOrderActions(store, {
   };
 
   const ensureOrderForTable = useCallback(
-    (tableId, overrideStaff = null) => {
+    (tableId, overrideStaff = null, covers = null) => {
       let order = getActiveOrder(tableId);
       if (!order) {
         const staffObj = overrideStaff || currentStaff;
@@ -32,11 +32,12 @@ export function useOrderActions(store, {
           id: uid("ord"),
           tableId,
           server: serverName,
+          covers,
           createdAt: Date.now(),
           items: [],
         };
         setOrders((prev) => [...prev, order]);
-        emit("order:create_or_ensure", { orderId: order.id, tableId, server: serverName });
+        emit("order:create_or_ensure", { orderId: order.id, tableId, server: serverName, covers });
       }
       return order;
     },
@@ -298,7 +299,14 @@ export function useOrderActions(store, {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return null;
     const table    = tables.find((t) => t.id === order.tableId);
-    const paidItems = order.items.filter((i) => i.status !== "draft");
+    // Comptoir : les articles saisis sont vendus directement (le serveur les passe en "servi").
+    // Note entamée par des tickets de convive : seul le reste figure sur ce ticket.
+    const paidItems = (order.type === "counter"
+      ? order.items.map((i) => (i.status === "draft" ? { ...i, status: "served" } : i))
+      : order.items.filter((i) => i.status !== "draft")
+    )
+      .map((i) => ({ ...i, qty: i.qty - (i.paidQty || 0) }))
+      .filter((i) => i.qty > 0);
     const subtotal = meta?.subtotal ?? paidItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
     const discount = meta?.discount ?? order.discount ?? null;
     const total = meta?.total ?? paidItems.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
@@ -385,6 +393,35 @@ export function useOrderActions(store, {
     });
 
     return receipt;
+  };
+
+  /**
+   * Ticket par convive : encaisse une partie des lignes sur un ticket séparé ; la note reste ouverte.
+   * Montant et ticket définitifs calculés par le serveur (history:new_entry).
+   */
+  const partialCheckout = (orderId, lines, payments, amount) => {
+    updateOrder(orderId, (o) => ({
+      ...o,
+      paidTotal: Math.round(((o.paidTotal || 0) + amount) * 100) / 100,
+      items: o.items.map((i) => {
+        const l = lines.find((x) => x.itemId === i.id);
+        return l ? { ...i, paidQty: (i.paidQty || 0) + l.qty } : i;
+      }),
+    }));
+    emit("order:checkout", {
+      orderId,
+      lines,
+      payments,
+      paymentMethod: payments.length === 1 ? payments[0].method : "partage",
+      tip: 0,
+      operatorId: currentStaff?.id,
+    });
+    pushToast(`Ticket émis : ${payments[0]?.label || "convive"} (${amount.toFixed(2)} €)`, "server");
+  };
+
+  const setOrderCovers = (orderId, covers) => {
+    updateOrder(orderId, (o) => ({ ...o, covers }));
+    emit("order:set_covers", { orderId, covers });
   };
 
   const toggleAlert = (tableId) => {
@@ -600,6 +637,8 @@ export function useOrderActions(store, {
     handleApplyDiscount,
     handleRemoveDiscount,
     checkoutOrder,
+    partialCheckout,
+    setOrderCovers,
     toggleAlert,
     startPrep,
     markReady,

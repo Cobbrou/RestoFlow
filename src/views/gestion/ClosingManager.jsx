@@ -14,7 +14,10 @@ import {
   Receipt,
   Search,
   ChevronRight,
+  CalendarCheck,
 } from "lucide-react";
+import PeriodClosings from "./PeriodClosings.jsx";
+import { hasPermission } from "../../utils/permissions.js";
 import { money } from "../../utils/index.js";
 import { generateXReportText, generateZReportText } from "../../utils/escpos.js";
 import { triggerFileDownload } from "../../utils/fec.js";
@@ -130,7 +133,8 @@ export default function ClosingManager({
       openedAt: lastZ ? lastZ.closedAt : (unclosedTickets[0]?.createdAt || Date.now()),
       generatedAt: Date.now(),
       ticketsCount: unclosedTickets.length,
-      coversCount: unclosedTickets.length * 2,
+      // Même règle que ticketCovers (server/src/closing/closing.service.ts)
+      coversCount: unclosedTickets.reduce((s, t) => s + (t.type === "CREDIT_NOTE" ? 0 : t.covers >= 0 && t.covers != null ? t.covers : 1), 0),
       totalGross: Math.round(totalGross * 100) / 100,
       totalDiscounts: Math.round(totalDiscounts * 100) / 100,
       totalNet: Math.round(totalNet * 100) / 100,
@@ -281,6 +285,7 @@ export default function ClosingManager({
             { id: "x_report", label: "Lecture X (En direct)", icon: FileText },
             { id: "z_closing", label: "Clôture Z", icon: Lock },
             { id: "z_history", label: "Registre des Z", icon: Receipt },
+            { id: "periods", label: "Clôtures mensuelles", icon: CalendarCheck },
             { id: "nf525_audit", label: "Audit NF525", icon: ShieldCheck },
             { id: "fec_export", label: "Export FEC", icon: Download },
           ].map((tab) => {
@@ -372,9 +377,13 @@ export default function ClosingManager({
                 <div className="bg-white p-4 rounded-2xl border border-black/10 shadow-sm col-span-2 md:col-span-1">
                   <span className="text-[11px] font-bold text-[#8A8378] uppercase">Tickets & Couverts</span>
                   <p className="rf-display text-2xl font-bold text-[#2B2622] mt-1">
-                    {xReport.ticketsCount} <span className="text-sm font-normal text-[#8A8378]">tickets</span>
+                    {xReport.ticketsCount} <span className="text-sm font-normal text-[#8A8378]">tickets</span>{" "}
+                    · {xReport.coversCount || 0} <span className="text-sm font-normal text-[#8A8378]">couverts</span>
                   </p>
-                  <span className="text-[11px] text-[#8A8378]">Panier moyen : {money(xReport.averageTicket)}</span>
+                  <span className="text-[11px] text-[#8A8378]">
+                    Panier moyen : {money(xReport.averageTicket)} · par couvert :{" "}
+                    {money(xReport.coversCount > 0 ? xReport.totalNet / xReport.coversCount : 0)}
+                  </span>
                 </div>
               </div>
 
@@ -665,6 +674,13 @@ export default function ClosingManager({
       {/* ──────────────────────────────────────────────────────────
           4. AUDIT & INTÉGRITÉ FISCALE NF525
       ────────────────────────────────────────────────────────── */}
+      {subTab === "periods" && (
+        <PeriodClosings
+          canClose={hasPermission(currentStaff, null, "caisse.close")}
+          pushToast={pushToast}
+        />
+      )}
+
       {subTab === "nf525_audit" && (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl border border-black/10 shadow-sm space-y-4">

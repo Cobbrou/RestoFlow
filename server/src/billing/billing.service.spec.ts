@@ -177,4 +177,120 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       expect(res.history.vatDetails.rates.map((r: any) => r.rate)).toEqual([10, 20]);
     });
   });
+
+  describe("processCheckout (vente comptoir)", () => {
+    it("vend les brouillons d'une commande comptoir sans envoi en cuisine, et les renvoie pour déstockage", async () => {
+      mockPrisma.orderItem = { updateMany: vi.fn() };
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: "c1", type: "counter", pickupNumber: 3, tableId: null,
+        items: [{ id: "x", name: "Café", price: 2, qty: 2, status: "draft", vatRate: 10 }],
+      });
+      const res = await billingService.processCheckout({ orderId: "c1", payments: [{ amount: 4, method: "especes" }] });
+      expect(res.history.total).toBe(4);
+      expect(res.soldDirectIds).toEqual(["x"]);
+      expect(mockPrisma.orderItem.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["x"] } }, data: { status: "served" } });
+    });
+
+    it("refuse toujours une commande en salle dont rien n'est envoyé", async () => {
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: "t1", type: "dine_in", tableId: "tb1", items: [{ id: "y", price: 2, qty: 1, status: "draft" }],
+      });
+      await expect(billingService.processCheckout({ orderId: "t1", payments: [{ amount: 2, method: "carte" }] })).rejects.toThrow("Aucun article");
+    });
+  });
+
+  describe("processCheckout (un ticket par convive)", () => {
+    // Note de 26 € brut, remise 10 % → 23,40 € : 2 plats à 10 € + vin à 6 €, 3 couverts
+    let order: any;
+    beforeEach(() => {
+      order = {
+        id: "o5", type: "dine_in", status: "open", tableId: "tb1", table: { number: 5 }, covers: 3, paidTotal: 0,
+        discount: JSON.stringify({ type: "percent", value: 10 }),
+        items: [
+          { id: "p", name: "Plat", price: 10, qty: 2, paidQty: 0, status: "served", vatRate: 10 },
+          { id: "v", name: "Vin", price: 6, qty: 1, paidQty: 0, status: "served", vatRate: 20 },
+        ],
+      };
+      mockPrisma.order.findUnique.mockImplementation(() => Promise.resolve(order));
+      mockPrisma.order.update = vi.fn().mockImplementation(({ data }) => {
+        order = { ...order, ...data };
+        return Promise.resolve(order);
+      });
+      mockPrisma.orderItem = {
+        updateMany: vi.fn().mockImplementation(({ where, data }) => {
+          const it = order.items.find((i: any) => i.id === where.id);
+          if (it.paidQty > where.paidQty.lte) return Promise.resolve({ count: 0 });
+          it.paidQty += data.paidQty.increment;
+          return Promise.resolve({ count: 1 });
+        }),
+      };
+      mockPrisma.orderHistory.count = vi.fn().mockResolvedValue(0);
+    });
+
+    it("émet un ticket par convive, remise au prorata, le dernier solde au centime et libère la table", async () => {
+      const a = await billingService.processCheckout({ orderId: "o5", lines: [{ itemId: "p", qty: 1 }], payments: [{ amount: 9, method: "carte" }] });
+      expect(a.history.total).toBe(9);
+      expect(a.history.covers).toBe(1);
+      expect(a.closed).toBe(false);
+      expect(mockPrisma.order.updateMany).not.toHaveBeenCalled(); // la note reste ouverte
+
+      mockPrisma.orderHistory.count.mockResolvedValue(1);
+      const b = await billingService.processCheckout({ orderId: "o5", payments: [{ amount: 14.4, method: "especes" }] });
+      expect(b.history.total).toBe(14.4); // 23,40 − 9,00
+      expect(b.history.covers).toBe(2);
+      expect(b.closed).toBe(true);
+      expect(b.table).toBeTruthy();
+      expect(order.status).toBe("closed");
+    });
+
+    it("refuse d'encaisser deux fois la même part et une remise après un premier ticket", async () => {
+      await billingService.processCheckout({ orderId: "o5", lines: [{ itemId: "v", qty: 1 }], payments: [{ amount: 5.4, method: "carte" }] });
+      await expect(
+        billingService.processCheckout({ orderId: "o5", lines: [{ itemId: "v", qty: 1 }], payments: [{ amount: 5.4, method: "carte" }] })
+      ).rejects.toThrow("déjà encaissée");
+      await expect(billingService.applyDiscount("o5", { type: "percent", value: 20 })).rejects.toThrow("en partie encaissée");
+    });
+  });
+
+  describe("refundTicket (avoir partiel)", () => {
+    // Ticket de 26 € brut, remise 10 % → 23,40 € : plat 20 € (10 %) + vin 6 € (20 %)
+    const orig = {
+      id: "h1", orderId: "o1", ticketNumber: "FAC-2026-0001", type: "SALE", subtotal: 26, total: 23.4, tip: 2,
+      paymentMethod: "carte", payments: JSON.stringify([{ method: "carte", amount: 25.4 }]),
+      items: JSON.stringify([
+        { id: "a", name: "Plat", price: 20, qty: 1, vatRate: 10 },
+        { id: "b", name: "Vin", price: 6, qty: 1, vatRate: 20 },
+      ]),
+    };
+    let notes: any[];
+
+    beforeEach(() => {
+      notes = [];
+      mockPrisma.orderHistory.findUnique = vi.fn().mockResolvedValue(orig);
+      mockPrisma.orderHistory.findMany = vi.fn().mockImplementation(() => Promise.resolve([...notes]));
+      mockPrisma.orderHistory.create = vi.fn().mockImplementation(({ data }) => {
+        notes.push(data);
+        return Promise.resolve({ ...data });
+      });
+    });
+
+    it("rembourse une ligne avec la remise au prorata, puis le reste au centime près, sans le pourboire", async () => {
+      const first = await billingService.refundTicket("h1", "vin bouchonné", "Admin", [{ itemId: "b", qty: 1 }], "especes");
+      expect(first.total).toBe(-5.4);
+      expect(first.vatDetails.rates.map((r: any) => r.rate)).toEqual([20]);
+      expect(first.payments).toEqual([expect.objectContaining({ method: "especes", amount: -5.4 })]);
+
+      const rest = await billingService.refundTicket("h1", "client parti", "Admin");
+      expect(rest.total).toBe(-18);
+      expect(rest.tip).toBe(0);
+      expect(first.total + rest.total).toBeCloseTo(-23.4, 10);
+
+      await expect(billingService.refundTicket("h1", "encore", "Admin")).rejects.toThrow("entièrement remboursé");
+    });
+
+    it("refuse une quantité au-delà du reste ou une ligne inconnue", async () => {
+      await expect(billingService.refundTicket("h1", "erreur", "Admin", [{ itemId: "b", qty: 2 }])).rejects.toThrow("reste à rembourser");
+      await expect(billingService.refundTicket("h1", "erreur", "Admin", [{ itemId: "zz", qty: 1 }])).rejects.toThrow("Ligne inconnue");
+    });
+  });
 });
