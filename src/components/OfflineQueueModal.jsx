@@ -116,6 +116,16 @@ export default function OfflineQueueModal({ isOpen, onClose }) {
           </div>
         </div>
 
+        {queue.some((a) => a.status === "rejected" && a.type === "order:checkout") && (
+          <div className="p-3 rounded-xl text-sm font-bold bg-red-600 text-white flex items-start gap-2">
+            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+            <span>
+              Encaissement refusé par le serveur : la commande est restée ouverte. Rouvrez la table et encaissez-la à
+              nouveau (vérifiez si le client a déjà payé), puis abandonnez l'action refusée.
+            </span>
+          </div>
+        )}
+
         {rejectedCount > 0 && (
           <div className="p-3 rounded-xl text-xs font-semibold bg-red-50 border border-red-200 text-[#C1361B] flex items-center gap-2">
             <AlertTriangle size={14} /> {rejectedCount} action(s) refusée(s) par le serveur : vérifiez-les avant de les abandonner.

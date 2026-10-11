@@ -78,6 +78,7 @@ nssm start RestoFlow; nssm start Caddy
 ```
 
 Ouvrez le port 443 dans le pare-feu Windows. Lancez `npm run db:migrate` à la main après chaque mise à jour.
+Vérifiez que le fuseau horaire de Windows est « Paris » : numéros d'appel, happy hour et heures imprimées en dépendent.
 
 ## 3. Certificat sur les tablettes
 
@@ -129,6 +130,24 @@ sudo systemctl restart restoflow     # applique les migrations au démarrage
 ```
 
 Les tablettes proposent la nouvelle version au prochain chargement.
+
+## 6. Pannes et mode dégradé
+
+Le mode hors-ligne couvre une **tablette** qui perd le Wi-Fi : elle continue à prendre les commandes et les envoie au retour du réseau.
+Il ne couvre pas la panne du **mini-PC**, de la box/du switch ou de l'imprimante cuisine : la cuisine ne reçoit alors plus rien.
+
+**Matériel à prévoir**
+
+- Un onduleur pour le mini-PC, la box (ou le switch) et l'imprimante cuisine : il absorbe les micro-coupures et laisse le temps de finir le service.
+- Le BIOS du mini-PC réglé pour redémarrer seul au retour du courant (« Restore on AC power loss : Power on ») ; les services RestoFlow et Caddy démarrent automatiquement.
+
+**Procédure papier** (à imprimer et ranger près du passe, avec un carnet de bons et un carnet de reçus)
+
+1. Le badge passe à « Hors-ligne » sur toutes les tablettes en même temps : le problème vient du mini-PC ou du réseau, pas d'une tablette.
+2. Prévenez la cuisine et passez aux bons papier. Les tablettes peuvent continuer à saisir les commandes pour les retrouver ensuite, mais rien n'arrive en cuisine.
+3. Encaissez sur la tablette si possible (l'encaissement est mis en file et le ticket définitif est numéroté au retour du serveur). Sinon, remettez un reçu manuel et saisissez la vente au retour.
+4. Redémarrez le mini-PC. S'il ne repart pas, restaurez la dernière sauvegarde sur un poste de secours (section 4).
+5. Au retour du serveur, ouvrez le badge de chaque tablette : une action **refusée** (badge rouge) doit être traitée à la main, en particulier un encaissement refusé, car la table est alors toujours ouverte sur le serveur.
 
 ## Modifier le schéma (développement)
 

@@ -278,7 +278,7 @@ model RestaurantConfig {
   fecExportConfig  String?   @default("{\"journalCode\":\"VT\",\"accountVente10\":\"706000\",\"accountVente20\":\"707000\",\"accountVat10\":\"445710\",\"accountVat20\":\"445720\",\"accountCard\":\"512000\",\"accountCash\":\"530000\",\"accountOther\":\"580000\"}")
   grandTotal       Float     @default(0) // Grand Total perpétuel cumulé
   lastClosingDate  DateTime?
-  nf525Key         String?   @default("RESTOFLOW_NF525_SECRET_KEY")
+  nf525Key         String?   // Clé de scellement NF525 aléatoire, générée à la création (jamais de valeur par défaut)
   updatedAt        DateTime  @updatedAt
 }
 

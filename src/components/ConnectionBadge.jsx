@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Wifi, WifiOff, RefreshCw } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Wifi, WifiOff, RefreshCw, AlertTriangle } from "lucide-react";
 import { subscribeSocketStatus } from "../services/socket.js";
 import { subscribeQueue } from "../services/actionQueue.js";
 import OfflineQueueModal from "./OfflineQueueModal.jsx";
@@ -8,13 +8,23 @@ export default function ConnectionBadge({ dark = false }) {
   const [status, setStatus] = useState({ connected: false });
   const [pendingCount, setPendingCount] = useState(0);
   const [isFlushing, setIsFlushing] = useState(false);
+  const [rejectedCount, setRejectedCount] = useState(0);
   const [isQueueModalOpen, setIsQueueModalOpen] = useState(false);
+  const seenRejectedCheckouts = useRef(new Set());
 
   useEffect(() => {
     const unsubSocket = subscribeSocketStatus((s) => setStatus(s));
     const unsubQueue = subscribeQueue((count, queue, flushing) => {
-      setPendingCount(count);
+      const rejected = queue.filter((a) => a.status === "rejected");
+      setPendingCount(count - rejected.length);
+      setRejectedCount(rejected.length);
       setIsFlushing(flushing);
+      // Encaissement refusé au rejeu : la table est fermée ici mais ouverte sur le serveur → on l'impose à l'écran
+      const fresh = rejected.filter((a) => a.type === "order:checkout" && !seenRejectedCheckouts.current.has(a.id));
+      if (fresh.length > 0) {
+        fresh.forEach((a) => seenRejectedCheckouts.current.add(a.id));
+        setIsQueueModalOpen(true);
+      }
     });
     return () => {
       unsubSocket();
@@ -64,6 +74,13 @@ export default function ConnectionBadge({ dark = false }) {
           >
             <RefreshCw size={10} className={isFlushing ? "animate-spin" : ""} />
             {pendingCount} en attente
+          </span>
+        )}
+
+        {rejectedCount > 0 && (
+          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full font-bold text-[10px] bg-red-600 text-white animate-pulse">
+            <AlertTriangle size={10} />
+            {rejectedCount} refusée{rejectedCount > 1 ? "s" : ""}
           </span>
         )}
       </button>
