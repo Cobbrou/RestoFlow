@@ -1050,6 +1050,36 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("caisse.close")
+  @SubscribeMessage("closing:close_period")
+  async handleClosePeriod(@ConnectedSocket() client: Socket, @MessageBody() data: { type: "MONTH" | "YEAR"; period: string }) {
+    try {
+      const closing = await this.closingService.closePeriod({
+        type: data?.type === "YEAR" ? "YEAR" : "MONTH",
+        period: String(data?.period || ""),
+        closedBy: client.data.user.name,
+      });
+      this.server.to(STAFF_ROOM).emit("closing:new_period", closing);
+      await this.journal.log("PERIOD_CLOSING", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+        reportNumber: closing.reportNumber,
+        totalNet: closing.totalNet,
+      });
+      return { ok: true, closing };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("caisse.close", "caisse.history", "caisse.fec")
+  @SubscribeMessage("closing:get_periods")
+  async handleGetPeriods() {
+    try {
+      return { ok: true, periods: await this.closingService.getPeriodClosings() };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
   @RequirePermissions("caisse.close", "caisse.history")
   @SubscribeMessage("closing:get_history")
   async handleGetClosingHistory(@MessageBody() data?: { limit?: number }) {

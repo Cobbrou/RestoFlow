@@ -9,6 +9,37 @@ describe("ticketCovers", () => {
   });
 });
 
+describe("ClosingService : garde-fous des clôtures", () => {
+  const config: any = { getConfig: vi.fn().mockResolvedValue({}), getNf525Key: vi.fn().mockResolvedValue("k") };
+
+  it("refuse le Z tant qu'une commande ouverte a des articles envoyés", async () => {
+    const prisma: any = { order: { findMany: vi.fn().mockResolvedValue([{ table: { number: 7 } }]) } };
+    const service = new ClosingService(prisma, config, {} as any);
+    await expect(service.processZClosing({ closedBy: "Admin" })).rejects.toThrow("Table 7");
+  });
+
+  it("refuse un mois non terminé, puis un mois dont des tickets n'ont pas de Z", async () => {
+    const prisma: any = {
+      periodClosing: { findUnique: vi.fn().mockResolvedValue(null) },
+      dailyClosing: { findMany: vi.fn().mockResolvedValue([]) },
+      orderHistory: { count: vi.fn().mockResolvedValue(2) },
+    };
+    const service = new ClosingService(prisma, config, {} as any);
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    await expect(service.closePeriod({ type: "MONTH", period: thisMonth, closedBy: "Admin" })).rejects.toThrow("pas terminée");
+    await expect(service.closePeriod({ type: "MONTH", period: "2020-01", closedBy: "Admin" })).rejects.toThrow("sans Z");
+  });
+
+  it("refuse l'année tant qu'un mois actif n'est pas clôturé", async () => {
+    const prisma: any = {
+      periodClosing: { findUnique: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([{ period: "2020-01" }]) },
+      dailyClosing: { findMany: vi.fn().mockResolvedValue([{ openedAt: new Date(2020, 0, 5) }, { openedAt: new Date(2020, 2, 5) }]) },
+    };
+    const service = new ClosingService(prisma, config, {} as any);
+    await expect(service.closePeriod({ type: "YEAR", period: "2020", closedBy: "Admin" })).rejects.toThrow("2020-03");
+  });
+});
+
 describe("ClosingService.generateFecExport", () => {
   it("équilibre l'écriture quand le règlement inclut un pourboire", async () => {
     const prisma: any = {

@@ -14,7 +14,10 @@ import {
   Receipt,
   Search,
   ChevronRight,
+  CalendarCheck,
 } from "lucide-react";
+import PeriodClosings from "./PeriodClosings.jsx";
+import { hasPermission } from "../../utils/permissions.js";
 import { money } from "../../utils/index.js";
 import { generateXReportText, generateZReportText } from "../../utils/escpos.js";
 import { triggerFileDownload } from "../../utils/fec.js";
@@ -282,6 +285,7 @@ export default function ClosingManager({
             { id: "x_report", label: "Lecture X (En direct)", icon: FileText },
             { id: "z_closing", label: "Clôture Z", icon: Lock },
             { id: "z_history", label: "Registre des Z", icon: Receipt },
+            { id: "periods", label: "Clôtures mensuelles", icon: CalendarCheck },
             { id: "nf525_audit", label: "Audit NF525", icon: ShieldCheck },
             { id: "fec_export", label: "Export FEC", icon: Download },
           ].map((tab) => {
@@ -670,6 +674,13 @@ export default function ClosingManager({
       {/* ──────────────────────────────────────────────────────────
           4. AUDIT & INTÉGRITÉ FISCALE NF525
       ────────────────────────────────────────────────────────── */}
+      {subTab === "periods" && (
+        <PeriodClosings
+          canClose={hasPermission(currentStaff, null, "caisse.close")}
+          pushToast={pushToast}
+        />
+      )}
+
       {subTab === "nf525_audit" && (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl border border-black/10 shadow-sm space-y-4">

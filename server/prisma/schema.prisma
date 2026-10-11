@@ -259,6 +259,37 @@ model DailyClosing {
   createdAt         DateTime @default(now())
 }
 
+// Clôtures mensuelles et annuelles (NF525) : cumul des Z de la période, en ajout seul, chaînées et signées
+model PeriodClosing {
+  id                String   @id
+  type              String   // "MONTH" | "YEAR"
+  period            String   // "2026-10" (mois) ou "2026" (année)
+  sequenceNumber    Int      @unique // Numéro séquentiel strict, toutes périodes confondues
+  reportNumber      String   @unique // "M-2026-10" ou "A-2026"
+  periodStart       DateTime
+  periodEnd         DateTime // exclu
+  closedAt          DateTime @default(now())
+  closedBy          String
+  closingsCount     Int      // Nombre de Z (mois) ou de clôtures mensuelles (année) cumulés
+  firstReport       String?  // Premier Z / mois inclus
+  lastReport        String?  // Dernier Z / mois inclus
+  totalGross        Float
+  totalDiscounts    Float
+  totalNet          Float
+  totalHT           Float
+  totalVAT          Float
+  totalTips         Float
+  ticketsCount      Int
+  coversCount       Int
+  paymentsBreakdown String   // JSON { carte, especes, ... }
+  vatBreakdown      String   // JSON [{ rate, ht, vat, ttc }]
+  grandTotal        Float    // Grand Total perpétuel à la fin de la période
+  previousHash      String?
+  signature         String
+
+  @@unique([type, period])
+}
+
 model RestaurantConfig {
   id               String    @id @default("default")
   name             String    @default("RestoFlow Bistrot")

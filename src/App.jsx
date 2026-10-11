@@ -278,6 +278,15 @@ export default function App() {
     pushToast(`Table ${table.number} installée pour ${reservation.customerName} (${reservation.guests} pers.)`, "server");
   };
 
+  // Rappel du Z : un ticket sans Z depuis plus de 20 h (le Z de la veille a été oublié)
+  const canCloseZ = hasPermission(currentStaff, roles.find((r) => r.id === currentStaff?.roleId), "caisse.close");
+  const zOverdueSince = useMemo(() => {
+    if (!canCloseZ) return null;
+    const oldest = Math.min(...history.filter((h) => !h.closedInZId).map((h) => new Date(h.createdAt).getTime()));
+    // ponytail: évalué au rendu (pas de minuterie), suffisant car l'écran se rafraîchit à chaque action
+    return Number.isFinite(oldest) && Date.now() - oldest > 20 * 3600 * 1000 ? oldest : null;
+  }, [history, canCloseZ]);
+
   // ── Rendu ──────────────────────────────────────────────────
   const activeTable = tables.find((t) => t.id === activeTableId);
   const activeOrder = activeTable
@@ -340,6 +349,15 @@ export default function App() {
         onLogout={handleLogout}
       />
       <ToastStack toasts={toasts} />
+
+      {zOverdueSince && role !== "cuisine" && (
+        <div className="px-4 py-2 bg-amber-100 border-b border-amber-300 text-amber-900 text-sm font-semibold flex items-center justify-between gap-3">
+          <span>⚠️ Rapport Z non effectué : ventes en attente depuis le {new Date(zOverdueSince).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.</span>
+          <button type="button" onClick={() => handleSetRole("gestion")} className="rf-tap px-3 py-1 rounded-lg bg-amber-900 text-amber-50 text-xs">
+            Faire le Z
+          </button>
+        </div>
+      )}
 
       {/* Clavier PIN tactile d'authentification */}
       <PinPadModal
