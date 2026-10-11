@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { deduplicateHistory } from "../utils/index.js";
 import { DEFAULT_MODULES_CONFIG } from "./useModules.js";
 import { getSocket } from "../services/socket.js";
@@ -70,18 +70,17 @@ export function useRestoState() {
   }, [applyState]);
 
   // Sauvegarde debounced des mutations locales dans IndexedDB (évite le flood I/O)
+  const savedRef = useRef({});
   useEffect(() => {
     if (!ready) return; // ne pas écraser le cache avec l'état vide du démarrage
     const timer = setTimeout(() => {
-      saveCollection("tables", tables);
-      saveCollection("orders", orders);
-      saveCollection("reservations", reservations);
-      saveCollection("history", history);
-      saveCollection("closings", closings);
-      saveCollection("products", products);
-      saveCollection("ingredients", ingredients);
-      saveCollection("recipes", recipes);
-      saveCollection("stockMovements", stockMovements);
+      const current = { tables, orders, reservations, history, closings, products, ingredients, recipes, stockMovements };
+      // Seules les collections modifiées (référence changée) sont réécrites : l'historique grossit tout le service
+      for (const [key, value] of Object.entries(current)) {
+        if (savedRef.current[key] === value) continue;
+        savedRef.current[key] = value;
+        saveCollection(key, value);
+      }
     }, 500);
     return () => clearTimeout(timer);
   }, [ready, tables, orders, reservations, history, closings, products, ingredients, recipes, stockMovements]);
