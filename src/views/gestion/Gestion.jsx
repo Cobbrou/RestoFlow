@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer, Upload } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { productsFromCsv, CSV_TEMPLATE } from "../../utils/catalogImport.js";
@@ -14,6 +14,7 @@ import ModulesManager from "./ModulesManager.jsx";
 import ThermalReceiptPreview from "../../components/ThermalReceiptPreview.jsx";
 
 import { hasPermission } from "../../utils/permissions.js";
+import { refundableLines } from "../../utils/refund.js";
 import { useRestoFlow } from "../../context/RestoFlowContext.jsx";
 import { getSocket } from "../../services/socket.js";
 import { useModules } from "../../hooks/useModules.js";
@@ -904,6 +905,8 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
   const [search,               setSearch]               = useState("");
   const [refundReason,         setRefundReason]         = useState("");
   const [refundBusy,           setRefundBusy]           = useState(false);
+  const [refundQty,            setRefundQty]            = useState({}); // { [cléLigne]: qté } : vide = tout le reste
+  const [refundMethod,         setRefundMethod]         = useState("carte");
   const [methodFilter,         setMethodFilter]         = useState(null);
   const [detailId,             setDetailId]             = useState(null);
   const [thermalPreviewDetail, setThermalPreviewDetail] = useState(null);
@@ -921,15 +924,25 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
 
   const totalCA = filtered.reduce((s, h) => s + h.total, 0);
   const detail  = detailId ? deduped.find((h) => h.id === detailId) : null;
-  // Tickets déjà annulés par un avoir
+  // Tickets ayant au moins un avoir (total ou partiel)
   const refundedTickets = useMemo(
     () => new Set(deduped.filter((h) => h.type === "CREDIT_NOTE").map((h) => h.refTicketNumber)),
     [deduped]
   );
-  const canRefundDetail =
-    canRefund && detail && detail.type !== "CREDIT_NOTE" && detail.signature && !refundedTickets.has(detail.ticketNumber);
+  useEffect(() => setRefundQty({}), [detailId]);
 
-  // Avoir NF525 : le ticket d'origine reste intact, un ticket négatif signé l'annule
+  // Lignes encore remboursables du ticket affiché (avoirs déjà émis déduits)
+  const refundLines = useMemo(
+    () =>
+      detail && detail.type !== "CREDIT_NOTE"
+        ? refundableLines(detail, deduped.filter((h) => h.type === "CREDIT_NOTE" && h.refTicketNumber === detail.ticketNumber))
+        : [],
+    [detail, deduped]
+  );
+  const canRefundDetail = canRefund && detail?.signature && refundLines.some((l) => l.remaining > 0);
+  const partialLines = Object.entries(refundQty).filter(([, q]) => q > 0).map(([itemId, qty]) => ({ itemId, qty }));
+
+  // Avoir NF525 : le ticket d'origine reste intact, un ticket négatif signé l'annule (en tout ou en partie)
   const emitRefund = () => {
     const socket = getSocket();
     if (!socket?.connected) {
@@ -937,11 +950,14 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
       return;
     }
     setRefundBusy(true);
-    socket.emit("history:refund", { historyId: detail.id, reason: refundReason }, (res) => {
+    const payload = { historyId: detail.id, reason: refundReason, refundMethod };
+    if (partialLines.length > 0) payload.lines = partialLines;
+    socket.emit("history:refund", payload, (res) => {
       setRefundBusy(false);
       if (res?.ok) {
-        pushToast?.(`Avoir ${res.history.ticketNumber} émis (annule ${detail.ticketNumber})`, "server");
+        pushToast?.(`Avoir ${res.history.ticketNumber} émis (sur ${detail.ticketNumber})`, "server");
         setRefundReason("");
+        setRefundQty({});
         setDetailId(res.history.id);
       } else {
         pushToast?.(res?.error || "Échec de l'émission de l'avoir", "warn");
@@ -1005,7 +1021,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: "#C1361B15", color: "#C1361B" }}>AVOIR</span>
                     )}
                     {refundedTickets.has(h.ticketNumber) && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "#2B262212", color: "#8A8378" }}>Annulé</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "#2B262212", color: "#8A8378" }}>Avoir émis</span>
                     )}
                     <span className="text-[10px] text-[#9A917E] ml-auto shrink-0">
                       {date.toLocaleDateString("fr-FR")} {date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
@@ -1111,7 +1127,32 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
             </div>
             {canRefundDetail && (
               <div className="px-5 pb-3">
-                <p className="text-xs font-bold text-[#2B2622] mb-1.5">Annuler ce ticket par un avoir</p>
+                <p className="text-xs font-bold text-[#2B2622] mb-1.5">Avoir sur ce ticket</p>
+                <p className="text-[11px] text-[#8A8378] mb-1.5">Choisissez les lignes à rembourser, ou laissez tout à 0 pour rembourser tout le reste.</p>
+                <div className="space-y-1 mb-2">
+                  {refundLines.filter((l) => l.remaining > 0).map((l) => {
+                    const q = refundQty[l.key] || 0;
+                    const set = (n) => setRefundQty((prev) => ({ ...prev, [l.key]: Math.max(0, Math.min(l.remaining, n)) }));
+                    return (
+                      <div key={l.key} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate">{l.name} <span className="text-[#8A8378]">({l.remaining} restant{l.remaining > 1 ? "s" : ""})</span></span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          <button type="button" onClick={() => set(q - 1)} className="rf-tap w-6 h-6 rounded-full bg-black/5 font-bold" aria-label={`Retirer ${l.name}`}>−</button>
+                          <span className="w-5 text-center font-bold">{q}</span>
+                          <button type="button" onClick={() => set(q + 1)} className="rf-tap w-6 h-6 rounded-full bg-black/5 font-bold" aria-label={`Ajouter ${l.name}`}>+</button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <label className="flex items-center gap-2 text-xs mb-2">
+                  Rembourser en
+                  <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="px-2 py-1 rounded-lg border border-black/15">
+                    <option value="carte">Carte</option>
+                    <option value="especes">Espèces</option>
+                    <option value="autre">Autre</option>
+                  </select>
+                </label>
                 <div className="flex gap-2">
                   <input
                     value={refundReason}
@@ -1125,7 +1166,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
                     className="rf-tap px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
                     style={{ background: "#C1361B" }}
                   >
-                    Émettre l'avoir
+                    {partialLines.length > 0 ? "Avoir partiel" : "Avoir du reste"}
                   </button>
                 </div>
               </div>

@@ -177,4 +177,46 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       expect(res.history.vatDetails.rates.map((r: any) => r.rate)).toEqual([10, 20]);
     });
   });
+
+  describe("refundTicket (avoir partiel)", () => {
+    // Ticket de 26 € brut, remise 10 % → 23,40 € : plat 20 € (10 %) + vin 6 € (20 %)
+    const orig = {
+      id: "h1", orderId: "o1", ticketNumber: "FAC-2026-0001", type: "SALE", subtotal: 26, total: 23.4, tip: 2,
+      paymentMethod: "carte", payments: JSON.stringify([{ method: "carte", amount: 25.4 }]),
+      items: JSON.stringify([
+        { id: "a", name: "Plat", price: 20, qty: 1, vatRate: 10 },
+        { id: "b", name: "Vin", price: 6, qty: 1, vatRate: 20 },
+      ]),
+    };
+    let notes: any[];
+
+    beforeEach(() => {
+      notes = [];
+      mockPrisma.orderHistory.findUnique = vi.fn().mockResolvedValue(orig);
+      mockPrisma.orderHistory.findMany = vi.fn().mockImplementation(() => Promise.resolve([...notes]));
+      mockPrisma.orderHistory.create = vi.fn().mockImplementation(({ data }) => {
+        notes.push(data);
+        return Promise.resolve({ ...data });
+      });
+    });
+
+    it("rembourse une ligne avec la remise au prorata, puis le reste au centime près, sans le pourboire", async () => {
+      const first = await billingService.refundTicket("h1", "vin bouchonné", "Admin", [{ itemId: "b", qty: 1 }], "especes");
+      expect(first.total).toBe(-5.4);
+      expect(first.vatDetails.rates.map((r: any) => r.rate)).toEqual([20]);
+      expect(first.payments).toEqual([expect.objectContaining({ method: "especes", amount: -5.4 })]);
+
+      const rest = await billingService.refundTicket("h1", "client parti", "Admin");
+      expect(rest.total).toBe(-18);
+      expect(rest.tip).toBe(0);
+      expect(first.total + rest.total).toBeCloseTo(-23.4, 10);
+
+      await expect(billingService.refundTicket("h1", "encore", "Admin")).rejects.toThrow("entièrement remboursé");
+    });
+
+    it("refuse une quantité au-delà du reste ou une ligne inconnue", async () => {
+      await expect(billingService.refundTicket("h1", "erreur", "Admin", [{ itemId: "b", qty: 2 }])).rejects.toThrow("reste à rembourser");
+      await expect(billingService.refundTicket("h1", "erreur", "Admin", [{ itemId: "zz", qty: 1 }])).rejects.toThrow("Ligne inconnue");
+    });
+  });
 });

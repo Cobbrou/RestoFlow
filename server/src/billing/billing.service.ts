@@ -121,9 +121,17 @@ export class BillingService {
 
   /**
    * Avoir NF525 : annule un ticket par un ticket aux montants négatifs, signé dans la même chaîne.
-   * Le ticket d'origine n'est jamais modifié. Un seul avoir (total) par ticket.
+   * Le ticket d'origine n'est jamais modifié.
+   * Sans `lines` : avoir total (ou du reste, si des avoirs partiels existent déjà).
+   * Avec `lines` [{ itemId, qty }] : avoir partiel, jamais au-delà des quantités restant à rembourser.
    */
-  async refundTicket(historyId: string, reason: string, actorName: string) {
+  async refundTicket(
+    historyId: string,
+    reason: string,
+    actorName: string,
+    lines?: { itemId: string; qty: number }[] | null,
+    refundMethod?: string
+  ) {
     const motif = (reason || "").trim();
     if (motif.length < 3) throw new BadRequestException("Motif d'annulation obligatoire");
 
@@ -133,6 +141,13 @@ export class BillingService {
           const orig = await tx.orderHistory.findUnique({ where: { id: historyId } });
           if (!orig) throw new NotFoundException("Ticket introuvable");
           if (orig.type !== "SALE") throw new BadRequestException("Un avoir ne peut pas être annulé");
+
+          const previous = await tx.orderHistory.findMany({
+            where: { type: "CREDIT_NOTE", refTicketNumber: orig.ticketNumber },
+          });
+          if (previous.length > 0 || Array.isArray(lines)) {
+            return toClientHistory(await this.appendPartialRefund(tx, orig, previous, lines ?? null, motif, actorName, refundMethod));
+          }
 
           const neg = (n: any) => (typeof n === "number" ? -n : n);
           const vat = parseJson(orig.vatDetails);
@@ -175,6 +190,99 @@ export class BillingService {
         }),
       "Ce ticket a déjà fait l'objet d'un avoir"
     );
+  }
+
+  /**
+   * Avoir partiel (ou du reste) : remise d'origine appliquée au prorata ; l'avoir qui solde le ticket
+   * prend exactement le reste, pour que la somme des avoirs égale le ticket. Le pourboire n'est pas remboursé.
+   */
+  private async appendPartialRefund(
+    tx: Prisma.TransactionClient,
+    orig: any,
+    previous: any[],
+    lines: { itemId: string; qty: number }[] | null,
+    motif: string,
+    actorName: string,
+    refundMethod?: string
+  ) {
+    const origItems: any[] = parseJson(orig.items, []);
+    const keyOf = (it: any, idx: number) => it.refKey ?? it.id ?? `#${idx}`;
+
+    const refunded = new Map<string, number>();
+    for (const cn of previous) {
+      parseJson(cn.items, []).forEach((it: any, idx: number) =>
+        refunded.set(keyOf(it, idx), (refunded.get(keyOf(it, idx)) || 0) + Math.abs(Number(it.qty) || 0))
+      );
+    }
+    const remaining = new Map<string, number>(
+      origItems.map((it, idx) => [keyOf(it, idx), (Number(it.qty) || 0) - (refunded.get(keyOf(it, idx)) || 0)])
+    );
+
+    const requested = new Map<string, number>();
+    if (lines) {
+      for (const l of lines) {
+        const key = String(l?.itemId);
+        const qty = Number(l?.qty);
+        if (!remaining.has(key)) throw new BadRequestException("Ligne inconnue sur ce ticket");
+        if (!Number.isInteger(qty) || qty < 1) throw new BadRequestException("Quantité à rembourser invalide");
+        requested.set(key, (requested.get(key) || 0) + qty);
+      }
+    } else {
+      for (const [key, qty] of remaining) if (qty > 0) requested.set(key, qty);
+    }
+    for (const [key, qty] of requested) {
+      if (qty > (remaining.get(key) || 0)) throw new BadRequestException("Quantité supérieure au reste à rembourser");
+    }
+    if (requested.size === 0) throw new BadRequestException("Ce ticket est déjà entièrement remboursé");
+
+    const refundItems = origItems
+      .map((it, idx) => ({ ...it, refKey: keyOf(it, idx), qty: requested.get(keyOf(it, idx)) || 0 }))
+      .filter((it) => it.qty > 0);
+    const grossCents = refundItems.reduce((s, it) => s + toCents(it.price) * it.qty, 0);
+    const origSubCents = toCents(orig.subtotal ?? orig.total);
+    const origTotalCents = toCents(orig.total);
+    const completes = [...remaining].every(([key, qty]) => qty === (requested.get(key) || 0));
+    const alreadyCents = previous.reduce((s, cn) => s - toCents(cn.total), 0);
+    // ponytail: si les arrondis des avoirs précédents ont trop remboursé, l'avoir final est plafonné au brut (écart ≤ 1 ct)
+    const targetNet = completes
+      ? origTotalCents - alreadyCents
+      : origSubCents > 0
+        ? Math.round((grossCents * origTotalCents) / origSubCents)
+        : 0;
+    const discountCents = Math.max(0, grossCents - targetNet);
+    const { subtotalCents, totalCents, ...vat } = computeVatBreakdown(
+      refundItems,
+      discountCents > 0 ? { type: "fixed", value: toEuros(discountCents) } : null
+    );
+
+    const methods = parseJson(orig.payments, []).map((p: any) => p.method);
+    const method = ["especes", "carte", "autre", ...methods].includes(refundMethod)
+      ? refundMethod
+      : methods[0] || orig.paymentMethod || "carte";
+    const neg = (n: any) => (typeof n === "number" ? -n : n);
+
+    return this.appendTicket(tx, {
+      orderId: `refund:${orig.orderId}:${previous.length + 1}`,
+      tableNumber: orig.tableNumber,
+      orderType: orig.orderType,
+      channel: orig.channel,
+      orderLabel: orig.orderLabel,
+      server: actorName,
+      items: JSON.stringify(refundItems.map((it) => ({ ...it, qty: -it.qty }))),
+      subtotal: -toEuros(subtotalCents),
+      total: -toEuros(totalCents),
+      discount: discountCents > 0 ? JSON.stringify({ type: "fixed", value: toEuros(discountCents), amount: -toEuros(discountCents) }) : null,
+      vatDetails: JSON.stringify({
+        ...Object.fromEntries(Object.entries(vat).map(([k, v]) => [k, neg(v)])),
+        rates: vat.rates.map((r) => ({ ...r, rawTtc: -r.rawTtc, ttc: -r.ttc, ht: -r.ht, vat: -r.vat })),
+      }),
+      paymentMethod: method,
+      payments: JSON.stringify([{ id: `pay_${Date.now()}`, label: "Remboursement", method, amount: -toEuros(totalCents) }]),
+      tip: 0,
+      type: "CREDIT_NOTE",
+      refTicketNumber: orig.ticketNumber,
+      reason: motif,
+    });
   }
 
   /** Rejoue en cas de collision de séquence (deux tickets simultanés) ; un doublon d'orderId = opération déjà faite */

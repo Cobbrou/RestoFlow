@@ -1121,9 +1121,18 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("caisse.close")
   @SubscribeMessage("history:refund")
-  async handleRefund(@ConnectedSocket() client: Socket, @MessageBody() data: { historyId: string; reason: string }) {
+  async handleRefund(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { historyId: string; reason: string; lines?: { itemId: string; qty: number }[]; refundMethod?: string }
+  ) {
     try {
-      const creditNote = await this.billingService.refundTicket(data?.historyId, data?.reason, client.data.user.name);
+      const creditNote = await this.billingService.refundTicket(
+        data?.historyId,
+        data?.reason,
+        client.data.user.name,
+        Array.isArray(data?.lines) ? data.lines : null,
+        data?.refundMethod
+      );
       this.server.to(STAFF_ROOM).emit("history:new_entry", creditNote);
       await this.journal.log("CREDIT_NOTE", { staffId: client.data.user.staffId, name: client.data.user.name }, {
         ticketNumber: creditNote.ticketNumber,
