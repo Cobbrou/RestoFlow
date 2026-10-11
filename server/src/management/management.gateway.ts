@@ -1,7 +1,7 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket } from "@nestjs/websockets";
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server, Socket } from "socket.io";
-import { WsAuthGuard } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, STAFF_ROOM } from "../auth/guards/ws-auth.guard";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
 import { ClientActionInterceptor } from "../websocket/client-action.interceptor";
@@ -28,7 +28,7 @@ export class ManagementGateway {
   private async broadcast(event: string, mutation: () => Promise<any>) {
     try {
       const list = await mutation();
-      this.server.emit(event, list);
+      this.server.to(STAFF_ROOM).emit(event, list);
       return { ok: true };
     } catch (err: any) {
       return { ok: false, error: err.message };

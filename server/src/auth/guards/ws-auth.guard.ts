@@ -5,6 +5,8 @@ import { Socket } from "socket.io";
 import { AuthService, SessionPayload } from "../auth.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 
+export const STAFF_ROOM = "staff";
+
 /**
  * Extrait et vérifie le jeton de session d'un socket (handshake ou header Authorization)
  */
@@ -14,6 +16,9 @@ export function authenticateSocket(client: Socket, authService: AuthService): Se
     client.handshake?.auth?.token || (header?.startsWith("Bearer ") ? header.slice(7) : null);
   const user = token ? authService.verifyToken(token) : null;
   client.data.user = user;
+  // 🔒 Seuls les sockets authentifiés reçoivent les diffusions (room STAFF_ROOM)
+  if (user) client.join(STAFF_ROOM);
+  else client.leave(STAFF_ROOM);
   return user;
 }
 

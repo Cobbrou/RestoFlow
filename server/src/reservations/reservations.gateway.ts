@@ -1,7 +1,7 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody } from "@nestjs/websockets";
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server } from "socket.io";
-import { WsAuthGuard } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, STAFF_ROOM } from "../auth/guards/ws-auth.guard";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
 import { ClientActionInterceptor } from "../websocket/client-action.interceptor";
@@ -30,7 +30,7 @@ export class ReservationsGateway {
   create(@MessageBody() data: any) {
     return this.run(async () => {
       const reservation = await this.reservations.create(data);
-      this.server.emit("reservation:created", reservation);
+      this.server.to(STAFF_ROOM).emit("reservation:created", reservation);
       return { ok: true, reservation };
     });
   }
@@ -39,7 +39,7 @@ export class ReservationsGateway {
   updateStatus(@MessageBody() data: { id: string; status: string }) {
     return this.run(async () => {
       const reservation = await this.reservations.updateStatus(data?.id, data?.status);
-      this.server.emit("reservation:updated", reservation);
+      this.server.to(STAFF_ROOM).emit("reservation:updated", reservation);
       return { ok: true, reservation };
     });
   }
@@ -48,7 +48,7 @@ export class ReservationsGateway {
   assignTable(@MessageBody() data: { id: string; tableId: string | null }) {
     return this.run(async () => {
       const reservation = await this.reservations.assignTable(data?.id, data?.tableId);
-      this.server.emit("reservation:updated", reservation);
+      this.server.to(STAFF_ROOM).emit("reservation:updated", reservation);
       return { ok: true, reservation };
     });
   }
@@ -57,7 +57,7 @@ export class ReservationsGateway {
   remove(@MessageBody() data: { id: string }) {
     return this.run(async () => {
       await this.reservations.remove(data?.id);
-      this.server.emit("reservation:deleted", { id: data.id });
+      this.server.to(STAFF_ROOM).emit("reservation:deleted", { id: data.id });
       return { ok: true, id: data.id };
     });
   }

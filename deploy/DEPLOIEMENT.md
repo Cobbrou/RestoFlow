@@ -111,6 +111,7 @@ Gardez au moins une copie hors du mini-PC : clé USB, ou `BACKUP_DIR` dans un do
 
 ```bash
 sudo systemctl stop restoflow
+rm -f /opt/restoflow/data/restoflow.db-wal /opt/restoflow/data/restoflow.db-shm   # journal WAL de l'ancienne base
 cp /mnt/usb/restoflow-backups/restoflow-AAAA-MM-JJ-HH-MM-SS.db /opt/restoflow/data/restoflow.db
 sudo systemctl start restoflow
 ```

@@ -57,6 +57,7 @@ export class ConfigService {
         accountCard: "512000",
         accountCash: "530000",
         accountOther: "580000",
+        accountTips: "468600",
       },
       modulesConfig: cfg.modulesConfig ? JSON.parse(cfg.modulesConfig) : {
         enableStockManagement: true,
@@ -140,23 +141,14 @@ export class ConfigService {
           : JSON.stringify(data.modulesConfig);
     }
 
-    const updated = await this.prisma.restaurantConfig.upsert({
+    await this.getConfig(); // crée la config (et une clé NF525 aléatoire) si absente
+    await this.prisma.restaurantConfig.update({
       where: { id: "default" },
-      create: {
-        id: "default",
-        ...updatePayload,
-      },
-      update: updatePayload,
+      data: updatePayload,
     });
 
-    return {
-      ...updated,
-      printers: JSON.parse(updated.printers || "[]"),
-      promoCodes: JSON.parse(updated.promoCodes || "[]"),
-      happyHourConfig: updated.happyHourConfig ? JSON.parse(updated.happyHourConfig) : null,
-      fecExportConfig: updated.fecExportConfig ? JSON.parse(updated.fecExportConfig) : null,
-      modulesConfig: updated.modulesConfig ? JSON.parse(updated.modulesConfig) : null,
-    };
+    // 🔒 Relu via getConfig : la clé de scellement NF525 n'est jamais renvoyée ni diffusée
+    return this.getConfig();
   }
 
   async updateModulesConfig(modules: any) {

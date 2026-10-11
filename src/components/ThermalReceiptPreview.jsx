@@ -175,12 +175,15 @@ export default function ThermalReceiptPreview({
 
       const socket = getSocket();
       if (socket && socket.connected) {
-        socket.emit(
+        // Sans ack (droits refusés via "exception", coupure) : on débloque le bouton au bout de 10 s
+        socket.timeout(10000).emit(
           "printer:send_raw",
           { ip: printer.ip, port: printer.port || 9100, buffer: bytes },
-          (res) => {
+          (err, res) => {
             setDirectPrinting(false);
-            if (res?.success) {
+            if (err) {
+              setDirectPrintStatus({ ok: false, msg: "Pas de réponse du serveur (droits ou connexion)" });
+            } else if (res?.success) {
               setDirectPrintStatus({
                 ok: true,
                 msg: `Envoyé à ${printer.name || printer.ip} (${res.bytesWritten || bytes.length} o) !`,

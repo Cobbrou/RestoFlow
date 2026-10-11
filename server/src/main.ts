@@ -24,8 +24,10 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
-  logger.log(`🍽️ RestoFlow NestJS Server running on http://localhost:${port}`);
+  // 🔒 Boucle locale par défaut : le LAN passe obligatoirement par Caddy (HTTPS)
+  const host = process.env.HOST || "127.0.0.1";
+  await app.listen(port, host);
+  logger.log(`🍽️ RestoFlow NestJS Server running on http://${host}:${port}`);
   await app.get(JournalService).log("SERVER_START", null, { version: process.env.npm_package_version || null });
 }
 

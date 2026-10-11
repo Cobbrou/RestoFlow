@@ -600,6 +600,7 @@ export class ClosingService {
       accountCard: "512000",
       accountCash: "530000",
       accountOther: "580000",
+      accountTips: "468600",
       ...cfg.fecExportConfig,
     };
 
@@ -690,6 +691,11 @@ export class ClosingService {
         const acc = rateAccounts(rate);
         if (cents(r.ht) !== 0) entries.push({ compte: acc.vente, lib: acc.lib, texte: `${isCreditNote ? "Avoir" : "Vente"} ${pieceRef} HT (${rate}%)`, debit: -cents(r.ht) });
         if (cents(r.vat) !== 0) entries.push({ compte: acc.tva, lib: `TVA collectée (${rate}%)`, texte: `TVA ${pieceRef} (${rate}%)`, debit: -cents(r.vat) });
+      }
+
+      // Pourboire encaissé avec le règlement : dû au personnel, hors CA
+      if (cents(ticket.tip) !== 0) {
+        entries.push({ compte: accounts.accountTips, lib: "Pourboires à reverser", texte: `Pourboire ${pieceRef}`, debit: -cents(ticket.tip) });
       }
 
       let entryDebit = 0;

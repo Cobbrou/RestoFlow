@@ -603,6 +603,7 @@ export class OrdersService {
     return {
       order: this.formatOrder(updated),
       calledCount: heldItems.length,
+      calledIds: heldItems.map((i) => i.id),
       rawOrder: order,
     };
   }
