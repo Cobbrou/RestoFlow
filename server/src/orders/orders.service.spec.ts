@@ -24,6 +24,30 @@ describe("OrdersService : article déjà envoyé en cuisine", () => {
   });
 });
 
+describe("OrdersService.cancelOffPremise", () => {
+  const make = (order: any) => {
+    const prisma: any = {
+      order: { findUnique: vi.fn().mockResolvedValue(order), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    };
+    return { prisma, service: new OrdersService(prisma) };
+  };
+  const base = { id: "o9", type: "takeaway", status: "open", pickupNumber: 4, paidTotal: 0, items: [] as any[] };
+
+  it("annule une commande à emporter ou comptoir dont rien n'est envoyé", async () => {
+    const { prisma, service } = make({ ...base, type: "counter", items: [{ id: "a", status: "draft" }] });
+    const res = await service.cancelOffPremise("o9");
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({ where: { id: "o9", status: "open" }, data: { status: "cancelled" } });
+    expect(res.label).toBe("Comptoir #4");
+  });
+
+  it("refuse une commande en salle, envoyée en cuisine, encaissée ou entamée", async () => {
+    await expect(make({ ...base, type: "dine_in" }).service.cancelOffPremise("o9")).rejects.toThrow("emporter ou comptoir");
+    await expect(make({ ...base, items: [{ status: "new" }] }).service.cancelOffPremise("o9")).rejects.toThrow("partis en cuisine");
+    await expect(make({ ...base, status: "closed" }).service.cancelOffPremise("o9")).rejects.toThrow("avoir");
+    await expect(make({ ...base, paidTotal: 5 }).service.cancelOffPremise("o9")).rejects.toThrow("en partie");
+  });
+});
+
 describe("OrdersService.setCovers", () => {
   it("refuse une valeur hors de 1 à 99 ou une commande encaissée", async () => {
     const prisma: any = {

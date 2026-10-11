@@ -39,7 +39,7 @@ export default function OrderTaking({
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
   onQty, onRemove, onVoid, onNote, onSetCovers,
-  onSend, onServe, onCheckout, onPartialCheckout, onBackToPlan, onToast,
+  onSend, onServe, onCheckout, onPartialCheckout, onCancelOrder, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
   onCallCourse,
   onChangeItemCourse,
@@ -387,6 +387,20 @@ export default function OrderTaking({
             <Receipt size={14} /> Partager / Encaisser la note
           </button>
         ) : null}
+
+        {/* Emporter / comptoir créé par erreur : annulable tant que rien n'est parti en cuisine ni encaissé */}
+        {!table && order && onCancelOrder && sentItems.length === 0 && !(order.paidTotal > 0) && (
+          <button
+            onClick={() => {
+              if (!window.confirm(`Annuler ${title} ?${items.length > 0 ? ` Les ${items.length} article(s) saisi(s) seront perdus.` : ""}`)) return;
+              checkedOutHereRef.current = true; // pas d'alerte « libérée sur un autre terminal »
+              onCancelOrder();
+            }}
+            className="rf-tap w-full py-2 rounded-xl font-semibold text-xs text-[#C1361B] bg-[#C1361B]/5 hover:bg-[#C1361B]/10"
+          >
+            Annuler cette commande
+          </button>
+        )}
       </div>
     </div>
   );
