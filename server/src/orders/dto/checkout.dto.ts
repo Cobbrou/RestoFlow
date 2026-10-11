@@ -27,4 +27,9 @@ export class CheckoutDto {
   @IsOptional()
   @IsString()
   operatorId?: string;
+
+  // Ticket par convive : [{ itemId, qty }] encaissés sur un ticket séparé (validés par le serveur)
+  @IsOptional()
+  @IsArray()
+  lines?: { itemId: string; qty: number }[];
 }

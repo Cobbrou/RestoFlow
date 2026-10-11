@@ -38,7 +38,7 @@ export default function OrderTaking({
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
   onQty, onRemove, onVoid, onNote, onSetCovers,
-  onSend, onServe, onCheckout, onBackToPlan, onToast,
+  onSend, onServe, onCheckout, onPartialCheckout, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
   onCallCourse,
   onChangeItemCourse,
@@ -417,6 +417,7 @@ export default function OrderTaking({
           table={table}
           config={config}
           onCancel={() => setPaying(false)}
+          onPartialCheckout={onPartialCheckout}
           onConfirm={(method, payments, meta) => {
             checkedOutHereRef.current = true;
             const r = onCheckout(method, payments, meta);

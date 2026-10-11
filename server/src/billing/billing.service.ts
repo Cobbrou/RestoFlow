@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { computeDiscountCents, computeVatBreakdown, toCents, toEuros } from "./pricing";
+import { computeDiscountCents, computeVatBreakdown, partialNetCents, toCents, toEuros } from "./pricing";
 import { GENESIS_TICKET, signTicket } from "./fiscal";
 import { isOffPremise, orderLabel } from "../orders/orders.service";
 
@@ -11,6 +11,7 @@ export interface CheckoutInput {
   payments?: any[];
   serverName?: string;
   tip?: number;
+  lines?: { itemId: string; qty: number }[]; // ticket par convive : lignes encaissées sur ce ticket
 }
 
 type TicketDraft = {
@@ -34,7 +35,12 @@ type TicketDraft = {
   reason: string | null;
 };
 
-const parseJson = (v: string | null, fallback: any = null) => (v ? JSON.parse(v) : fallback);
+// La remise est répartie sur les tickets de convive : elle ne change plus une fois la note entamée
+export function assertNotPartiallyPaid(order: { paidTotal?: number | null }) {
+  if ((order.paidTotal || 0) > 0) throw new BadRequestException("Note déjà en partie encaissée : action impossible");
+}
+
+const parseJson =(v: string | null, fallback: any = null) => (v ? JSON.parse(v) : fallback);
 
 /** Format d'un ticket envoyé aux clients (history:new_entry, sync:init) */
 export function toClientHistory(h: any) {
@@ -58,6 +64,7 @@ export class BillingService {
       include: { items: true },
     });
     if (!order) throw new NotFoundException("Commande introuvable");
+    assertNotPartiallyPaid(order);
 
     if (discount?.type !== "percent" && discount?.type !== "fixed") {
       throw new BadRequestException("Type de remise invalide");
@@ -97,6 +104,7 @@ export class BillingService {
       include: { items: true },
     });
     if (!order) throw new NotFoundException("Commande introuvable");
+    assertNotPartiallyPaid(order);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
@@ -244,11 +252,7 @@ export class BillingService {
     const completes = [...remaining].every(([key, qty]) => qty === (requested.get(key) || 0));
     const alreadyCents = previous.reduce((s, cn) => s - toCents(cn.total), 0);
     // ponytail: si les arrondis des avoirs précédents ont trop remboursé, l'avoir final est plafonné au brut (écart ≤ 1 ct)
-    const targetNet = completes
-      ? origTotalCents - alreadyCents
-      : origSubCents > 0
-        ? Math.round((grossCents * origTotalCents) / origSubCents)
-        : 0;
+    const targetNet = partialNetCents({ grossCents, fullSubCents: origSubCents, fullTotalCents: origTotalCents, alreadyCents, completes });
     const discountCents = Math.max(0, grossCents - targetNet);
     const { subtotalCents, totalCents, ...vat } = computeVatBreakdown(
       refundItems,
@@ -338,6 +342,11 @@ export class BillingService {
     });
     if (!order) throw new NotFoundException("Commande introuvable");
 
+    // Un ticket par convive : encaissement d'une partie des lignes ; une note déjà entamée se solde par la même voie
+    if (Array.isArray(data.lines) || order.items.some((i) => i.paidQty > 0)) {
+      return this.partialCheckoutInTransaction(tx, order, data);
+    }
+
     // 🔒 Garde anti double encaissement (double clic, rejeu hors-ligne, deux terminaux)
     const claimed = await tx.order.updateMany({
       where: { id: order.id, status: "open" },
@@ -365,33 +374,7 @@ export class BillingService {
     const tipValue = Number(data.tip ?? 0);
     if (!Number.isFinite(tipValue) || tipValue < 0) throw new BadRequestException("Pourboire invalide");
     const tipCents = toCents(tipValue);
-
-    const paymentList =
-      data.payments && data.payments.length > 0
-        ? data.payments
-        : [
-            {
-              id: `pay_${Date.now()}`,
-              label: "Paiement unique",
-              amount: toEuros(totalCents + tipCents),
-              method: data.paymentMethod || "carte",
-              paidAt: Date.now(),
-            },
-          ];
-
-    const paidCents = paymentList.reduce((sum: number, p: any) => {
-      const amount = Number(p?.amount);
-      if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("Montant de paiement invalide");
-      return sum + toCents(amount);
-    }, 0);
-    if (paidCents !== totalCents + tipCents) {
-      throw new BadRequestException(
-        `Paiements (${toEuros(paidCents).toFixed(2)} €) différents du total (${toEuros(totalCents + tipCents).toFixed(2)} €)`
-      );
-    }
-
-    const finalMethod =
-      data.paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
+    const { paymentList, method: finalMethod } = this.checkPayments(data, totalCents, tipCents);
 
     const historyRecord = await this.appendTicket(tx, {
       orderId: order.id,
@@ -414,9 +397,19 @@ export class BillingService {
       reason: null,
     });
 
-    // Réinitialisation de la table (aucune pour une commande hors salle)
-    const updatedTable = order.tableId
-      ? await tx.table.update({
+    return {
+      orderId: order.id,
+      history: toClientHistory(historyRecord),
+      table: await this.resetTable(tx, order),
+      soldDirectIds, // à déstocker après validation (vente comptoir)
+      closed: true,
+    };
+  }
+
+  /** Réinitialisation de la table après encaissement complet (aucune pour une commande hors salle) */
+  private resetTable(tx: Prisma.TransactionClient, order: { tableId: string | null }) {
+    return order.tableId
+      ? tx.table.update({
           where: { id: order.tableId },
           data: {
             alert: false,
@@ -427,13 +420,120 @@ export class BillingService {
             reservationNote: null,
           },
         })
-      : null;
+      : Promise.resolve(null);
+  }
+
+  /** Règlements fournis par le client : doivent égaler exactement le montant dû (pourboire compris) */
+  private checkPayments(data: CheckoutInput, dueCents: number, tipCents: number) {
+    const paymentList =
+      data.payments && data.payments.length > 0
+        ? data.payments
+        : [{ id: `pay_${Date.now()}`, label: "Paiement unique", amount: toEuros(dueCents + tipCents), method: data.paymentMethod || "carte", paidAt: Date.now() }];
+    const paidCents = paymentList.reduce((sum: number, p: any) => {
+      const amount = Number(p?.amount);
+      if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("Montant de paiement invalide");
+      return sum + toCents(amount);
+    }, 0);
+    if (paidCents !== dueCents + tipCents) {
+      throw new BadRequestException(
+        `Paiements (${toEuros(paidCents).toFixed(2)} €) différents du total (${toEuros(dueCents + tipCents).toFixed(2)} €)`
+      );
+    }
+    const method = data.paymentMethod || (paymentList.length > 1 ? "partage" : paymentList[0]?.method || "carte");
+    return { paymentList, method };
+  }
+
+  /**
+   * Ticket par convive : encaisse `lines` [{ itemId, qty }] (ou tout le reste) sur un ticket séparé.
+   * Remise d'origine au prorata ; le ticket qui solde la note prend exactement le reste et ferme la commande.
+   */
+  private async partialCheckoutInTransaction(tx: Prisma.TransactionClient, order: any, data: CheckoutInput) {
+    if (order.status !== "open") throw new ConflictException("Cette commande a déjà été encaissée");
+    const sentItems = order.items.filter((i: any) => i.status !== "draft");
+    const remaining = new Map<string, number>(sentItems.map((i: any) => [i.id, i.qty - (i.paidQty || 0)]));
+
+    const requested = new Map<string, number>();
+    if (Array.isArray(data.lines)) {
+      for (const l of data.lines) {
+        const qty = Number(l?.qty);
+        if (!remaining.has(l?.itemId)) throw new BadRequestException("Article inconnu ou non envoyé");
+        if (!Number.isInteger(qty) || qty < 1) throw new BadRequestException("Quantité à encaisser invalide");
+        requested.set(l.itemId, (requested.get(l.itemId) || 0) + qty);
+      }
+    } else {
+      for (const [id, qty] of remaining) if (qty > 0) requested.set(id, qty);
+    }
+    if (requested.size === 0) throw new BadRequestException("Aucun article à encaisser");
+
+    // 🔒 Incrément conditionnel : deux terminaux ne peuvent pas encaisser deux fois la même part
+    for (const [id, qty] of requested) {
+      const item = sentItems.find((i: any) => i.id === id);
+      const res = await tx.orderItem.updateMany({
+        where: { id, paidQty: { lte: item.qty - qty } },
+        data: { paidQty: { increment: qty } },
+      });
+      if (res.count !== 1) throw new ConflictException(`${item.name} : quantité déjà encaissée`);
+    }
+
+    const orderDiscount = order.discount ? JSON.parse(order.discount) : null;
+    const full = computeVatBreakdown(sentItems, orderDiscount);
+    const ticketItems = sentItems
+      .filter((i: any) => requested.has(i.id))
+      .map((i: any) => ({ ...i, qty: requested.get(i.id), paidQty: undefined }));
+    const grossCents = ticketItems.reduce((s: number, i: any) => s + toCents(i.price) * i.qty, 0);
+    const completes = [...remaining].every(([id, qty]) => qty === (requested.get(id) || 0));
+    const previousParts = await tx.orderHistory.count({ where: { orderId: { startsWith: `${order.id}:p` } } });
+    const netCents = partialNetCents({
+      grossCents,
+      fullSubCents: full.subtotalCents,
+      fullTotalCents: full.totalCents,
+      alreadyCents: toCents(order.paidTotal || 0),
+      completes,
+    });
+    const discountCents = Math.max(0, grossCents - netCents);
+    const { subtotalCents, totalCents, discountCents: _d, ...vatDetails } = computeVatBreakdown(
+      ticketItems,
+      discountCents > 0 ? { type: "fixed", value: toEuros(discountCents) } : null
+    );
+
+    const tipValue = Number(data.tip ?? 0);
+    if (!Number.isFinite(tipValue) || tipValue < 0) throw new BadRequestException("Pourboire invalide");
+    const tipCents = toCents(tipValue);
+    const { paymentList, method } = this.checkPayments(data, totalCents, tipCents);
+
+    const historyRecord = await this.appendTicket(tx, {
+      orderId: `${order.id}:p${previousParts + 1}`,
+      tableNumber: order.table?.number ?? null,
+      orderType: order.type,
+      channel: order.channel,
+      orderLabel: isOffPremise(order) ? orderLabel(order) : null,
+      server: data.serverName || order.server,
+      items: JSON.stringify(ticketItems),
+      subtotal: toEuros(subtotalCents),
+      total: toEuros(totalCents),
+      discount: discountCents > 0 ? JSON.stringify({ type: "fixed", value: toEuros(discountCents), amount: toEuros(discountCents) }) : null,
+      vatDetails: JSON.stringify(vatDetails),
+      paymentMethod: method,
+      payments: JSON.stringify(paymentList),
+      tip: toEuros(tipCents),
+      // 1 couvert par ticket de convive ; le dernier ticket prend le reste des couverts saisis
+      covers: order.covers == null ? null : completes ? Math.max(0, order.covers - previousParts) : 1,
+      type: "SALE",
+      refTicketNumber: null,
+      reason: null,
+    });
+
+    await tx.order.update({
+      where: { id: order.id },
+      data: { paidTotal: toEuros(toCents(order.paidTotal || 0) + totalCents), ...(completes && { status: "closed" }) },
+    });
 
     return {
       orderId: order.id,
       history: toClientHistory(historyRecord),
-      table: updatedTable,
-      soldDirectIds, // à déstocker après validation (vente comptoir)
+      table: completes ? await this.resetTable(tx, order) : null,
+      soldDirectIds: [] as string[],
+      closed: completes,
     };
   }
 }

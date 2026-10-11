@@ -5,6 +5,7 @@ describe("ticketCovers", () => {
   it("prend les couverts saisis, 1 par défaut, 0 pour un avoir", () => {
     expect(ticketCovers({ type: "SALE", covers: 4 })).toBe(4);
     expect(ticketCovers({ type: "SALE", covers: null })).toBe(1);
+    expect(ticketCovers({ type: "SALE", covers: 0 })).toBe(0); // dernier ticket de convive, couverts déjà comptés
     expect(ticketCovers({ type: "CREDIT_NOTE", covers: 4 })).toBe(0);
   });
 });

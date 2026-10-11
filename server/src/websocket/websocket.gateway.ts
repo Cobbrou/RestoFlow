@@ -696,7 +696,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         });
       }
 
-      this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
+      // Ticket de convive : la note reste ouverte avec les quantités restant à encaisser
+      if (res.closed) this.server.to(STAFF_ROOM).emit("order:closed", { orderId: res.orderId });
+      else this.server.to(STAFF_ROOM).emit("order:updated", await this.ordersService.findById(res.orderId));
       if (res.table) this.server.to(STAFF_ROOM).emit("table:updated", res.table);
       this.server.to(STAFF_ROOM).emit("history:new_entry", res.history);
       // Vente comptoir : déstockage une fois la vente validée (un encaissement refusé ne déstocke rien)

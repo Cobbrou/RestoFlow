@@ -92,6 +92,9 @@ export class TablesService {
     if (!sourceOrder || !targetOrder) {
       throw new BadRequestException("Les deux tables doivent avoir une commande ouverte pour être fusionnées");
     }
+    if ((sourceOrder.paidTotal || 0) > 0 || (targetOrder.paidTotal || 0) > 0) {
+      throw new BadRequestException("Une des notes est déjà en partie encaissée : fusion impossible");
+    }
 
     await this.prisma.orderItem.updateMany({
       where: { orderId: sourceOrder.id },

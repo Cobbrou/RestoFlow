@@ -148,6 +148,7 @@ model Order {
   pickupAt      DateTime? // Heure de retrait / livraison souhaitée
   pickupNumber  Int?      // Numéro d'appel du jour, attribué par le serveur
   covers        Int?      // Couverts saisis à l'ouverture de la table (null : non renseigné)
+  paidTotal     Float     @default(0) // Déjà encaissé par des tickets partiels (un ticket par convive)
   externalRef   String?   // Identifiant de la commande chez le canal externe (plateforme, site)
   items     OrderItem[]
 
@@ -170,6 +171,7 @@ model OrderItem {
   courseStatus String  @default("direct") // "direct" | "held" | "called"
   station     String   @default("kitchen") // "kitchen" | "bar"
   vatRate     Float    @default(10) // Taux figé à l'ajout, copié du produit (NF525 : ventilation TVA)
+  paidQty     Int      @default(0) // Quantité déjà encaissée sur un ticket partiel (partage par convive)
   vatSplit    String?  // Menu à plusieurs taux : JSON [{ rate, weight }], poids = prix des composants en centimes
   options     String?  // Libellé figé des options choisies, ex. "Saignant · Bacon (+2.00€)" (supplément inclus dans price)
 }

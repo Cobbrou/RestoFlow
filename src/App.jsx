@@ -166,7 +166,7 @@ export default function App() {
 
   const {
     getActiveOrder, ensureOrderForTable, createOffPremiseOrder, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem, voidItem,
-    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder, setOrderCovers,
+    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder, partialCheckout, setOrderCovers,
     toggleAlert, startPrep, markReady, handleCallCourse, handleChangeItemCourse, handleTransferTable,
     handleMergeTable, handleCreateReservation, handleUpdateReservationStatus, handleAssignReservationTable,
     handleDeleteReservation,
@@ -425,6 +425,7 @@ export default function App() {
             onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}
             onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
             onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
+            onPartialCheckout={(lines, payments, amount) => partialCheckout(activeOrder.id, lines, payments, amount)}
             onBackToPlan={() => setServerView("plan")}
             onCallCourse={(courseOrOrderId, maybeCourse) => {
               const course = maybeCourse || courseOrOrderId;

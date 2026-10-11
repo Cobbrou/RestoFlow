@@ -134,7 +134,7 @@ export default function ClosingManager({
       generatedAt: Date.now(),
       ticketsCount: unclosedTickets.length,
       // Même règle que ticketCovers (server/src/closing/closing.service.ts)
-      coversCount: unclosedTickets.reduce((s, t) => s + (t.type === "CREDIT_NOTE" ? 0 : t.covers > 0 ? t.covers : 1), 0),
+      coversCount: unclosedTickets.reduce((s, t) => s + (t.type === "CREDIT_NOTE" ? 0 : t.covers >= 0 && t.covers != null ? t.covers : 1), 0),
       totalGross: Math.round(totalGross * 100) / 100,
       totalDiscounts: Math.round(totalDiscounts * 100) / 100,
       totalNet: Math.round(totalNet * 100) / 100,

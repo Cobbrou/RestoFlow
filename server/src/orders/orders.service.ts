@@ -68,6 +68,7 @@ export class OrdersService {
       pickupAt: order.pickupAt ? new Date(order.pickupAt).getTime() : null,
       pickupNumber: order.pickupNumber ?? null,
       covers: order.covers ?? null,
+      paidTotal: order.paidTotal || 0,
       externalRef: order.externalRef ?? null,
       table: order.table ? {
         id: order.table.id,
@@ -82,6 +83,7 @@ export class OrdersService {
         name: it.name,
         price: it.price,
         qty: it.qty,
+        paidQty: it.paidQty || 0,
         notes: it.notes || "",
         status: it.status,
         isMenu: it.isMenu,
@@ -462,6 +464,10 @@ export class OrdersService {
     const voidQty = qty === undefined || qty === null ? item.qty : Number(qty);
     if (!Number.isInteger(voidQty) || voidQty < 1 || voidQty > item.qty) {
       throw new BadRequestException("Quantité à annuler invalide");
+    }
+    // Une part déjà encaissée sur un ticket de convive ne s'annule plus que par un avoir
+    if (voidQty > item.qty - (item.paidQty || 0)) {
+      throw new BadRequestException("Quantité déjà encaissée sur un ticket : émettez un avoir");
     }
 
     if (voidQty === item.qty) {

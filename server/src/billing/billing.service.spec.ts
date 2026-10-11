@@ -199,6 +199,59 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
     });
   });
 
+  describe("processCheckout (un ticket par convive)", () => {
+    // Note de 26 € brut, remise 10 % → 23,40 € : 2 plats à 10 € + vin à 6 €, 3 couverts
+    let order: any;
+    beforeEach(() => {
+      order = {
+        id: "o5", type: "dine_in", status: "open", tableId: "tb1", table: { number: 5 }, covers: 3, paidTotal: 0,
+        discount: JSON.stringify({ type: "percent", value: 10 }),
+        items: [
+          { id: "p", name: "Plat", price: 10, qty: 2, paidQty: 0, status: "served", vatRate: 10 },
+          { id: "v", name: "Vin", price: 6, qty: 1, paidQty: 0, status: "served", vatRate: 20 },
+        ],
+      };
+      mockPrisma.order.findUnique.mockImplementation(() => Promise.resolve(order));
+      mockPrisma.order.update = vi.fn().mockImplementation(({ data }) => {
+        order = { ...order, ...data };
+        return Promise.resolve(order);
+      });
+      mockPrisma.orderItem = {
+        updateMany: vi.fn().mockImplementation(({ where, data }) => {
+          const it = order.items.find((i: any) => i.id === where.id);
+          if (it.paidQty > where.paidQty.lte) return Promise.resolve({ count: 0 });
+          it.paidQty += data.paidQty.increment;
+          return Promise.resolve({ count: 1 });
+        }),
+      };
+      mockPrisma.orderHistory.count = vi.fn().mockResolvedValue(0);
+    });
+
+    it("émet un ticket par convive, remise au prorata, le dernier solde au centime et libère la table", async () => {
+      const a = await billingService.processCheckout({ orderId: "o5", lines: [{ itemId: "p", qty: 1 }], payments: [{ amount: 9, method: "carte" }] });
+      expect(a.history.total).toBe(9);
+      expect(a.history.covers).toBe(1);
+      expect(a.closed).toBe(false);
+      expect(mockPrisma.order.updateMany).not.toHaveBeenCalled(); // la note reste ouverte
+
+      mockPrisma.orderHistory.count.mockResolvedValue(1);
+      const b = await billingService.processCheckout({ orderId: "o5", payments: [{ amount: 14.4, method: "especes" }] });
+      expect(b.history.total).toBe(14.4); // 23,40 − 9,00
+      expect(b.history.covers).toBe(2);
+      expect(b.closed).toBe(true);
+      expect(b.table).toBeTruthy();
+      expect(order.status).toBe("closed");
+    });
+
+    it("refuse d'encaisser deux fois la même part et une remise après un premier ticket", async () => {
+      await billingService.processCheckout({ orderId: "o5", lines: [{ itemId: "v", qty: 1 }], payments: [{ amount: 5.4, method: "carte" }] });
+      await expect(
+        billingService.processCheckout({ orderId: "o5", lines: [{ itemId: "v", qty: 1 }], payments: [{ amount: 5.4, method: "carte" }] })
+      ).rejects.toThrow("déjà encaissée");
+      await expect(billingService.applyDiscount("o5", { type: "percent", value: 20 })).rejects.toThrow("en partie encaissée");
+    });
+  });
+
   describe("refundTicket (avoir partiel)", () => {
     // Ticket de 26 € brut, remise 10 % → 23,40 € : plat 20 € (10 %) + vin 6 € (20 %)
     const orig = {

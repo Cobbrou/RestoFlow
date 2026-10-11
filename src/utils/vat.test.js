@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { calculateVatBreakdown, menuVatSplit } from "./vat.js";
+import { calculateVatBreakdown, menuVatSplit, partialNetCents } from "./vat.js";
+
+describe("partialNetCents (ticket par convive, copie du serveur)", () => {
+  it("remise au prorata, le dernier ticket solde au centime", () => {
+    const base = { fullSubCents: 2600, fullTotalCents: 2340 };
+    expect(partialNetCents({ ...base, grossCents: 1000, alreadyCents: 0, completes: false })).toBe(900);
+    expect(partialNetCents({ ...base, grossCents: 1600, alreadyCents: 900, completes: true })).toBe(1440);
+  });
+});
 
 describe("TVA & Fiscalité - calculateVatBreakdown", () => {
   it("ventile un menu mixte comme le serveur (copie de pricing.ts)", () => {

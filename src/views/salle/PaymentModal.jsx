@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { money, orderLabel } from "../../utils/index.js";
 import TpeModal from "../../components/TpeModal.jsx";
-import { calculateVatBreakdown } from "../../utils/vat.js";
+import { calculateVatBreakdown, partialNetCents } from "../../utils/vat.js";
 import { useModules } from "../../hooks/useModules.js";
 
 export const PAYMENT_METHODS = [
@@ -38,24 +38,25 @@ export const PAYMENT_METHODS = [
  *  - Liaison TPE Bancaire
  *  - Pourboires & modularité à la carte
  */
-export default function PaymentModal({ order, table, config = {}, onCancel, onConfirm }) {
+export default function PaymentModal({ order, table, config = {}, onCancel, onConfirm, onPartialCheckout }) {
   const { hasAdvancedSplits, hasTips } = useModules();
 
-  // Articles facturables (hors brouillons)
-  const items = useMemo(() => (order.items || []).filter((i) => i.status !== "draft"), [order]);
+  // Articles facturables (hors brouillons) : note complète, puis reste à encaisser (tickets de convive déduits)
+  const allItems = useMemo(() => (order.items || []).filter((i) => i.status !== "draft"), [order]);
+  const items = useMemo(
+    () => allItems.map((i) => ({ ...i, qty: i.qty - (i.paidQty || 0) })).filter((i) => i.qty > 0),
+    [allItems]
+  );
   const subtotal = useMemo(() => items.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0), [items]);
 
-  // Remise appliquée à la commande
+  // Remise appliquée à la commande, calculée sur la note complète (même règle que le serveur)
   const discount = order.discount;
-  const discountAmount = useMemo(() => {
-    // Même règle que le serveur : recalcul depuis type/valeur (le montant stocké peut dater d'avant un ajout d'article)
-    if (!discount) return 0;
-    if (discount.type === "percent") return Math.round(subtotal * (Math.min(100, discount.value) / 100) * 100) / 100;
-    return Math.min(subtotal, discount.value || 0);
-  }, [discount, subtotal]);
+  const full = useMemo(() => calculateVatBreakdown(allItems, discount), [allItems, discount]);
+  const paidTotal = order.paidTotal || 0;
 
-  // Montant total net
-  const total = useMemo(() => Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100), [subtotal, discountAmount]);
+  // Reste à encaisser : note complète moins les tickets de convive déjà émis
+  const total = useMemo(() => Math.max(0, Math.round((full.totalTTC - paidTotal) * 100) / 100), [full, paidTotal]);
+  const discountAmount = Math.max(0, Math.round((subtotal - total) * 100) / 100);
 
   // Pourboire (Tip)
   const [tip, setTip] = useState(0);
@@ -67,7 +68,10 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   }, [total, tip, hasTips]);
 
   // Ventilation TVA
-  const vatDetails = useMemo(() => calculateVatBreakdown(items, discount), [items, discount]);
+  const vatDetails = useMemo(
+    () => calculateVatBreakdown(items, discountAmount > 0 ? { type: "fixed", value: discountAmount } : null),
+    [items, discountAmount]
+  );
 
   // Session TPE active : { amount, label, callback }
   const [tpeSession, setTpeSession] = useState(null);
@@ -310,9 +314,52 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
     });
   };
 
+  // ── Un ticket par convive ──────────────────────────────────
+  // Ses articles attribués (hors parts partagées, réglées sur le dernier ticket) forment son ticket.
+  const [paidGuests, setPaidGuests] = useState([]);
+  const cents = (n) => Math.round((Number(n) || 0) * 100);
+  const guestTicket = (guestId) => {
+    const lines = items.flatMap((it) => {
+      const qty = itemAllocations[it.id]?.[guestId] || 0;
+      return qty > 0 ? [{ itemId: it.id, qty, gross: cents(it.price) * qty }] : [];
+    });
+    const completes = items.every((it) => (itemAllocations[it.id]?.[guestId] || 0) === it.qty);
+    const net = partialNetCents({
+      grossCents: lines.reduce((s, l) => s + l.gross, 0),
+      fullSubCents: cents(full.subtotal),
+      fullTotalCents: cents(full.totalTTC),
+      alreadyCents: cents(paidTotal),
+      completes,
+    });
+    return { lines: lines.map(({ itemId, qty }) => ({ itemId, qty })), amount: net / 100, completes };
+  };
+  const activeHasShared = items.some((it) => (itemAllocations[it.id]?.shared || 0) > 0);
+
   // Régler le sous-total du convive actif
   const handlePayGuest = (guestId, method) => {
     const guest = guests.find((g) => g.id === guestId);
+    if (onPartialCheckout) {
+      const ticket = guestTicket(guestId);
+      if (ticket.lines.length === 0) return;
+      const payment = {
+        id: `pay_${guestId}_${Date.now()}`,
+        label: guest ? guest.name : "Convive",
+        amount: ticket.amount,
+        method,
+        paidAt: Date.now(),
+      };
+      // Le convive règle tout le reste : c'est le dernier ticket, la note se ferme normalement
+      if (ticket.completes) {
+        onConfirm(method, [payment], { subtotal, total: ticket.amount, rawTotal: ticket.amount, tip: 0, discount, vatDetails, tpeData: null });
+        return;
+      }
+      onPartialCheckout(ticket.lines, [payment], ticket.amount);
+      setPaidGuests((prev) => [...prev, guestId]);
+      setItemAllocations((prev) =>
+        Object.fromEntries(Object.entries(prev).map(([itemId, alloc]) => [itemId, { ...alloc, [guestId]: 0 }]))
+      );
+      return;
+    }
     const amount = guestTotals[guestId] || 0;
     if (amount <= 0) return;
 
@@ -859,7 +906,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                 {guests.map((g) => {
                   const active = activeGuestId === g.id;
                   const gTotal = guestTotals[g.id] || 0;
-                  const isPaid = payments.some((p) => p.label === g.name);
+                  const isPaid = paidGuests.includes(g.id) || payments.some((p) => p.label === g.name);
 
                   return (
                     <button
@@ -1022,19 +1069,39 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                     ))}
                   </div>
 
-                  <button
-                    disabled={(guestTotals[activeGuestId] || 0) <= 0}
-                    onClick={() => handlePayGuest(activeGuestId, itemMethod)}
-                    className="rf-tap px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs disabled:opacity-40 flex items-center gap-1.5"
-                    style={{ background: "#C1440E" }}
-                  >
-                    <span>
-                      Encaisser {guests.find((g) => g.id === activeGuestId)?.name} (
-                      {money(guestTotals[activeGuestId] || 0)})
-                    </span>
-                    <ArrowRight size={13} />
-                  </button>
+                  {onPartialCheckout ? (
+                    <button
+                      disabled={guestTicket(activeGuestId).lines.length === 0}
+                      onClick={() => handlePayGuest(activeGuestId, itemMethod)}
+                      className="rf-tap px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs disabled:opacity-40 flex items-center gap-1.5"
+                      style={{ background: "#C1440E" }}
+                    >
+                      <span>
+                        Ticket {guests.find((g) => g.id === activeGuestId)?.name} ({money(guestTicket(activeGuestId).amount)})
+                      </span>
+                      <ArrowRight size={13} />
+                    </button>
+                  ) : (
+                    <button
+                      disabled={(guestTotals[activeGuestId] || 0) <= 0}
+                      onClick={() => handlePayGuest(activeGuestId, itemMethod)}
+                      className="rf-tap px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs disabled:opacity-40 flex items-center gap-1.5"
+                      style={{ background: "#C1440E" }}
+                    >
+                      <span>
+                        Encaisser {guests.find((g) => g.id === activeGuestId)?.name} (
+                        {money(guestTotals[activeGuestId] || 0)})
+                      </span>
+                      <ArrowRight size={13} />
+                    </button>
+                  )}
                 </div>
+                {onPartialCheckout && (
+                  <p className="text-[11px] text-[#8A8378]">
+                    Chaque convive reçoit son propre ticket.
+                    {activeHasShared && " Les articles partagés et non attribués se règlent ensuite sur le dernier ticket (mode « Plein » ou « Égal »)."}
+                  </p>
+                )}
               </div>
             </div>
           )}
