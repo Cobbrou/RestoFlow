@@ -65,6 +65,8 @@ export class TablesService {
   }
 
   async mergeTables(sourceTableId: string, targetTableId: string) {
+    // Même table : la commande serait close sans ticket (vente perdue)
+    if (sourceTableId === targetTableId) throw new BadRequestException("Impossible de fusionner une table avec elle-même");
     const sourceTable = await this.prisma.table.findUnique({ where: { id: sourceTableId } });
     const targetTable = await this.prisma.table.findUnique({ where: { id: targetTableId } });
 
