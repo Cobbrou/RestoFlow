@@ -35,6 +35,38 @@ describe("StockService.recordMovement", () => {
   });
 });
 
+describe("StockService.applyInventory", () => {
+  const make = () => {
+    const stocks: Record<string, number> = { a: 4, b: 2.5 };
+    const prisma: any = {
+      ingredient: {
+        findMany: vi.fn(async ({ where }) => where.id.in.filter((id: string) => id in stocks).map((id: string) => ({ id }))),
+        findUnique: vi.fn(async ({ where }) => ({ currentStock: stocks[where.id] })),
+      },
+    };
+    const service = new StockService(prisma);
+    const record = vi.spyOn(service, "recordMovement").mockImplementation(async (m: any) => {
+      stocks[m.ingredientId] += m.quantity;
+      return { affectedProducts: [] } as any;
+    });
+    return { service, record };
+  };
+
+  it("trace l'écart compté en ADJUSTMENT et ignore les lignes sans écart (rejeu sans effet)", async () => {
+    const { service, record } = make();
+    const counts = [{ ingredientId: "a", counted: 3 }, { ingredientId: "b", counted: 2.5 }];
+    expect((await service.applyInventory(counts, "s1")).adjusted).toBe(1);
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ ingredientId: "a", type: "ADJUSTMENT", quantity: -1, staffId: "s1" }));
+    expect((await service.applyInventory(counts, "s1")).adjusted).toBe(0);
+  });
+
+  it("refuse une quantité négative ou un ingrédient inconnu", async () => {
+    const { service } = make();
+    await expect(service.applyInventory([{ ingredientId: "a", counted: -1 }])).rejects.toThrow(/invalide/);
+    await expect(service.applyInventory([{ ingredientId: "zz", counted: 1 }])).rejects.toThrow(/inconnu/);
+  });
+});
+
 describe("numOr", () => {
   it("garde 0 (seuil d'alerte), défaut seulement si vide ou invalide", () => {
     expect(numOr(0, 5)).toBe(0);

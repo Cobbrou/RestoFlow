@@ -227,6 +227,33 @@ export class StockService {
     };
   }
 
+  /**
+   * Inventaire physique : chaque quantité comptée devient le stock, l'écart est tracé en ADJUSTMENT.
+   * Rejouable : un comptage déjà appliqué ne produit plus d'écart.
+   * ponytail: un mouvement par ligne (rupture en cascade de recordMovement réutilisée), pas une transaction unique
+   */
+  async applyInventory(counts: { ingredientId: string; counted: number }[], staffId?: string) {
+    if (!Array.isArray(counts) || counts.length === 0) throw new BadRequestException("Inventaire vide");
+    for (const c of counts) {
+      if (!Number.isFinite(Number(c?.counted)) || Number(c.counted) < 0) throw new BadRequestException("Quantité comptée invalide");
+    }
+    const ids = counts.map((c) => c.ingredientId);
+    const known = await this.prisma.ingredient.findMany({ where: { id: { in: ids }, archived: false }, select: { id: true } });
+    if (known.length !== new Set(ids).size) throw new NotFoundException("Ingrédient inconnu ou archivé dans l'inventaire");
+
+    const affectedProducts: string[] = [];
+    let adjusted = 0;
+    for (const c of counts) {
+      const ing = await this.prisma.ingredient.findUnique({ where: { id: c.ingredientId }, select: { currentStock: true } });
+      const delta = Math.round((Number(c.counted) - (ing?.currentStock ?? 0)) * 1000) / 1000;
+      if (delta === 0) continue;
+      const res = await this.recordMovement({ ingredientId: c.ingredientId, type: "ADJUSTMENT", quantity: delta, staffId, reason: "Inventaire physique" });
+      affectedProducts.push(...res.affectedProducts);
+      adjusted++;
+    }
+    return { adjusted, affectedProducts };
+  }
+
   async getMovements(limit = 100) {
     const list = await this.prisma.stockMovement.findMany({
       take: limit,

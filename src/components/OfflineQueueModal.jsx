@@ -22,6 +22,7 @@ const ACTION_LABELS = {
   "order:checkout": "Encaissement",
   "order:set_covers": "Nombre de couverts",
   "order:request_bill": "Addition demandée",
+  "stock:inventory": "Inventaire physique",
   "order:cancel_offpremise": "Annulation de commande",
   "tables:toggle_alert": "Alerte de table",
   "reservation:create": "Nouvelle réservation",

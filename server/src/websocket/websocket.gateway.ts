@@ -833,6 +833,25 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @RequirePermissions("gestion.stocks")
+  @SubscribeMessage("stock:inventory")
+  async handleInventory(@ConnectedSocket() client: Socket, @MessageBody() data: { counts: { ingredientId: string; counted: number }[] }) {
+    try {
+      const res = await this.stockService.applyInventory(data?.counts, client.data.user.staffId);
+      await this.journal.log("STOCK_INVENTORY", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+        lines: data.counts.length,
+        adjusted: res.adjusted,
+      });
+      await this.broadcastStock();
+      if (res.affectedProducts.length > 0) {
+        this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
+      }
+      return { ok: true, adjusted: res.adjusted };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:create_ingredient")
   async handleCreateIngredient(@MessageBody() data: any) {
     try {
