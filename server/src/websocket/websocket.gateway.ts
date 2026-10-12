@@ -302,9 +302,18 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("salle.order")
   @SubscribeMessage("order:add_item")
-  async handleAddItem(@MessageBody() data: any) {
+  async handleAddItem(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
       const order = await this.ordersService.addItem(data);
+      // Le tarif (happy hour) suit l'heure de saisie fournie par la tablette : un fort décalage est tracé
+      const delayMin = Math.round((Date.now() - Number(data?.addedAt)) / 60000);
+      if (delayMin > 5) {
+        await this.journal.log("ITEM_BACKDATED", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+          orderId: order?.id,
+          productId: data?.product?.id,
+          delayMin,
+        });
+      }
       this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
@@ -705,7 +714,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         .join("\n");
       const rawText = `${ESCPOS_INIT}\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
         historyRecord.items
-          .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
+          .map((i: any) => `${i.qty}x ${String(i.name).slice(0, 20).padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
           .join("\n") +
         (discount > 0.004 ? `\nRemise: -${eur(discount)}` : "") +
         `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\x1b\x61\x00` +
