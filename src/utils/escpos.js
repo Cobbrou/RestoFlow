@@ -7,7 +7,7 @@
  *  - Reçu bancaire TPE (carte bancaire)
  */
 
-import { money, isOffPremise, orderLabel, formatPickup } from "./index.js";
+import { money, isOffPremise, orderLabel, formatPickup, PAYMENT_LABELS, paymentRows } from "./index.js";
 import { calculateVatBreakdown } from "./vat.js";
 
 // Constantes ESC/POS standards
@@ -142,7 +142,7 @@ export function generateCustomerReceiptText(receipt = {}, config = {}, width = 4
     { label: receipt.paidAt ? "Règlement" : "À régler", amount: total, method: receipt.paymentMethod || "carte" },
   ];
   for (const p of payments) {
-    const methodStr = p.method === "carte" ? "Carte Bancaire" : p.method === "especes" ? "Espèces" : p.method === "autre" ? "Autre" : (p.method || "En attente");
+    const methodStr = PAYMENT_LABELS[p.method] || p.method || "En attente";
     lines.push(formatRow(`• ${p.label || "Part"} (${methodStr})`, money(p.amount != null ? p.amount : total), width));
   }
 
@@ -341,11 +341,9 @@ export function generateXReportText(xData = {}, config = {}, width = 42) {
   // Règlements
   lines.push(formatSeparator("-", width));
   lines.push(formatCenter("MODES D'ENCAISSEMENT", width));
-  const pb = xData.paymentsBreakdown || {};
-  lines.push(formatRow("• Carte Bancaire :", money(pb.carte || 0), width));
-  lines.push(formatRow("• Espèces :", money(pb.especes || 0), width));
-  lines.push(formatRow("• Autre règlement :", money(pb.autre || 0), width));
-  if (pb.partage) lines.push(formatRow("• Paiements partagés :", money(pb.partage || 0), width));
+  for (const [m, amount] of paymentRows(xData.paymentsBreakdown)) {
+    lines.push(formatRow(`• ${PAYMENT_LABELS[m] || m} :`, money(amount), width));
+  }
 
   // Ventilation TVA
   lines.push(formatSeparator("-", width));
@@ -416,9 +414,9 @@ export function generateZReportText(zData = {}, config = {}, width = 42) {
   // Modes de paiement
   lines.push(formatCenter("VENTILATION DES ENCAISSEMENTS", width));
   const pb = zData.paymentsBreakdown || {};
-  lines.push(formatRow("• Carte Bancaire :", money(pb.carte || 0), width));
-  lines.push(formatRow("• Espèces en caisse :", money(pb.especes || 0), width));
-  lines.push(formatRow("• Autres règlements :", money(pb.autre || 0), width));
+  for (const [m, amount] of paymentRows(pb)) {
+    lines.push(formatRow(`• ${PAYMENT_LABELS[m] || m} :`, money(amount), width));
+  }
 
   // Contrôle de caisse & écart
   if (zData.countedCash != null) {

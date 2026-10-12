@@ -97,6 +97,7 @@ export class OrdersService {
       pickupAt: order.pickupAt ? new Date(order.pickupAt).getTime() : null,
       pickupNumber: order.pickupNumber ?? null,
       covers: order.covers ?? null,
+      billRequestedAt: order.billRequestedAt ? new Date(order.billRequestedAt).getTime() : null,
       paidTotal: order.paidTotal || 0,
       externalRef: order.externalRef ?? null,
       table: order.table ? {
@@ -212,6 +213,16 @@ export class OrdersService {
     const value = validCovers(covers);
     if (value == null) throw new BadRequestException("Nombre de couverts invalide (1 à 99)");
     const res = await this.prisma.order.updateMany({ where: { id: orderId, status: "open" }, data: { covers: value } });
+    if (res.count === 0) throw new NotFoundException("Commande introuvable ou déjà encaissée");
+    return this.findById(orderId);
+  }
+
+  /** Addition demandée : valeur explicite (pas de bascule) pour qu'un rejeu hors-ligne reste idempotent */
+  async setBillRequested(orderId: string, requested: boolean) {
+    const res = await this.prisma.order.updateMany({
+      where: { id: orderId, status: "open" },
+      data: { billRequestedAt: requested ? new Date() : null },
+    });
     if (res.count === 0) throw new NotFoundException("Commande introuvable ou déjà encaissée");
     return this.findById(orderId);
   }

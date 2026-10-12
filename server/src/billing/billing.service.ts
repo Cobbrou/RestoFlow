@@ -41,7 +41,8 @@ export function assertNotPartiallyPaid(order: { paidTotal?: number | null }) {
 }
 
 // Modes de règlement d'une ligne de paiement (un ticket à plusieurs règlements a pour mode global "partage")
-export const PAYMENT_METHODS = ["carte", "especes", "autre"];
+// Pas de rendu monnaie sur un titre-restaurant : la somme des règlements doit égaler le dû
+export const PAYMENT_METHODS = ["carte", "especes", "cheque", "titre_resto", "autre"];
 
 const parseJson =(v: string | null, fallback: any = null) => (v ? JSON.parse(v) : fallback);
 
@@ -263,7 +264,7 @@ export class BillingService {
     );
 
     const methods = parseJson(orig.payments, []).map((p: any) => p.method);
-    const method = ["especes", "carte", "autre", ...methods].includes(refundMethod)
+    const method = ["especes", "carte", "cheque", "autre", ...methods].includes(refundMethod)
       ? refundMethod
       : methods[0] || orig.paymentMethod || "carte";
     const neg = (n: any) => (typeof n === "number" ? -n : n);

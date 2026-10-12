@@ -1,3 +1,19 @@
+// Modes de règlement (liste serveur : PAYMENT_METHODS de billing.service.ts) ; "partage" = ticket à plusieurs règlements
+export const PAYMENT_LABELS = {
+  carte: "Carte Bancaire",
+  especes: "Espèces",
+  cheque: "Chèque",
+  titre_resto: "Titre-restaurant",
+  autre: "Autre",
+  partage: "Partagé",
+};
+
+/** Lignes d'une ventilation par mode pour les rapports X / Z : carte, espèces et autre toujours, les autres modes s'ils ont servi */
+export const paymentRows = (breakdown = {}) =>
+  Object.keys(PAYMENT_LABELS)
+    .filter((m) => ["carte", "especes", "autre"].includes(m) || breakdown[m])
+    .map((m) => [m, breakdown[m] || 0]);
+
 export const money = (n) => {
   const val = typeof n === "number" && !isNaN(n) ? n : 0;
   return val.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -94,7 +110,7 @@ export function orderKitchenStatus(order) {
 
 /**
  * Retourne le statut visuel d'une table (utilisé par le plan de salle et la cuisine).
- * @returns {"free"|"occupied"|"sent"|"ready"|"alert"|"reserved"}
+ * @returns {"free"|"occupied"|"sent"|"ready"|"bill"|"alert"|"reserved"}
  */
 export function tableStatus(table, order) {
   if (order) {
@@ -103,8 +119,9 @@ export function tableStatus(table, order) {
     const hasReady    = order.items.some((i) => i.status === "ready");
     const allServed   = order.items.length > 0 && order.items.every((i) => i.status === "served");
     if (table.alert) return "alert";
-    if (allServed)   return "occupied";
     if (hasReady)    return "ready";
+    if (order.billRequestedAt) return "bill";
+    if (allServed)   return "occupied";
     if (hasSent)     return "sent";
     if (hasDraft)    return "occupied";
   }
@@ -122,6 +139,7 @@ export const STATUS_META = {
   sent:     { label: "Envoyée en cuisine",  color: "#3E7CB1", dot: "🔵" },
   ready:    { label: "Prête à servir",      color: "#2E9E5B", dot: "🟢" },
   alert:    { label: "Attention",           color: "#C1361B", dot: "🔴" },
+  bill:     { label: "Addition demandée",   color: "#6B5B95", dot: "🟣" },
   reserved: { label: "Réservée",            color: "#8A8378", dot: "⚪" },
 };
 

@@ -79,6 +79,8 @@ export class ConfigService {
         accountVat20: "445720",
         accountCard: "512000",
         accountCash: "530000",
+        accountCheque: "511200",
+        accountMealVoucher: "511300",
         accountOther: "580000",
         accountTips: "468600",
       },

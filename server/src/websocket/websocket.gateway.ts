@@ -275,6 +275,18 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @RequirePermissions("salle.order")
+  @SubscribeMessage("order:request_bill")
+  async handleRequestBill(@MessageBody() data: { orderId: string; requested: boolean }) {
+    try {
+      const order = await this.ordersService.setBillRequested(data.orderId, data.requested === true);
+      this.server.to(STAFF_ROOM).emit("order:updated", order);
+      return { ok: true, order };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
   // Commande hors salle (emporter…) ; le serveur attribue le numéro d'appel
   @RequirePermissions("salle.order")
   @SubscribeMessage("order:create_offpremise")
@@ -665,7 +677,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
 
       // Impression automatique du ticket de caisse si configurée
-      this.attemptAutoCaissePrint(res.history).catch(this.printFailed(client, "du ticket de caisse"));
+      this.attemptAutoCaissePrint(res.history, data.printReceipt !== false).catch(this.printFailed(client, "du ticket de caisse"));
 
       return { ok: true, history: res.history, table: res.table };
     } catch (err: any) {
@@ -673,19 +685,24 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-  private async attemptAutoCaissePrint(historyRecord: any) {
+  private async attemptAutoCaissePrint(historyRecord: any, printReceipt = true) {
     const cfg = await this.configService.getConfig();
     const caissePrinter = cfg.printers?.find(
       (p: any) => p.type === "caisse" && p.interface === "network" && p.enabled && p.ip
     );
     if (caissePrinter) {
+      const paidCash = (historyRecord.payments || []).some((p: any) => p.method === "especes") || historyRecord.paymentMethod === "especes";
+      // Ticket non demandé : seul le tiroir s'ouvre pour rendre la monnaie
+      if (!printReceipt) {
+        if (paidCash) await this.printOrThrow(caissePrinter, `${ESCPOS_INIT}\x1b\x70\x00\x19\xfa`);
+        return;
+      }
       this.logger.log(`Impression automatique facturette vers ${caissePrinter.ip}:${caissePrinter.port || 9100}`);
       const eur = (n: any) => `${Number(n || 0).toFixed(2)}E`;
       const discount = Number(historyRecord.subtotal || 0) - Number(historyRecord.total || 0);
       const vatLines = (historyRecord.vatDetails?.rates || [])
         .map((r: any) => `TVA ${String(r.rate).padEnd(4)}% HT ${eur(r.ht).padStart(9)}  TVA ${eur(r.vat).padStart(8)}`)
         .join("\n");
-      const paidCash = (historyRecord.payments || []).some((p: any) => p.method === "especes") || historyRecord.paymentMethod === "especes";
       const rawText = `${ESCPOS_INIT}\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
         historyRecord.items
           .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)

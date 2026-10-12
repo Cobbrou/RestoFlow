@@ -16,9 +16,13 @@ import {
   Clock,
   Archive,
   RotateCcw,
+  ShoppingCart,
+  Download,
 } from "lucide-react";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { money } from "../../utils/index.js";
+import { reorderBySupplier, reorderCsv } from "../../utils/reorder.js";
+import { triggerFileDownload } from "../../utils/fec.js";
 
 const CATEGORIES = [
   "Boucherie",
@@ -39,7 +43,7 @@ export default function StockManager({
   onDeleteIngredient,
   onRestoreIngredient,
 }) {
-  const [subView, setSubView] = useState("levels"); // "levels" | "movements"
+  const [subView, setSubView] = useState("levels"); // "levels" | "movements" | "reorder"
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "ok" | "low" | "out"
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -55,6 +59,8 @@ export default function StockManager({
     () => ingredients.filter((i) => !i.archived),
     [ingredients]
   );
+
+  const reorder = useMemo(() => reorderBySupplier(activeIngredients), [activeIngredients]);
 
   const summary = useMemo(() => {
     let totalValue = 0;
@@ -146,7 +152,7 @@ export default function StockManager({
 
       {/* ── Barre d'actions & Sous-onglets ───────────────────────── */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-black/5 shadow-xs">
-        <div className="flex gap-1 p-1 rounded-xl bg-black/5 w-fit">
+        <div className="flex flex-wrap gap-1 p-1 rounded-xl bg-black/5 w-fit">
           <button
             onClick={() => setSubView("levels")}
             className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
@@ -166,6 +172,16 @@ export default function StockManager({
             }}
           >
             <History size={14} /> Journal des Mouvements ({stockMovements.length})
+          </button>
+          <button
+            onClick={() => setSubView("reorder")}
+            className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{
+              background: subView === "reorder" ? "#2B2622" : "transparent",
+              color: subView === "reorder" ? "#FAF6EE" : "#5B5346",
+            }}
+          >
+            <ShoppingCart size={14} /> À commander ({reorder.reduce((n, g) => n + g.lines.length, 0)})
           </button>
         </div>
 
@@ -423,6 +439,59 @@ export default function StockManager({
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Vue 3 : Suggestion de commande fournisseur ───────────── */}
+      {subView === "reorder" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2 bg-white p-3 rounded-2xl border border-black/10">
+            <p className="text-xs text-[#5B5346]">
+              Ingrédients au seuil d'alerte ou dessous, à recommander jusqu'au stock idéal.
+            </p>
+            <button
+              onClick={() => triggerFileDownload("﻿" + reorderCsv(reorder), `commande-fournisseurs-${new Date().toISOString().slice(0, 10)}.csv`)}
+              disabled={reorder.length === 0}
+              className="rf-tap shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-[#2B2622] disabled:opacity-40"
+            >
+              <Download size={14} /> Exporter CSV
+            </button>
+          </div>
+          {reorder.length === 0 && (
+            <p className="text-center text-sm text-[#8A8378] py-10">Aucun ingrédient à recommander.</p>
+          )}
+          {reorder.map((g) => (
+            <div key={g.supplier} className="bg-white rounded-2xl border border-black/10 overflow-hidden shadow-xs">
+              <div className="p-3 border-b border-black/5 bg-black/[.02] flex items-center justify-between">
+                <p className="text-sm font-bold text-[#2B2622]">{g.supplier}</p>
+                <span className="rf-mono text-xs font-bold text-[#2B2622]">{money(g.totalCents / 100)} HT</span>
+              </div>
+              <div className="overflow-x-auto rf-scrollbar">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-black/10 text-[#8A8378] font-bold uppercase tracking-wider">
+                      <th className="py-2 px-4">Ingrédient</th>
+                      <th className="py-2 px-3">Réf.</th>
+                      <th className="py-2 px-3">Stock</th>
+                      <th className="py-2 px-3">À commander</th>
+                      <th className="py-2 px-3 text-right">Estimation HT</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-black/5">
+                    {g.lines.map(({ ingredient: i, qty, totalCents }) => (
+                      <tr key={i.id}>
+                        <td className="py-2 px-4 font-semibold text-[#2B2622]">{i.name}</td>
+                        <td className="py-2 px-3 text-[#8A8378]">{i.supplierRef || "—"}</td>
+                        <td className="py-2 px-3">{i.currentStock} {i.unit}</td>
+                        <td className="py-2 px-3 font-bold">{qty} {i.unit}</td>
+                        <td className="py-2 px-3 text-right rf-mono">{i.costPerUnit > 0 ? money(totalCents / 100) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

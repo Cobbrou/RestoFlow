@@ -38,7 +38,7 @@ export default function OrderTaking({
   currentStaff, roles = [],
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
-  onQty, onRemove, onVoid, onNote, onSetCovers,
+  onQty, onRemove, onVoid, onNote, onSetCovers, onRequestBill,
   onSend, onServe, onCheckout, onPartialCheckout, onCancelOrder, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
   onCallCourse,
@@ -387,6 +387,18 @@ export default function OrderTaking({
             <Receipt size={14} /> Partager / Encaisser la note
           </button>
         ) : null}
+
+        {table && order && sentItems.length > 0 && onRequestBill && (
+          <button
+            onClick={() => onRequestBill(!order.billRequestedAt)}
+            className="rf-tap w-full py-2 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 border"
+            style={order.billRequestedAt
+              ? { background: "#6B5B95", color: "#fff", borderColor: "#6B5B95" }
+              : { color: "#6B5B95", borderColor: "#6B5B9555" }}
+          >
+            <Receipt size={14} /> {order.billRequestedAt ? "Addition demandée · annuler" : "Addition demandée"}
+          </button>
+        )}
 
         {/* Emporter / comptoir créé par erreur : annulable tant que rien n'est parti en cuisine ni encaissé */}
         {!table && order && onCancelOrder && sentItems.length === 0 && !(order.paidTotal > 0) && (

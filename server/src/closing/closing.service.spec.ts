@@ -86,6 +86,23 @@ describe("ClosingService.generateFecExport : numérotation", () => {
     expect(fec.content).not.toContain("|ECR000001|");
   });
 
+  it("impute titres-restaurant et chèques sur leurs comptes de tiers", async () => {
+    const prisma: any = {
+      orderHistory: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: "h1", ticketNumber: "FAC-2026-1", sequenceNumber: 1, type: "SALE", createdAt: new Date("2026-10-10T12:00:00"),
+          total: 22, tip: 0, paymentMethod: "partage",
+          payments: JSON.stringify([{ method: "titre_resto", amount: 12 }, { method: "cheque", amount: 10 }]),
+          vatDetails: JSON.stringify({ rates: [{ rate: 10, ht: 20, vat: 2 }] }),
+        }]),
+      },
+    };
+    const config: any = { getConfig: vi.fn().mockResolvedValue({ siret: "98765432100012", fecExportConfig: null }) };
+    const fec = await new ClosingService(prisma, config, {} as any).generateFecExport();
+    expect(fec.isBalanced).toBe(true);
+    expect(fec.content).toContain("|511300|Titres-restaurant à encaisser|");
+    expect(fec.content).toContain("|511200|Chèques à encaisser|");
+  });
 });
 
 describe("aggregateTickets (commun aux rapports X et Z)", () => {

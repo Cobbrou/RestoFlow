@@ -148,6 +148,7 @@ model Order {
   pickupAt      DateTime? // Heure de retrait / livraison souhaitée
   pickupNumber  Int?      // Numéro d'appel du jour, attribué par le serveur
   covers        Int?      // Couverts saisis à l'ouverture de la table (null : non renseigné)
+  billRequestedAt DateTime? // Addition demandée par la table (null : pas de demande)
   paidTotal     Float     @default(0) // Déjà encaissé par des tickets partiels (un ticket par convive)
   externalRef   String?   // Identifiant de la commande chez le canal externe (plateforme, site)
   items     OrderItem[]

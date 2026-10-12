@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer, Upload } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { productsFromCsv, CSV_TEMPLATE } from "../../utils/catalogImport.js";
-import { isAvailable, money, deduplicateHistory, parseOptionsText, formatOptionsText } from "../../utils/index.js";
+import { isAvailable, money, deduplicateHistory, parseOptionsText, formatOptionsText, PAYMENT_LABELS } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
@@ -891,8 +891,8 @@ function MenuForm({ menu, products, onCancel, onSave }) {
    HISTORIQUE DES PAIEMENTS
 ══════════════════════════════════════════════════════════════ */
 
-const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, autre: Wallet, partage: Users };
-const METHOD_LABELS = { carte: "Carte",    especes: "Espèces", autre: "Autre",  partage: "Partagé" };
+const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, cheque: Wallet, titre_resto: Wallet, autre: Wallet, partage: Users };
+const METHOD_LABELS = { ...PAYMENT_LABELS, carte: "Carte", titre_resto: "Titre-resto" };
 
 function HistoryManager({ history, config, pushToast, canRefund }) {
   const [search,               setSearch]               = useState("");
@@ -972,7 +972,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
           />
         </div>
         <div className="flex gap-1">
-          {[null, "carte", "especes", "partage", "autre"].map((m) => {
+          {[null, "carte", "especes", "titre_resto", "cheque", "partage", "autre"].map((m) => {
             const Icon   = m ? METHOD_ICONS[m] : Receipt;
             const active = methodFilter === m;
             return (
@@ -1143,6 +1143,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
                   <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="px-2 py-1 rounded-lg border border-black/15">
                     <option value="carte">Carte</option>
                     <option value="especes">Espèces</option>
+                    <option value="cheque">Chèque</option>
                     <option value="autre">Autre</option>
                   </select>
                 </label>

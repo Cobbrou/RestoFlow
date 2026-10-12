@@ -164,7 +164,7 @@ export default function App() {
 
   const {
     getActiveOrder, ensureOrderForTable, createOffPremiseOrder, addProductToOrder, addComposedMenuToOrder, changeQty, removeItem, voidItem,
-    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder, partialCheckout, cancelOffPremiseOrder, setOrderCovers,
+    setItemNote, sendToKitchen, serveAndMaybeFree, handleApplyDiscount, handleRemoveDiscount, checkoutOrder, partialCheckout, cancelOffPremiseOrder, setOrderCovers, setBillRequested,
     toggleAlert, startPrep, markReady, handleCallCourse, handleChangeItemCourse, handleTransferTable,
     handleMergeTable, handleCreateReservation, handleUpdateReservationStatus, handleAssignReservationTable,
     handleDeleteReservation,
@@ -425,12 +425,13 @@ export default function App() {
             onVoid={(itemId, qty, reason, done) => voidItem(activeOrder.id, itemId, qty, reason, done)}
             onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
             onSetCovers={(n) => setOrderCovers(activeOrder.id, n)}
+            onRequestBill={(requested) => setBillRequested(activeOrder.id, requested)}
             onSend={() => sendToKitchen(activeOrder.id)}
             onServe={() => serveAndMaybeFree(activeOrder.id)}
             onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}
             onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
             onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
-            onPartialCheckout={(lines, payments, amount) => partialCheckout(activeOrder.id, lines, payments, amount)}
+            onPartialCheckout={(lines, payments, amount, print) => partialCheckout(activeOrder.id, lines, payments, amount, print)}
             onCancelOrder={() => {
               cancelOffPremiseOrder(activeOrder.id);
               setServerView("plan");

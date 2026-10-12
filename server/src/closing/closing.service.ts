@@ -205,7 +205,7 @@ export class ClosingService {
       ticketsCount,
       ...rest,
       averageTicket: ticketsCount > 0 ? Math.round((totals.totalNet / ticketsCount) * 100) / 100 : 0,
-      paymentsBreakdown: { carte: pb.carte, especes: pb.especes, autre: pb.autre, partage: pb.partage || 0 },
+      paymentsBreakdown: { ...pb, partage: pb.partage || 0 },
       topItems,
       serverSales: serverSalesMap,
       lastZReportNumber: lastZ?.reportNumber || null,
@@ -595,6 +595,8 @@ export class ClosingService {
       accountVat20: "445720",
       accountCard: "512000",
       accountCash: "530000",
+      accountCheque: "511200",
+      accountMealVoucher: "511300",
       accountOther: "580000",
       accountTips: "468600",
       ...cfg.fecExportConfig,
@@ -669,7 +671,11 @@ export class ClosingService {
             ? [accounts.accountCash, "Caisse Espèces"]
             : p.method === "carte"
               ? [accounts.accountCard, "Banque Carte Bancaire"]
-              : [accounts.accountOther, "Autres règlements"];
+              : p.method === "cheque"
+                ? [accounts.accountCheque, "Chèques à encaisser"]
+                : p.method === "titre_resto"
+                  ? [accounts.accountMealVoucher, "Titres-restaurant à encaisser"]
+                  : [accounts.accountOther, "Autres règlements"];
         entries.push({ compte, lib, texte: `${isCreditNote ? "Remboursement" : "Encaissement"} ${pieceRef} (${p.method})`, debit: amount });
       }
 
