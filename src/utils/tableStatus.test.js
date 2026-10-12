@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { tableStatus, paymentRows } from "./index.js";
+import { tableStatus, paymentRows, isWithinHours } from "./index.js";
+
+describe("isWithinHours", () => {
+  const at = (h, m) => new Date(2026, 9, 12, h, m);
+  it("respecte les créneaux, y compris après minuit", () => {
+    expect(isWithinHours(null, at(3, 0))).toBe(true);
+    expect(isWithinHours("11:30-14:30, 19:00-22:30", at(12, 0))).toBe(true);
+    expect(isWithinHours("11:30-14:30, 19:00-22:30", at(14, 30))).toBe(false);
+    expect(isWithinHours("11:30-14:30, 19:00-22:30", at(20, 0))).toBe(true);
+    expect(isWithinHours("22:00-02:00", at(1, 59))).toBe(true);
+    expect(isWithinHours("22:00-02:00", at(12, 0))).toBe(false);
+  });
+});
 
 describe("tableStatus : addition demandée", () => {
   const served = { items: [{ status: "served" }] };

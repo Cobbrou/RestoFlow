@@ -84,6 +84,23 @@ export function isAvailable(product) {
 }
 
 /**
+ * Créneaux de vente d'un produit ou d'une formule (« 11:30-14:30, 19:00-22:30 », normalisés par le serveur).
+ * Sans créneau : toute la journée. Une fin avant le début couvre minuit (« 22:00-02:00 »).
+ */
+export function isWithinHours(hours, date = new Date()) {
+  if (!hours) return true;
+  const toMin = (t) => {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const now = date.getHours() * 60 + date.getMinutes();
+  return hours.split(",").some((slot) => {
+    const [start, end] = slot.trim().split("-").map(toMin);
+    return start < end ? now >= start && now < end : now >= start || now < end;
+  });
+}
+
+/**
  * Détecte si une note de commande contient un mot-clé d'allergie.
  */
 export function noteIndicatesAllergy(notes) {
@@ -168,6 +185,7 @@ export function menuToProduct(menu, allProducts) {
     price: menu.price,
     emoji: menu.emoji || "📋",
     available: menu.available !== false,
+    hours: menu.hours || null,
     allergens,
     desc:
       menu.desc ||

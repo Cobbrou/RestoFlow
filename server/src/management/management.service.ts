@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
 import { SessionPayload } from "../auth/auth.service";
+import { normalizeHours } from "../catalog/catalog.service";
 
 const PIN = /^\d{4,6}$/;
 const newId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -102,6 +103,7 @@ export class ManagementService {
     if (data?.desc !== undefined) fields.desc = String(data.desc);
     if (data?.emoji !== undefined) fields.emoji = data.emoji;
     if (data?.available !== undefined) fields.available = Boolean(data.available);
+    if (data?.hours !== undefined) fields.hours = normalizeHours(data.hours);
     if (data?.groups !== undefined) {
       if (!Array.isArray(data.groups)) throw new BadRequestException("Étapes de formule invalides");
       fields.groups = JSON.stringify(data.groups);
