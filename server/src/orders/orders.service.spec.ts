@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BadRequestException } from "@nestjs/common";
-import { OrdersService, heldToRelease, orderLabel } from "./orders.service";
+import { OrdersService, checkMenuComposition, heldToRelease, orderLabel } from "./orders.service";
 
 describe("OrdersService : article déjà envoyé en cuisine", () => {
   const sent = { id: "it1", orderId: "o1", status: "new", notes: "sans sel", course: "plat" };
@@ -170,5 +170,113 @@ describe("OrdersService.createOffPremise (emporter)", () => {
 
   it("libellé : la salle garde « Table N »", () => {
     expect(orderLabel({ type: "dine_in", table: { number: 4 } })).toBe("Table 4");
+  });
+});
+
+describe("OrdersService.sendKitchen", () => {
+  it("n'envoie que les brouillons qu'il a lui-même basculés (double appui, deux terminaux)", async () => {
+    const order = { id: "o1", status: "open", items: [{ id: "a", status: "draft" }, { id: "b", status: "draft" }, { id: "c", status: "new" }] };
+    const prisma: any = {
+      order: { findUnique: vi.fn().mockResolvedValue(order), update: vi.fn() },
+      restaurantConfig: { findUnique: vi.fn().mockResolvedValue(null) },
+      // "b" a déjà été réclamé par un envoi concurrent
+      orderItem: { updateMany: vi.fn(({ where }) => ({ count: where.id === "b" ? 0 : 1 })) },
+    };
+    const { sentIds } = await new OrdersService(prisma).sendKitchen("o1");
+    expect(sentIds).toEqual(["a"]);
+  });
+
+  it("refuse une commande encaissée", async () => {
+    const prisma: any = { order: { findUnique: vi.fn().mockResolvedValue({ id: "o1", status: "closed", items: [] }) } };
+    await expect(new OrdersService(prisma).sendKitchen("o1")).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe("Menus : composition validée contre la formule", () => {
+  const groups = [
+    { title: "Plat", count: 1, productIds: ["p1", "p2"] },
+    { title: "Dessert", count: 1, productIds: ["p3"] },
+  ];
+
+  it("accepte un choix par étape parmi ceux proposés", () => {
+    expect(checkMenuComposition(groups, [{ productIds: ["p2"] }, { productIds: ["p3"] }])).toBe(groups);
+  });
+
+  it("refuse une étape manquante, un produit hors formule ou un nombre de choix faux", () => {
+    expect(() => checkMenuComposition(groups, [{ productIds: ["p1"] }])).toThrow("incomplète");
+    expect(() => checkMenuComposition(groups, [{ productIds: ["p9"] }, { productIds: ["p3"] }])).toThrow("Plat");
+    expect(() => checkMenuComposition(groups, [{ productIds: ["p1", "p2"] }, { productIds: ["p3"] }])).toThrow("Plat");
+    expect(() => checkMenuComposition(groups, null)).toThrow(BadRequestException);
+  });
+
+  it("addItem traite « menu_… » comme un menu même si le client envoie isMenu: false", async () => {
+    const prisma: any = {
+      order: { findUnique: vi.fn().mockResolvedValue({ id: "o1", status: "open", items: [] }) },
+      menu: { findUnique: vi.fn().mockResolvedValue({ id: "m1", name: "Menu", price: 15, groups: JSON.stringify(groups) }) },
+      orderItem: { create: vi.fn() },
+    };
+    await expect(
+      new OrdersService(prisma).addItem({ orderId: "o1", product: { id: "menu_m1", name: "x", price: 1, isMenu: false } })
+    ).rejects.toThrow("incomplète");
+    expect(prisma.orderItem.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("OrdersService.createOrEnsure", () => {
+  const table = { id: "t1", number: 1 };
+  const make = () => {
+    const orders: any[] = [{ id: "ord_old", tableId: "t1", status: "closed", items: [] }];
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    const prisma: any = {
+      table: { findUnique: vi.fn().mockResolvedValue(table) },
+      order: {
+        findFirst: vi.fn(async ({ where }) => {
+          await tick();
+          return orders.find((o) => o.tableId === where.tableId && o.status === where.status) || null;
+        }),
+        findUnique: vi.fn(async ({ where }) => orders.find((o) => o.id === where.id) || null),
+        create: vi.fn(async ({ data }) => {
+          await tick();
+          const o = { ...data, items: [] };
+          orders.push(o);
+          return o;
+        }),
+      },
+    };
+    return { orders, service: new OrdersService(prisma) };
+  };
+
+  it("deux ouvertures simultanées de la même table donnent une seule commande", async () => {
+    const { orders, service } = make();
+    const [a, b] = await Promise.all([service.createOrEnsure("t1", "A", "ord_a"), service.createOrEnsure("t1", "B", "ord_b")]);
+    expect(a?.id).toBe("ord_a");
+    expect(b?.id).toBe("ord_a");
+    expect(orders.filter((o) => o.status === "open")).toHaveLength(1);
+  });
+
+  it("un orderId déjà encaissé n'est pas renvoyé : nouvelle commande ouverte", async () => {
+    const { service } = make();
+    const order = await service.createOrEnsure("t1", "A", "ord_old");
+    expect(order?.status).toBe("open");
+    expect(order?.id).not.toBe("ord_old");
+  });
+});
+
+describe("OrdersService.callCourse", () => {
+  it("ne réclame pas une suite encore en brouillon (non envoyée ni déstockée)", async () => {
+    const prisma: any = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "o1",
+          items: [
+            { id: "sent", course: "plat", courseStatus: "held", status: "new" },
+            { id: "draft", course: "plat", courseStatus: "held", status: "draft" },
+          ],
+        }),
+      },
+      orderItem: { updateMany: vi.fn() },
+    };
+    const res = await new OrdersService(prisma).callCourse("o1", "plat");
+    expect(res.calledIds).toEqual(["sent"]);
   });
 });

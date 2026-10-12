@@ -1,6 +1,29 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import * as crypto from "crypto";
+
+const JSON_FIELDS: [string, "array" | "object"][] = [
+  ["printers", "array"],
+  ["promoCodes", "array"],
+  ["happyHourConfig", "object"],
+  ["fecExportConfig", "object"],
+  ["modulesConfig", "object"],
+];
+
+/** Valeur JSON de configuration (objet, ou texte JSON) re-sérialisée ; lève si illisible ou de mauvaise forme */
+export function jsonField(field: string, value: unknown, shape: "array" | "object"): string {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new BadRequestException(`${field} : JSON invalide`);
+    }
+  }
+  const ok = shape === "array" ? Array.isArray(parsed) : !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
+  if (!ok) throw new BadRequestException(`${field} : ${shape === "array" ? "liste" : "objet"} attendu`);
+  return JSON.stringify(parsed);
+}
 
 @Injectable()
 export class ConfigService {
@@ -56,6 +79,8 @@ export class ConfigService {
         accountVat20: "445720",
         accountCard: "512000",
         accountCash: "530000",
+        accountCheque: "511200",
+        accountMealVoucher: "511300",
         accountOther: "580000",
         accountTips: "468600",
       },
@@ -110,35 +135,9 @@ export class ConfigService {
       updatePayload.tpeAutoPrint = Boolean(data.tpeAutoPrint);
     }
 
-    if (data.printers !== undefined) {
-      updatePayload.printers =
-        typeof data.printers === "string" ? data.printers : JSON.stringify(data.printers);
-    }
-
-    if (data.promoCodes !== undefined) {
-      updatePayload.promoCodes =
-        typeof data.promoCodes === "string" ? data.promoCodes : JSON.stringify(data.promoCodes);
-    }
-
-    if (data.happyHourConfig !== undefined) {
-      updatePayload.happyHourConfig =
-        typeof data.happyHourConfig === "string"
-          ? data.happyHourConfig
-          : JSON.stringify(data.happyHourConfig);
-    }
-
-    if (data.fecExportConfig !== undefined) {
-      updatePayload.fecExportConfig =
-        typeof data.fecExportConfig === "string"
-          ? data.fecExportConfig
-          : JSON.stringify(data.fecExportConfig);
-    }
-
-    if (data.modulesConfig !== undefined) {
-      updatePayload.modulesConfig =
-        typeof data.modulesConfig === "string"
-          ? data.modulesConfig
-          : JSON.stringify(data.modulesConfig);
+    // 🔒 Champs JSON validés avant écriture : un contenu illisible ferait échouer getConfig, donc la synchro de tous les postes
+    for (const [field, shape] of JSON_FIELDS) {
+      if (data[field] !== undefined) updatePayload[field] = jsonField(field, data[field], shape);
     }
 
     await this.getConfig(); // crée la config (et une clé NF525 aléatoire) si absente

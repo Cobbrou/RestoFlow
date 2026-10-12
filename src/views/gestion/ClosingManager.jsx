@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import PeriodClosings from "./PeriodClosings.jsx";
 import { hasPermission } from "../../utils/permissions.js";
-import { money } from "../../utils/index.js";
+import { money, PAYMENT_LABELS, paymentRows } from "../../utils/index.js";
 import { generateXReportText, generateZReportText } from "../../utils/escpos.js";
 import { triggerFileDownload } from "../../utils/fec.js";
 import { getSocket } from "../../services/socket.js";
@@ -396,35 +396,19 @@ export default function ClosingManager({
                     <span>Ventilation des Règlements</span>
                   </h3>
                   <div className="space-y-2.5">
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-black/[0.03]">
-                      <div className="flex items-center gap-2">
-                        <CreditCard size={15} className="text-[#3E7CB1]" />
-                        <span className="text-xs font-semibold text-[#2B2622]">Carte Bancaire</span>
-                      </div>
-                      <span className="rf-mono text-sm font-bold text-[#2B2622]">
-                        {money(xReport.paymentsBreakdown?.carte || 0)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-black/[0.03]">
-                      <div className="flex items-center gap-2">
-                        <Banknote size={15} className="text-[#2E9E5B]" />
-                        <span className="text-xs font-semibold text-[#2B2622]">Espèces</span>
-                      </div>
-                      <span className="rf-mono text-sm font-bold text-[#2B2622]">
-                        {money(xReport.paymentsBreakdown?.especes || 0)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-black/[0.03]">
-                      <div className="flex items-center gap-2">
-                        <Wallet size={15} className="text-[#6B5B95]" />
-                        <span className="text-xs font-semibold text-[#2B2622]">Autres règlements</span>
-                      </div>
-                      <span className="rf-mono text-sm font-bold text-[#2B2622]">
-                        {money(xReport.paymentsBreakdown?.autre || 0)}
-                      </span>
-                    </div>
+                    {paymentRows(xReport.paymentsBreakdown).map(([m, amount]) => {
+                      const Icon = m === "carte" ? CreditCard : m === "especes" ? Banknote : Wallet;
+                      const color = m === "carte" ? "text-[#3E7CB1]" : m === "especes" ? "text-[#2E9E5B]" : "text-[#6B5B95]";
+                      return (
+                        <div key={m} className="flex items-center justify-between p-2.5 rounded-xl bg-black/[0.03]">
+                          <div className="flex items-center gap-2">
+                            <Icon size={15} className={color} />
+                            <span className="text-xs font-semibold text-[#2B2622]">{PAYMENT_LABELS[m]}</span>
+                          </div>
+                          <span className="rf-mono text-sm font-bold text-[#2B2622]">{money(amount)}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 

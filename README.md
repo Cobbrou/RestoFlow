@@ -264,12 +264,12 @@ RestoFlow/
 - [x] Clôtures X / Z, chaînage cryptographique, FEC
 - [x] Modules à la carte et pourboires
 - [x] Options et suppléments produit, rupture « 86 » depuis le KDS
+- [x] Pointage du personnel et répartition des pourboires selon les heures
 
 ### 🔮 À venir
 - [ ] 📱 **Commande à table par QR code** : menu, commande et paiement depuis le smartphone du client.
 - [ ] 🖥️ **Borne de commande** : commande et encaissement en autonomie.
 - [ ] 🛵 **Livraison** : connexion aux plateformes (Uber Eats, Deliveroo) ou livraison en propre.
-- [ ] 💼 **Paie** : répartition des pourboires selon les heures travaillées.
 - [ ] 🐘 **PostgreSQL** en production.
 
 ---

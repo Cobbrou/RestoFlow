@@ -6,5 +6,6 @@ import { ManagementGateway } from "./management.gateway";
 @Module({
   imports: [AuthModule],
   providers: [ManagementService, ManagementGateway],
+  exports: [ManagementService],
 })
 export class ManagementModule {}

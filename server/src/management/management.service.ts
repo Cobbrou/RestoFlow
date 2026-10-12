@@ -1,10 +1,27 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
+import { SessionPayload } from "../auth/auth.service";
+import { normalizeHours } from "../catalog/catalog.service";
+import { toCents } from "../billing/pricing";
+import { distributeTips, TipsOptions } from "./tips";
 
 const PIN = /^\d{4,6}$/;
 const newId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 const clientId = (id: any, prefix: string) => (typeof id === "string" && /^[\w-]{3,64}$/.test(id) ? id : newId(prefix));
+
+export type Actor = Pick<SessionPayload, "staffId" | "roleId" | "permissions">;
+
+/**
+ * Anti-escalade : seul un admin attribue le rôle admin ou touche à un compte admin,
+ * et personne ne donne (via un rôle) une permission qu'il n'a pas lui-même
+ */
+export function assertCanGrant(actor: Actor, roleId: string | null, permissions: string[] = []) {
+  if (actor.roleId === "admin") return;
+  if (roleId === "admin") throw new ForbiddenException("Seul un administrateur peut gérer un compte administrateur");
+  const missing = permissions.filter((p) => !(actor.permissions || []).includes(p));
+  if (missing.length > 0) throw new ForbiddenException(`Vous ne pouvez pas attribuer des droits que vous n'avez pas : ${missing.join(", ")}`);
+}
 
 /**
  * Administration persistée côté serveur : plan de salle, formules, équipe et rôles.
@@ -88,6 +105,7 @@ export class ManagementService {
     if (data?.desc !== undefined) fields.desc = String(data.desc);
     if (data?.emoji !== undefined) fields.emoji = data.emoji;
     if (data?.available !== undefined) fields.available = Boolean(data.available);
+    if (data?.hours !== undefined) fields.hours = normalizeHours(data.hours);
     if (data?.groups !== undefined) {
       if (!Array.isArray(data.groups)) throw new BadRequestException("Étapes de formule invalides");
       fields.groups = JSON.stringify(data.groups);
@@ -123,7 +141,7 @@ export class ManagementService {
     });
   }
 
-  private async staffFields(data: any, creating: boolean) {
+  private async staffFields(data: any, creating: boolean, actor: Actor) {
     const fields: any = {};
     if (data?.name !== undefined || creating) {
       const name = String(data?.name || "").trim();
@@ -131,9 +149,9 @@ export class ManagementService {
       fields.name = name;
     }
     if (data?.roleId !== undefined || creating) {
-      if (!(await this.prisma.role.findUnique({ where: { id: String(data?.roleId) } }))) {
-        throw new BadRequestException("Rôle inconnu");
-      }
+      const role = await this.prisma.role.findUnique({ where: { id: String(data?.roleId) } });
+      if (!role) throw new BadRequestException("Rôle inconnu");
+      assertCanGrant(actor, role.id, JSON.parse(role.permissions || "[]"));
       fields.roleId = data.roleId;
     }
     // PIN : jamais stocké ni renvoyé en clair ; vide en modification = inchangé
@@ -148,27 +166,31 @@ export class ManagementService {
     return fields;
   }
 
-  async createStaff(data: any) {
-    const fields = await this.staffFields(data, true);
+  async createStaff(data: any, actor: Actor) {
+    const fields = await this.staffFields(data, true, actor);
     await this.prisma.staff.create({
       data: { id: clientId(data.id, "stf"), avatarBg: "#C1440E", ...fields },
     });
     return this.listStaff();
   }
 
-  async updateStaff(id: string, data: any, actorStaffId: string) {
-    const fields = await this.staffFields(data, false);
-    if (id === actorStaffId && (fields.active === false || (fields.roleId && fields.roleId !== "admin"))) {
+  async updateStaff(id: string, data: any, actor: Actor) {
+    const target = await this.prisma.staff.findUnique({ where: { id } });
+    if (!target) throw new NotFoundException("Collaborateur introuvable");
+    assertCanGrant(actor, target.roleId); // un compte admin (PIN, rôle…) n'est modifiable que par un admin
+    const fields = await this.staffFields(data, false, actor);
+    if (id === actor.staffId && (fields.active === false || (fields.roleId && fields.roleId !== "admin"))) {
       await this.assertAnotherActiveAdmin(id);
     }
     await this.prisma.staff.update({ where: { id }, data: fields });
     return this.listStaff();
   }
 
-  async deleteStaff(id: string, actorStaffId: string) {
-    if (id === actorStaffId) throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte");
+  async deleteStaff(id: string, actor: Actor) {
+    if (id === actor.staffId) throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte");
     const target = await this.prisma.staff.findUnique({ where: { id } });
     if (!target) throw new NotFoundException("Collaborateur introuvable");
+    assertCanGrant(actor, target.roleId);
     if (target.roleId === "admin") await this.assertAnotherActiveAdmin(id);
     await this.prisma.staff.delete({ where: { id } });
     return this.listStaff();
@@ -203,16 +225,19 @@ export class ManagementService {
     return fields;
   }
 
-  async createRole(data: any) {
+  async createRole(data: any, actor: Actor) {
     const fields = this.roleFields({ description: "", color: "#8A8378", permissions: [], ...data });
+    assertCanGrant(actor, null, JSON.parse(fields.permissions));
     if (!fields.name) throw new BadRequestException("Nom du rôle obligatoire");
     await this.prisma.role.create({ data: { id: clientId(data.id, "role"), isSystem: false, ...fields } });
     return this.listRoles();
   }
 
-  async updateRole(id: string, data: any) {
+  async updateRole(id: string, data: any, actor: Actor) {
     if (id === "admin") throw new BadRequestException("Le rôle administrateur n'est pas modifiable");
-    await this.prisma.role.update({ where: { id }, data: this.roleFields(data) });
+    const fields = this.roleFields(data);
+    if (fields.permissions) assertCanGrant(actor, null, JSON.parse(fields.permissions));
+    await this.prisma.role.update({ where: { id }, data: fields });
     return this.listRoles();
   }
 
@@ -225,5 +250,88 @@ export class ManagementService {
     }
     await this.prisma.role.delete({ where: { id } });
     return this.listRoles();
+  }
+
+  // ── Pointage ─────────────────────────────────────────────────────────
+
+  /** Services en cours (tous équipiers) : diffusés pour afficher qui est en poste */
+  listOpenShifts() {
+    return this.prisma.shift.findMany({ where: { endAt: null }, orderBy: { startAt: "asc" } });
+  }
+
+  /** Services commencés sur la période [from, to[ ; ceux encore ouverts y figurent aussi */
+  listShifts(from: Date, to: Date) {
+    return this.prisma.shift.findMany({
+      where: { OR: [{ startAt: { gte: from, lt: to } }, { endAt: null }] },
+      orderBy: { startAt: "asc" },
+    });
+  }
+
+  /**
+   * Arrivée ou départ d'un équipier. Rejouable hors-ligne : l'heure saisie sur la tablette fait foi
+   * (bornée aux dernières 24 h), une arrivée déjà en cours ou un départ sans service ouvert ne change rien.
+   */
+  async clock(data: { id?: string; staffId: string; action: string; at?: number }) {
+    const staff = await this.prisma.staff.findUnique({ where: { id: data.staffId }, select: { id: true, active: true } });
+    if (!staff?.active) throw new NotFoundException("Équipier introuvable ou inactif");
+    const now = Date.now();
+    const at = new Date(Number.isFinite(Number(data.at)) && Number(data.at) <= now && Number(data.at) > now - 86400000 ? Number(data.at) : now);
+    const open = await this.prisma.shift.findFirst({ where: { staffId: staff.id, endAt: null } });
+
+    if (data.action === "in") {
+      if (open) return open;
+      const id = clientId(data.id, "shift");
+      return (await this.prisma.shift.findUnique({ where: { id } })) ?? this.prisma.shift.create({ data: { id, staffId: staff.id, startAt: at } });
+    }
+    if (data.action === "out") {
+      if (!open) return null;
+      return this.prisma.shift.update({ where: { id: open.id }, data: { endAt: at < open.startAt ? open.startAt : at } });
+    }
+    throw new BadRequestException("Pointage : action « in » ou « out » attendue");
+  }
+
+  /** Départ oublié : le gestionnaire saisit l'heure réelle de fin */
+  async closeShift(id: string, endAt: number, closedBy: string) {
+    const shift = await this.prisma.shift.findUnique({ where: { id } });
+    if (!shift) throw new NotFoundException("Service introuvable");
+    if (shift.endAt) return shift;
+    const end = new Date(Number(endAt));
+    if (!Number.isFinite(end.getTime()) || end <= shift.startAt || end.getTime() > Date.now()) {
+      throw new BadRequestException("Heure de fin invalide (après l'arrivée, pas dans le futur)");
+    }
+    return this.prisma.shift.update({ where: { id }, data: { endAt: end, closedBy } });
+  }
+
+  /**
+   * Répartition des pourboires encaissés sur [from, to[ (avoirs déduits) selon les heures pointées.
+   * extraCents : montant ajouté à la main (tronc commun en espèces, par exemple).
+   */
+  async tipsDistribution(from: Date, to: Date, options: TipsOptions & { extraCents?: number } = {}) {
+    if (!(to > from)) throw new BadRequestException("Période invalide");
+    const mode = options.mode ?? "hours";
+    if (!["hours", "weighted", "equal"].includes(mode)) throw new BadRequestException("Mode de répartition inconnu");
+    const extraCents = Math.round(Number(options.extraCents) || 0);
+    if (extraCents < 0) throw new BadRequestException("Montant ajouté invalide");
+
+    const [tickets, shifts, staff] = await Promise.all([
+      this.prisma.orderHistory.findMany({ where: { createdAt: { gte: from, lt: to } }, select: { tip: true } }),
+      this.prisma.shift.findMany({ where: { startAt: { lt: to }, OR: [{ endAt: null }, { endAt: { gt: from } }] } }),
+      this.prisma.staff.findMany({ select: { id: true, name: true, roleId: true } }),
+    ]);
+    const collectedCents = tickets.reduce((sum, t) => sum + toCents(t.tip ?? 0), 0);
+    const tipCents = Math.max(0, collectedCents) + extraCents;
+    const roleWeights = Object.fromEntries(
+      Object.entries(options.roleWeights ?? {}).filter(([, v]) => Number.isFinite(Number(v)) && Number(v) >= 0).map(([k, v]) => [k, Number(v)])
+    );
+    return {
+      collectedCents,
+      extraCents,
+      ...distributeTips(tipCents, shifts, staff, { from: from.getTime(), to: to.getTime() }, {
+        mode,
+        roleWeights,
+        excludedRoleIds: Array.isArray(options.excludedRoleIds) ? options.excludedRoleIds : [],
+        excludedStaffIds: Array.isArray(options.excludedStaffIds) ? options.excludedStaffIds : [],
+      }),
+    };
   }
 }

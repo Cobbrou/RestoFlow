@@ -211,6 +211,11 @@ export function useManagementActions(store, { emit, pushToast, currentStaff }) {
     pushToast("Mouvement de stock enregistré", "server");
   };
 
+  const handleInventory = (counts) => {
+    emit("stock:inventory", { counts });
+    pushToast(`Inventaire envoyé (${counts.length} ligne(s))`, "server");
+  };
+
   const handleAddIngredient = (data) => {
     emit("stock:create_ingredient", data);
     pushToast(`Ingrédient créé : ${data.name}`, "server");
@@ -261,6 +266,7 @@ export function useManagementActions(store, { emit, pushToast, currentStaff }) {
     onUpdateRole: updateRole,
     onDeleteRole: deleteRole,
     onAddMovement: handleAddStockMovement,
+    onInventory: handleInventory,
     onAddIngredient: handleAddIngredient,
     onUpdateIngredient: handleUpdateIngredient,
     onDeleteIngredient: handleDeleteIngredient,

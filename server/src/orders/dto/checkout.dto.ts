@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, Min } from "class-validator";
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsBoolean, Min } from "class-validator";
 
 /**
  * Seuls la commande, les règlements et le pourboire sont fournis par le client :
@@ -32,4 +32,9 @@ export class CheckoutDto {
   @IsOptional()
   @IsArray()
   lines?: { itemId: string; qty: number }[];
+
+  // Ticket sur demande : false n'imprime pas (le tiroir s'ouvre quand même pour les espèces)
+  @IsOptional()
+  @IsBoolean()
+  printReceipt?: boolean;
 }

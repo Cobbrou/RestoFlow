@@ -1,5 +1,6 @@
 import { Utensils, Volume2, VolumeX, ClipboardList, ChefHat, BarChart3, Settings, KeyRound, LogOut } from "lucide-react";
 import ConnectionBadge from "./ConnectionBadge.jsx";
+import ClockButton from "./ClockButton.jsx";
 import { canAccessTab, getRoleName } from "../utils/permissions.js";
 
 /**
@@ -106,6 +107,7 @@ export default function TopNav({
           {logo}
           <div className="flex items-center gap-1.5 ml-auto">
             <ConnectionBadge dark={dark} />
+            <ClockButton currentStaff={currentStaff} dark={dark} />
             {staffBtn}
             {logoutBtn}
             {soundBtn}
@@ -171,6 +173,7 @@ export default function TopNav({
       )}
 
       <div className="flex items-center gap-2">
+        <ClockButton currentStaff={currentStaff} dark={dark} />
         {staffBtn}
         {logoutBtn}
         {soundBtn}

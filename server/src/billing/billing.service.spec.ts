@@ -108,6 +108,21 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       );
     });
 
+    it("refuse un mode de règlement inconnu et ne fige que les champs attendus", async () => {
+      const order = { id: "o1", tableId: null, server: "A", items: [{ id: "i", name: "Café", price: 2, qty: 1, status: "served" }] };
+      mockPrisma.order.findUnique.mockResolvedValue(order);
+      await expect(
+        billingService.processCheckout({ orderId: "o1", payments: [{ amount: 2, method: "bitcoin" }] })
+      ).rejects.toThrow("Mode de règlement inconnu");
+
+      const res = await billingService.processCheckout({
+        orderId: "o1",
+        payments: [{ id: "p1", label: "Carte", amount: 2, method: "carte", injecte: "x".repeat(1000) }],
+      });
+      expect(res.history.payments[0]).not.toHaveProperty("injecte");
+      expect(res.history.payments[0]).toMatchObject({ id: "p1", method: "carte", amount: 2 });
+    });
+
     it("encaisse une commande à emporter sans table et fige son libellé sur le ticket", async () => {
       mockPrisma.order.findUnique.mockResolvedValue({
         id: "order_emp",

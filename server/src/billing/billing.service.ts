@@ -40,6 +40,10 @@ export function assertNotPartiallyPaid(order: { paidTotal?: number | null }) {
   if ((order.paidTotal || 0) > 0) throw new BadRequestException("Note déjà en partie encaissée : action impossible");
 }
 
+// Modes de règlement d'une ligne de paiement (un ticket à plusieurs règlements a pour mode global "partage")
+// Pas de rendu monnaie sur un titre-restaurant : la somme des règlements doit égaler le dû
+export const PAYMENT_METHODS = ["carte", "especes", "cheque", "titre_resto", "autre"];
+
 const parseJson =(v: string | null, fallback: any = null) => (v ? JSON.parse(v) : fallback);
 
 /** Format d'un ticket envoyé aux clients (history:new_entry, sync:init) */
@@ -260,7 +264,7 @@ export class BillingService {
     );
 
     const methods = parseJson(orig.payments, []).map((p: any) => p.method);
-    const method = ["especes", "carte", "autre", ...methods].includes(refundMethod)
+    const method = ["especes", "carte", "cheque", "autre", ...methods].includes(refundMethod)
       ? refundMethod
       : methods[0] || orig.paymentMethod || "carte";
     const neg = (n: any) => (typeof n === "number" ? -n : n);
@@ -425,10 +429,25 @@ export class BillingService {
 
   /** Règlements fournis par le client : doivent égaler exactement le montant dû (pourboire compris) */
   private checkPayments(data: CheckoutInput, dueCents: number, tipCents: number) {
-    const paymentList =
+    if (data.paymentMethod && !PAYMENT_METHODS.includes(data.paymentMethod) && data.paymentMethod !== "partage") {
+      throw new BadRequestException("Mode de règlement inconnu");
+    }
+    const raw =
       data.payments && data.payments.length > 0
         ? data.payments
         : [{ id: `pay_${Date.now()}`, label: "Paiement unique", amount: toEuros(dueCents + tipCents), method: data.paymentMethod || "carte", paidAt: Date.now() }];
+    // 🔒 Règlements figés dans le ticket signé : modes connus et champs attendus uniquement
+    const paymentList = raw.map((p: any) => {
+      if (!PAYMENT_METHODS.includes(p?.method)) throw new BadRequestException("Mode de règlement inconnu");
+      return {
+        id: String(p.id || `pay_${Date.now()}`).slice(0, 64),
+        label: String(p.label || "").slice(0, 60),
+        method: p.method,
+        amount: p.amount,
+        paidAt: Number(p.paidAt) || Date.now(),
+        ...(p.tpeData && typeof p.tpeData === "object" && { tpeData: p.tpeData }),
+      };
+    });
     const paidCents = paymentList.reduce((sum: number, p: any) => {
       const amount = Number(p?.amount);
       if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("Montant de paiement invalide");

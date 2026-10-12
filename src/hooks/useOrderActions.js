@@ -389,6 +389,7 @@ export function useOrderActions(store, {
       payments: paymentList,
       tip: Number(meta?.tip || 0),
       operatorId: currentStaff?.id,
+      printReceipt: meta?.printReceipt !== false,
     });
 
     return receipt;
@@ -398,7 +399,7 @@ export function useOrderActions(store, {
    * Ticket par convive : encaisse une partie des lignes sur un ticket séparé ; la note reste ouverte.
    * Montant et ticket définitifs calculés par le serveur (history:new_entry).
    */
-  const partialCheckout = (orderId, lines, payments, amount) => {
+  const partialCheckout = (orderId, lines, payments, amount, printReceipt = true) => {
     updateOrder(orderId, (o) => ({
       ...o,
       paidTotal: Math.round(((o.paidTotal || 0) + amount) * 100) / 100,
@@ -414,6 +415,7 @@ export function useOrderActions(store, {
       paymentMethod: payments.length === 1 ? payments[0].method : "partage",
       tip: 0,
       operatorId: currentStaff?.id,
+      printReceipt,
     });
     pushToast(`Ticket émis : ${payments[0]?.label || "convive"} (${amount.toFixed(2)} €)`, "server");
   };
@@ -423,6 +425,11 @@ export function useOrderActions(store, {
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
     emit("order:cancel_offpremise", { orderId });
     pushToast("Commande annulée", "server");
+  };
+
+  const setBillRequested = (orderId, requested) => {
+    updateOrder(orderId, (o) => ({ ...o, billRequestedAt: requested ? Date.now() : null }));
+    emit("order:request_bill", { orderId, requested });
   };
 
   const setOrderCovers = (orderId, covers) => {
@@ -491,7 +498,8 @@ export function useOrderActions(store, {
     updateOrder(orderId, (o) => ({
       ...o,
       items: o.items.map((i) => {
-        if ((course === "suite" || i.course === course) && i.courseStatus === "held") {
+        // Même règle que le serveur : un brouillon part par l'envoi en cuisine, pas par la réclame
+        if ((course === "suite" || i.course === course) && i.courseStatus === "held" && i.status !== "draft") {
           return { ...i, courseStatus: "called", status: "new" };
         }
         return i;
@@ -646,6 +654,7 @@ export function useOrderActions(store, {
     partialCheckout,
     cancelOffPremiseOrder,
     setOrderCovers,
+    setBillRequested,
     toggleAlert,
     startPrep,
     markReady,

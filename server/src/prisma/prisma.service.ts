@@ -47,6 +47,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     for (const sql of Object.values(NF525_TRIGGERS)) {
       await this.$executeRawUnsafe(sql);
     }
+    // Idempotence : une action hors-ligne n'est jamais rejouée au-delà de 12 h, 30 jours de mémoire suffisent
+    await this.processedAction.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - 30 * 86400000) } } });
   }
 
   async onModuleDestroy() {

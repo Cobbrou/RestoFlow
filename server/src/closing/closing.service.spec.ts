@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ClosingService, ticketCovers } from "./closing.service";
+import { ClosingService, aggregateTickets, ticketCovers } from "./closing.service";
 
 describe("ticketCovers", () => {
   it("prend les couverts saisis, 1 par défaut, 0 pour un avoir", () => {
@@ -68,5 +68,78 @@ describe("ClosingService.generateFecExport", () => {
     expect(fec.isBalanced).toBe(true);
     expect(fec.totalDebit).toBe(25);
     expect(fec.content).toContain("|468600|Pourboires à reverser|");
+  });
+});
+
+describe("ClosingService.generateFecExport : numérotation", () => {
+  it("numérote les écritures par le n° de séquence fiscal, stable d'un export à l'autre", async () => {
+    const ticket = (seq: number) => ({
+      id: `h${seq}`, ticketNumber: `FAC-2026-${seq}`, sequenceNumber: seq, type: "SALE", createdAt: new Date("2026-10-10T12:00:00"),
+      total: 11, tip: 0, paymentMethod: "carte", payments: JSON.stringify([{ method: "carte", amount: 11 }]),
+      vatDetails: JSON.stringify({ rates: [{ rate: 10, ht: 10, vat: 1 }] }),
+    });
+    const prisma: any = { orderHistory: { findMany: vi.fn().mockResolvedValue([ticket(41), ticket(42)]) } };
+    const config: any = { getConfig: vi.fn().mockResolvedValue({ siret: "98765432100012", fecExportConfig: null }) };
+    const fec = await new ClosingService(prisma, config, {} as any).generateFecExport({ startDate: "2026-10-10" });
+    expect(fec.content).toContain("|ECR000041|");
+    expect(fec.content).toContain("|ECR000042|");
+    expect(fec.content).not.toContain("|ECR000001|");
+  });
+
+  it("impute titres-restaurant et chèques sur leurs comptes de tiers", async () => {
+    const prisma: any = {
+      orderHistory: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: "h1", ticketNumber: "FAC-2026-1", sequenceNumber: 1, type: "SALE", createdAt: new Date("2026-10-10T12:00:00"),
+          total: 22, tip: 0, paymentMethod: "partage",
+          payments: JSON.stringify([{ method: "titre_resto", amount: 12 }, { method: "cheque", amount: 10 }]),
+          vatDetails: JSON.stringify({ rates: [{ rate: 10, ht: 20, vat: 2 }] }),
+        }]),
+      },
+    };
+    const config: any = { getConfig: vi.fn().mockResolvedValue({ siret: "98765432100012", fecExportConfig: null }) };
+    const fec = await new ClosingService(prisma, config, {} as any).generateFecExport();
+    expect(fec.isBalanced).toBe(true);
+    expect(fec.content).toContain("|511300|Titres-restaurant à encaisser|");
+    expect(fec.content).toContain("|511200|Chèques à encaisser|");
+  });
+});
+
+describe("aggregateTickets (commun aux rapports X et Z)", () => {
+  it("cumule en centimes : TVA par taux, règlements, remises, pourboires, avoirs et anciens tickets", () => {
+    const tickets = [
+      {
+        total: 10.1, subtotal: 11.1, tip: 0.2, covers: 2, type: "SALE",
+        discount: JSON.stringify({ amount: 1 }),
+        vatDetails: JSON.stringify({ rates: [{ rate: 10, ht: 9.18, vat: 0.92, ttc: 10.1 }] }),
+        payments: JSON.stringify([{ method: "especes", amount: 10.3 }]),
+      },
+      {
+        total: 0.2, tip: 0, type: "SALE",
+        vatDetails: JSON.stringify({ rates: [{ rate: 20, ht: 0.17, vat: 0.03, ttc: 0.2 }] }),
+        payments: JSON.stringify([{ method: "carte", amount: 0.2 }]),
+      },
+      // Ancien ticket sans ventilation : 10 % par défaut, mode du ticket
+      { total: 11, paymentMethod: "carte" },
+      // Avoir : montants négatifs, aucun couvert
+      {
+        total: -0.2, type: "CREDIT_NOTE",
+        vatDetails: JSON.stringify({ rates: [{ rate: 20, ht: -0.17, vat: -0.03, ttc: -0.2 }] }),
+        payments: JSON.stringify([{ method: "carte", amount: -0.2 }]),
+      },
+    ];
+    const t = aggregateTickets(tickets);
+    expect(t.totalNet).toBe(21.1);
+    expect(t.totalGross).toBe(22.1);
+    expect(t.totalDiscounts).toBe(1);
+    expect(t.totalTips).toBe(0.2);
+    expect(t.totalHT).toBe(19.18);
+    expect(t.totalVAT).toBe(1.92);
+    expect(t.coversCount).toBe(4);
+    expect(t.paymentsBreakdown).toEqual({ carte: 11, especes: 10.3, autre: 0 });
+    expect(t.vatBreakdown).toEqual([
+      { rate: 10, ht: 9.18, vat: 0.92, ttc: 10.1 },
+      { rate: 20, ht: 0, vat: 0, ttc: 0 },
+    ]);
   });
 });

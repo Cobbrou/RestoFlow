@@ -22,9 +22,5 @@ export class StockMovementDto {
 
   @IsOptional()
   @IsString()
-  staffId?: string;
-
-  @IsOptional()
-  @IsString()
   reason?: string;
 }

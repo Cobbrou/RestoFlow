@@ -6,7 +6,7 @@ import {
   ArrowRightLeft, Merge, BellRing
 } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
-import { isAvailable, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice, resolveOptions, resolveMenuOptions, isOffPremise, orderLabel, formatPickup } from "../../utils/index.js";
+import { isAvailable, isWithinHours, noteIndicatesAllergy, elapsed, money, isHappyHourActive, getProductEffectivePrice, resolveOptions, resolveMenuOptions, isOffPremise, orderLabel, formatPickup } from "../../utils/index.js";
 import Modal from "../../components/Modal.jsx";
 import PaymentModal from "./PaymentModal.jsx";
 import DiscountModal from "./DiscountModal.jsx";
@@ -38,7 +38,7 @@ export default function OrderTaking({
   currentStaff, roles = [],
   onToggleProductAvailable,
   onBack, onAdd, onAddComposedMenu,
-  onQty, onRemove, onVoid, onNote, onSetCovers,
+  onQty, onRemove, onVoid, onNote, onSetCovers, onRequestBill,
   onSend, onServe, onCheckout, onPartialCheckout, onCancelOrder, onBackToPlan, onToast,
   onApplyDiscount, onRemoveDiscount,
   onCallCourse,
@@ -165,6 +165,7 @@ export default function OrderTaking({
       }
       return;
     }
+    if (!isWithinHours(p.hours) && !confirm(`« ${p.name} » est servi ${p.hours}. L'ajouter quand même ?`)) return;
     if (p.isMenu) setComposerMenu(p);
     else if (p.options?.length) setOptionsFor(p);
     else onAdd(p);
@@ -387,6 +388,18 @@ export default function OrderTaking({
             <Receipt size={14} /> Partager / Encaisser la note
           </button>
         ) : null}
+
+        {table && order && sentItems.length > 0 && onRequestBill && (
+          <button
+            onClick={() => onRequestBill(!order.billRequestedAt)}
+            className="rf-tap w-full py-2 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 border"
+            style={order.billRequestedAt
+              ? { background: "#6B5B95", color: "#fff", borderColor: "#6B5B95" }
+              : { color: "#6B5B95", borderColor: "#6B5B9555" }}
+          >
+            <Receipt size={14} /> {order.billRequestedAt ? "Addition demandée · annuler" : "Addition demandée"}
+          </button>
+        )}
 
         {/* Emporter / comptoir créé par erreur : annulable tant que rien n'est parti en cuisine ni encaissé */}
         {!table && order && onCancelOrder && sentItems.length === 0 && !(order.paidTotal > 0) && (
@@ -633,13 +646,19 @@ function ProductCard({ p, isMobile, onTap, portionsLeft, config, now, canManageA
   const isHH = isHappyHourActive(config, new Date(now || Date.now()));
   const effectivePrice = getProductEffectivePrice(p, config, new Date(now || Date.now()));
   const hasHhDiscount = isHH && effectivePrice < p.price;
+  const offHours = !isWithinHours(p.hours, new Date(now || Date.now()));
 
   return (
     <button
       onClick={onTap}
       className={`rf-tap rf-anim-pop relative text-left rounded-xl border bg-white ${isMobile ? "p-3.5" : "p-3"} flex gap-3 items-start ${!isOutOfStock ? "border-black/10 hover:border-black/25" : "border-[#C1361B]/30"}`}
-      style={{ opacity: !isOutOfStock ? 1 : 0.6 }}
+      style={{ opacity: isOutOfStock ? 0.6 : offHours ? 0.45 : 1 }}
     >
+      {offHours && (
+        <span className="absolute bottom-1.5 right-1.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-black/10 text-[#2B2622] z-10" title="Hors créneau de vente">
+          🕒 {p.hours}
+        </span>
+      )}
       {isOutOfStock ? (
         <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
           <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" style={{ background: "#C1361B", color: "#FFF7ED" }}>

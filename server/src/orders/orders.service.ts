@@ -47,6 +47,35 @@ const MAX_OFFLINE_AGE_MS = 12 * 3600 * 1000;
 const validCovers = (n: unknown): number | null =>
   typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
 
+/**
+ * Composition d'un menu envoyée par le terminal : une entrée par étape de la formule, dans l'ordre,
+ * avec exactement `count` produits proposés par cette étape. Renvoie les étapes de la formule.
+ */
+export function checkMenuComposition(groups: any[], composition: unknown) {
+  if (!Array.isArray(groups) || !Array.isArray(composition) || composition.length !== groups.length) {
+    throw new BadRequestException("Composition du menu incomplète");
+  }
+  groups.forEach((g, i) => {
+    const ids = (composition[i] as any)?.productIds;
+    const allowed: string[] = Array.isArray(g?.productIds) ? g.productIds : [];
+    if (!Array.isArray(ids) || ids.length !== (Number(g?.count) || 1) || !ids.every((id) => allowed.includes(id))) {
+      throw new BadRequestException(`${g?.title || "Menu"} : choix invalide`);
+    }
+  });
+  return groups;
+}
+
+// Ouvertures de table sérialisées par table : deux terminaux qui ouvrent la même table au même instant
+// obtiennent la même commande, jamais deux commandes ouvertes
+// ponytail: verrou en mémoire mono-processus, index unique partiel en base si plusieurs instances serveur
+const tableLocks = new Map<string, Promise<unknown>>();
+function withTableLock<T>(tableId: string, fn: () => Promise<T>): Promise<T> {
+  const run = (tableLocks.get(tableId) || Promise.resolve()).catch(() => {}).then(fn);
+  tableLocks.set(tableId, run);
+  run.finally(() => tableLocks.get(tableId) === run && tableLocks.delete(tableId)).catch(() => {});
+  return run;
+}
+
 @Injectable()
 export class OrdersService {
   constructor(private prisma: PrismaService) {}
@@ -68,6 +97,7 @@ export class OrdersService {
       pickupAt: order.pickupAt ? new Date(order.pickupAt).getTime() : null,
       pickupNumber: order.pickupNumber ?? null,
       covers: order.covers ?? null,
+      billRequestedAt: order.billRequestedAt ? new Date(order.billRequestedAt).getTime() : null,
       paidTotal: order.paidTotal || 0,
       externalRef: order.externalRef ?? null,
       table: order.table ? {
@@ -133,35 +163,29 @@ export class OrdersService {
 
     const resolvedTableId = table.id;
 
-    let order = null;
-    if (orderId) {
-      order = await this.prisma.order.findUnique({
-        where: { id: orderId },
-        include: { items: true, table: true },
-      });
-    }
-
-    if (!order) {
-      order = await this.prisma.order.findFirst({
-        where: { tableId: resolvedTableId, status: "open" },
-        include: { items: true, table: true },
-      });
-    }
-
-    if (!order) {
-      order = await this.prisma.order.create({
-        data: {
-          id: orderId || `ord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          tableId: resolvedTableId,
-          server: serverName || "Service",
-          status: "open",
-          covers: validCovers(covers),
-        },
-        include: { items: true, table: true },
-      });
-    }
-
-    return this.formatOrder(order);
+    return withTableLock(resolvedTableId, async () => {
+      // Seule une commande encore ouverte sur cette table est reprise (rejeu après encaissement, autre table : ignorée)
+      const order =
+        (await this.prisma.order.findFirst({
+          where: { tableId: resolvedTableId, status: "open" },
+          include: { items: true, table: true },
+        })) ||
+        (await this.prisma.order.create({
+          data: {
+            // Identifiant du terminal réutilisé seulement s'il est libre
+            id:
+              orderId && !(await this.prisma.order.findUnique({ where: { id: orderId } }))
+                ? orderId
+                : `ord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            tableId: resolvedTableId,
+            server: serverName || "Service",
+            status: "open",
+            covers: validCovers(covers),
+          },
+          include: { items: true, table: true },
+        }));
+      return this.formatOrder(order);
+    });
   }
 
   /**
@@ -189,6 +213,16 @@ export class OrdersService {
     const value = validCovers(covers);
     if (value == null) throw new BadRequestException("Nombre de couverts invalide (1 à 99)");
     const res = await this.prisma.order.updateMany({ where: { id: orderId, status: "open" }, data: { covers: value } });
+    if (res.count === 0) throw new NotFoundException("Commande introuvable ou déjà encaissée");
+    return this.findById(orderId);
+  }
+
+  /** Addition demandée : valeur explicite (pas de bascule) pour qu'un rejeu hors-ligne reste idempotent */
+  async setBillRequested(orderId: string, requested: boolean) {
+    const res = await this.prisma.order.updateMany({
+      where: { id: orderId, status: "open" },
+      data: { billRequestedAt: requested ? new Date() : null },
+    });
     if (res.count === 0) throw new NotFoundException("Commande introuvable ou déjà encaissée");
     return this.findById(orderId);
   }
@@ -281,7 +315,7 @@ export class OrdersService {
         : `it_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     // 🔒 Prix, nom et taux de TVA viennent toujours de la base, jamais du client
-    const { dbProduct, name, price: basePrice, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
+    const { dbProduct, menu, name, price: basePrice, vatRate } = await this.resolveCatalogPrice(data.product?.id, data.addedAt);
 
     // Options (cuisson, suppléments) validées contre la fiche produit ; le supplément s'ajoute au prix de la ligne
     let optionsLabel = "";
@@ -315,7 +349,8 @@ export class OrdersService {
     // Hors salle : tout part ensemble, pas de suites à réclamer
     if (isOffPremise(order)) course = courseStatus = "direct";
 
-    if (!data.product.isMenu) {
+    // 🔒 Menu ou produit : déduit de l'identifiant en base, jamais du drapeau isMenu envoyé par le client
+    if (!menu) {
       const existing = order.items.find(
         (i: any) =>
           i.productId === data.product.id &&
@@ -352,18 +387,22 @@ export class OrdersService {
       }
     } else {
       // Options des composants (cuisson du burger…) : composition[g].options[i] = picks de productIds[i]
+      const groups = checkMenuComposition(JSON.parse(menu.groups || "[]"), data.composition);
       const parts: string[] = [];
       const components: { price: number; vatRate: number }[] = [];
+      const composition: any[] = [];
       let extraCents = 0;
-      for (const g of Array.isArray(data.composition) ? data.composition : []) {
-        const ids: string[] = Array.isArray(g?.productIds) ? g.productIds : [];
+      for (const [gi, g] of (data.composition as any[]).entries()) {
+        const ids: string[] = g.productIds;
+        const names: string[] = [];
         for (const [i, pid] of ids.entries()) {
           const p = await this.prisma.product.findUnique({
             where: { id: pid },
             select: { name: true, options: true, price: true, vatRate: true },
           });
-          if (!p) continue;
+          if (!p) throw new BadRequestException(`${groups[gi].title || "Menu"} : produit introuvable`);
           components.push(p);
+          names.push(p.name);
           try {
             const r = resolveOptions(normalizeOptionGroups(JSON.parse(p.options || "[]")), g.options?.[i]);
             extraCents += r.extraCents;
@@ -372,6 +411,8 @@ export class OrdersService {
             throw new BadRequestException(`${p.name} — ${e.message}`);
           }
         }
+        // Libellés relus en base : le bon cuisine n'affiche que ce qui a été validé
+        composition.push({ title: groups[gi].title, names, productIds: ids, options: ids.map((_, i) => g.options?.[i] || []) });
       }
       const split = menuVatSplit(components);
       await this.prisma.orderItem.create({
@@ -389,7 +430,7 @@ export class OrdersService {
           options: parts.join(" | ") || null,
           status: "draft",
           isMenu: true,
-          composition: data.composition ? JSON.stringify(data.composition) : null,
+          composition: JSON.stringify(composition),
           course: isOffPremise(order) ? "direct" : data.course || "plat",
           courseStatus: isOffPremise(order) ? "direct" : data.courseStatus || "held",
           station: "kitchen",
@@ -417,7 +458,7 @@ export class OrdersService {
       const menu = await this.prisma.menu.findUnique({ where: { id: productId.slice(5) } });
       if (!menu) throw new NotFoundException("Menu introuvable");
       // Taux par défaut ; addItem le remplace par celui des composants (ou une ventilation si menu mixte)
-      return { dbProduct: null, name: menu.name, price: menu.price, vatRate: 10 };
+      return { dbProduct: null, menu, name: menu.name, price: menu.price, vatRate: 10 };
     }
 
     const dbProduct = await this.prisma.product.findUnique({ where: { id: productId } });
@@ -427,7 +468,7 @@ export class OrdersService {
       select: { happyHourConfig: true },
     });
     const hh = cfg?.happyHourConfig ? JSON.parse(cfg.happyHourConfig) : null;
-    return { dbProduct, name: dbProduct.name, price: effectivePrice(dbProduct, hh, at), vatRate: dbProduct.vatRate };
+    return { dbProduct, menu: null, name: dbProduct.name, price: effectivePrice(dbProduct, hh, at), vatRate: dbProduct.vatRate };
   }
 
   async changeQty(orderId: string, itemId: string, delta: number) {
@@ -529,6 +570,7 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Commande introuvable : ${orderId}`);
     }
+    if (order.status !== "open") throw new BadRequestException("Commande déjà encaissée ou annulée");
 
     // Une suite n'attend la réclame que si une suite précédente reste à servir (ex. burger seul : envoi direct)
     const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
@@ -547,10 +589,13 @@ export class OrdersService {
       },
     });
 
-    await this.prisma.orderItem.updateMany({
-      where: { orderId: order.id, status: "draft" },
-      data: { status: "new" },
-    });
+    // 🔒 Passage conditionnel ligne par ligne : deux envois simultanés (double appui, deux terminaux)
+    // ne réclament jamais la même ligne ; seules les lignes réellement envoyées ici sont déstockées et imprimées
+    const sentIds: string[] = [];
+    for (const item of order.items.filter((i) => i.status === "draft")) {
+      const res = await this.prisma.orderItem.updateMany({ where: { id: item.id, status: "draft" }, data: { status: "new" } });
+      if (res.count === 1) sentIds.push(item.id);
+    }
 
     const updated = await this.prisma.order.findUnique({
       where: { id: order.id },
@@ -560,6 +605,7 @@ export class OrdersService {
     return {
       order: this.formatOrder(updated),
       rawOrder: order,
+      sentIds,
     };
   }
 
@@ -636,10 +682,12 @@ export class OrdersService {
     });
     if (!order) throw new NotFoundException("Commande introuvable");
 
+    // Seules les suites déjà envoyées (et déstockées) sont réclamées ; un brouillon part par l'envoi en cuisine
     const heldItems = order.items.filter(
       (i: any) =>
         (course === "suite" || i.course === course) &&
-        i.courseStatus === "held"
+        i.courseStatus === "held" &&
+        i.status !== "draft"
     );
 
     if (heldItems.length > 0) {

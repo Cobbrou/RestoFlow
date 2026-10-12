@@ -1,3 +1,19 @@
+// Modes de règlement (liste serveur : PAYMENT_METHODS de billing.service.ts) ; "partage" = ticket à plusieurs règlements
+export const PAYMENT_LABELS = {
+  carte: "Carte Bancaire",
+  especes: "Espèces",
+  cheque: "Chèque",
+  titre_resto: "Titre-restaurant",
+  autre: "Autre",
+  partage: "Partagé",
+};
+
+/** Lignes d'une ventilation par mode pour les rapports X / Z : carte, espèces et autre toujours, les autres modes s'ils ont servi */
+export const paymentRows = (breakdown = {}) =>
+  Object.keys(PAYMENT_LABELS)
+    .filter((m) => ["carte", "especes", "autre"].includes(m) || breakdown[m])
+    .map((m) => [m, breakdown[m] || 0]);
+
 export const money = (n) => {
   const val = typeof n === "number" && !isNaN(n) ? n : 0;
   return val.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -68,6 +84,23 @@ export function isAvailable(product) {
 }
 
 /**
+ * Créneaux de vente d'un produit ou d'une formule (« 11:30-14:30, 19:00-22:30 », normalisés par le serveur).
+ * Sans créneau : toute la journée. Une fin avant le début couvre minuit (« 22:00-02:00 »).
+ */
+export function isWithinHours(hours, date = new Date()) {
+  if (!hours) return true;
+  const toMin = (t) => {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const now = date.getHours() * 60 + date.getMinutes();
+  return hours.split(",").some((slot) => {
+    const [start, end] = slot.trim().split("-").map(toMin);
+    return start < end ? now >= start && now < end : now >= start || now < end;
+  });
+}
+
+/**
  * Détecte si une note de commande contient un mot-clé d'allergie.
  */
 export function noteIndicatesAllergy(notes) {
@@ -94,7 +127,7 @@ export function orderKitchenStatus(order) {
 
 /**
  * Retourne le statut visuel d'une table (utilisé par le plan de salle et la cuisine).
- * @returns {"free"|"occupied"|"sent"|"ready"|"alert"|"reserved"}
+ * @returns {"free"|"occupied"|"sent"|"ready"|"bill"|"alert"|"reserved"}
  */
 export function tableStatus(table, order) {
   if (order) {
@@ -103,8 +136,9 @@ export function tableStatus(table, order) {
     const hasReady    = order.items.some((i) => i.status === "ready");
     const allServed   = order.items.length > 0 && order.items.every((i) => i.status === "served");
     if (table.alert) return "alert";
-    if (allServed)   return "occupied";
     if (hasReady)    return "ready";
+    if (order.billRequestedAt) return "bill";
+    if (allServed)   return "occupied";
     if (hasSent)     return "sent";
     if (hasDraft)    return "occupied";
   }
@@ -122,6 +156,7 @@ export const STATUS_META = {
   sent:     { label: "Envoyée en cuisine",  color: "#3E7CB1", dot: "🔵" },
   ready:    { label: "Prête à servir",      color: "#2E9E5B", dot: "🟢" },
   alert:    { label: "Attention",           color: "#C1361B", dot: "🔴" },
+  bill:     { label: "Addition demandée",   color: "#6B5B95", dot: "🟣" },
   reserved: { label: "Réservée",            color: "#8A8378", dot: "⚪" },
 };
 
@@ -150,6 +185,7 @@ export function menuToProduct(menu, allProducts) {
     price: menu.price,
     emoji: menu.emoji || "📋",
     available: menu.available !== false,
+    hours: menu.hours || null,
     allergens,
     desc:
       menu.desc ||

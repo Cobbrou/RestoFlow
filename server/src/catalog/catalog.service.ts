@@ -1,14 +1,36 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { normalizeOptionGroups } from "../billing/pricing";
+import { numOr } from "../stock/stock.service";
+
+/**
+ * Créneaux de vente « 11:30-14:30, 19:00-22:30 » (fin après minuit admise : « 22:00-02:00 »).
+ * Vide → null (toute la journée) ; format invalide → refus.
+ */
+export function normalizeHours(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const slots = text.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const invalid = () => new BadRequestException(`Créneau horaire invalide : « ${text} » (ex. 11:30-14:30, 19:00-22:30)`);
+  const norm = (t: string) => {
+    const m = t.trim().match(/^([01]?\d|2[0-3])[:h]([0-5]\d)$/);
+    if (!m) throw invalid();
+    return `${m[1].padStart(2, "0")}:${m[2]}`;
+  };
+  return slots
+    .map((slot) => {
+      const parts = slot.split("-");
+      if (parts.length !== 2) throw invalid();
+      const [start, end] = parts.map(norm);
+      if (start === end) throw invalid();
+      return `${start}-${end}`;
+    })
+    .join(", ");
+}
 
 @Injectable()
 export class CatalogService {
   constructor(private prisma: PrismaService) {}
-
-  async getCategories() {
-    return this.prisma.category.findMany();
-  }
 
   async getProducts() {
     const products = await this.prisma.product.findMany();
@@ -42,6 +64,7 @@ export class CatalogService {
     station?: string;
     vatRate?: number;
     options?: unknown;
+    hours?: string | null;
   }) {
     const id = data.id || `prod_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const allergensStr = Array.isArray(data.allergens)
@@ -64,6 +87,7 @@ export class CatalogService {
         station: data.station || (["boissons", "bieres", "vins", "cafes"].includes(data.cat) ? "bar" : "kitchen"),
         vatRate: data.vatRate || (["boissons", "bieres", "vins"].includes(data.cat) ? 20 : 10),
         options: JSON.stringify(normalizeOptionGroups(data.options)),
+        hours: normalizeHours(data.hours),
       },
     });
 
@@ -88,6 +112,7 @@ export class CatalogService {
     station?: string;
     vatRate?: number;
     options?: unknown;
+    hours?: string | null;
     initialStock: number;
     minThreshold?: number;
     costPerUnit?: number;
@@ -104,7 +129,7 @@ export class CatalogService {
 
     const ingCategory = ["boissons", "bieres", "vins", "cafes"].includes(data.cat) ? "Boissons" : "Épicerie";
     const initialStock = Number(data.initialStock) || 0;
-    const minThreshold = Number(data.minThreshold) || 5;
+    const minThreshold = numOr(data.minThreshold, 5);
     const costPerUnit = Number(data.costPerUnit) || 0;
 
     return await this.prisma.$transaction(async (tx) => {
@@ -123,6 +148,7 @@ export class CatalogService {
           station: data.station || (["boissons", "bieres", "vins", "cafes"].includes(data.cat) ? "bar" : "kitchen"),
           vatRate: data.vatRate || (["boissons", "bieres", "vins"].includes(data.cat) ? 20 : 10),
           options: JSON.stringify(normalizeOptionGroups(data.options)),
+          hours: normalizeHours(data.hours),
         },
       });
 
@@ -204,6 +230,7 @@ export class CatalogService {
     if (data.station !== undefined) patch.station = data.station;
     if (data.vatRate !== undefined) patch.vatRate = Number(data.vatRate);
     if (data.options !== undefined) patch.options = JSON.stringify(normalizeOptionGroups(data.options));
+    if (data.hours !== undefined) patch.hours = normalizeHours(data.hours);
 
     const updated = await this.prisma.product.update({
       where: { id },

@@ -7,6 +7,21 @@ import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 
 export const STAFF_ROOM = "staff";
 
+// Données réservées : seuls les postes ayant au moins une de ces permissions les reçoivent
+export const SENSITIVE = {
+  history: ["caisse.checkout", "caisse.history", "caisse.close", "caisse.fec", "dashboard.view"],
+  closings: ["caisse.close", "caisse.history", "caisse.fec"],
+  stockMovements: ["gestion.stocks", "gestion.recipes"],
+  staffContacts: ["gestion.staff"],
+};
+
+const ADMIN_ROOM = "perm:*";
+/** Rooms des postes ayant au moins une des permissions (l'admin les a toutes) : server.to(permRooms(...)) */
+export const permRooms = (perms: string[]) => [ADMIN_ROOM, ...perms.map((p) => `perm:${p}`)];
+
+export const hasAnyPermission = (user: SessionPayload | null, perms: string[]) =>
+  !!user && (user.roleId === "admin" || perms.some((p) => (user.permissions || []).includes(p)));
+
 /**
  * Extrait et vérifie le jeton de session d'un socket (handshake ou header Authorization),
  * puis relit en base le statut actif et les droits de l'équipier
@@ -20,6 +35,9 @@ export async function authenticateSocket(client: Socket, authService: AuthServic
   // 🔒 Seuls les sockets authentifiés reçoivent les diffusions (room STAFF_ROOM)
   if (user) client.join(STAFF_ROOM);
   else client.leave(STAFF_ROOM);
+  // Rooms de permissions recalculées à chaque authentification (changement de rôle pris en compte)
+  for (const room of client.rooms) if (room.startsWith("perm:")) client.leave(room);
+  if (user) client.join(user.roleId === "admin" ? [ADMIN_ROOM] : (user.permissions || []).map((p) => `perm:${p}`));
   return user;
 }
 

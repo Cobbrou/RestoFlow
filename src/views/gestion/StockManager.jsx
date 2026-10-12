@@ -16,9 +16,14 @@ import {
   Clock,
   Archive,
   RotateCcw,
+  ShoppingCart,
+  Download,
+  ClipboardCheck,
 } from "lucide-react";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { money } from "../../utils/index.js";
+import { reorderBySupplier, reorderCsv } from "../../utils/reorder.js";
+import { triggerFileDownload } from "../../utils/fec.js";
 
 const CATEGORIES = [
   "Boucherie",
@@ -34,12 +39,13 @@ export default function StockManager({
   ingredients = [],
   stockMovements = [],
   onAddMovement,
+  onInventory,
   onAddIngredient,
   onUpdateIngredient,
   onDeleteIngredient,
   onRestoreIngredient,
 }) {
-  const [subView, setSubView] = useState("levels"); // "levels" | "movements"
+  const [subView, setSubView] = useState("levels"); // "levels" | "movements" | "reorder"
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "ok" | "low" | "out"
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -48,6 +54,7 @@ export default function StockManager({
   // Modals state
   const [deliveryModalOpen, setDeliveryModalOpen] = useState(false);
   const [wasteModalOpen, setWasteModalOpen] = useState(false);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [ingredientModal, setIngredientModal] = useState(null); // null | "new" | ingredient object
 
   // KPIs (calculés uniquement sur les ingrédients actifs non archivés)
@@ -55,6 +62,8 @@ export default function StockManager({
     () => ingredients.filter((i) => !i.archived),
     [ingredients]
   );
+
+  const reorder = useMemo(() => reorderBySupplier(activeIngredients), [activeIngredients]);
 
   const summary = useMemo(() => {
     let totalValue = 0;
@@ -146,7 +155,7 @@ export default function StockManager({
 
       {/* ── Barre d'actions & Sous-onglets ───────────────────────── */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-black/5 shadow-xs">
-        <div className="flex gap-1 p-1 rounded-xl bg-black/5 w-fit">
+        <div className="flex flex-wrap gap-1 p-1 rounded-xl bg-black/5 w-fit">
           <button
             onClick={() => setSubView("levels")}
             className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
@@ -167,6 +176,16 @@ export default function StockManager({
           >
             <History size={14} /> Journal des Mouvements ({stockMovements.length})
           </button>
+          <button
+            onClick={() => setSubView("reorder")}
+            className="rf-tap flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{
+              background: subView === "reorder" ? "#2B2622" : "transparent",
+              color: subView === "reorder" ? "#FAF6EE" : "#5B5346",
+            }}
+          >
+            <ShoppingCart size={14} /> À commander ({reorder.reduce((n, g) => n + g.lines.length, 0)})
+          </button>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -181,6 +200,12 @@ export default function StockManager({
             className="rf-tap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-[#C1361B] hover:opacity-90 shadow-xs"
           >
             <TrendingDown size={14} /> Déclarer une Perte
+          </button>
+          <button
+            onClick={() => setInventoryOpen(true)}
+            className="rf-tap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-[#3E7CB1] hover:opacity-90 shadow-xs"
+          >
+            <ClipboardCheck size={14} /> Inventaire
           </button>
           <button
             onClick={() => setIngredientModal("new")}
@@ -426,6 +451,59 @@ export default function StockManager({
         </div>
       )}
 
+      {/* ── Vue 3 : Suggestion de commande fournisseur ───────────── */}
+      {subView === "reorder" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2 bg-white p-3 rounded-2xl border border-black/10">
+            <p className="text-xs text-[#5B5346]">
+              Ingrédients au seuil d'alerte ou dessous, à recommander jusqu'au stock idéal.
+            </p>
+            <button
+              onClick={() => triggerFileDownload("﻿" + reorderCsv(reorder), `commande-fournisseurs-${new Date().toISOString().slice(0, 10)}.csv`)}
+              disabled={reorder.length === 0}
+              className="rf-tap shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-[#2B2622] disabled:opacity-40"
+            >
+              <Download size={14} /> Exporter CSV
+            </button>
+          </div>
+          {reorder.length === 0 && (
+            <p className="text-center text-sm text-[#8A8378] py-10">Aucun ingrédient à recommander.</p>
+          )}
+          {reorder.map((g) => (
+            <div key={g.supplier} className="bg-white rounded-2xl border border-black/10 overflow-hidden shadow-xs">
+              <div className="p-3 border-b border-black/5 bg-black/[.02] flex items-center justify-between">
+                <p className="text-sm font-bold text-[#2B2622]">{g.supplier}</p>
+                <span className="rf-mono text-xs font-bold text-[#2B2622]">{money(g.totalCents / 100)} HT</span>
+              </div>
+              <div className="overflow-x-auto rf-scrollbar">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-black/10 text-[#8A8378] font-bold uppercase tracking-wider">
+                      <th className="py-2 px-4">Ingrédient</th>
+                      <th className="py-2 px-3">Réf.</th>
+                      <th className="py-2 px-3">Stock</th>
+                      <th className="py-2 px-3">À commander</th>
+                      <th className="py-2 px-3 text-right">Estimation HT</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-black/5">
+                    {g.lines.map(({ ingredient: i, qty, totalCents }) => (
+                      <tr key={i.id}>
+                        <td className="py-2 px-4 font-semibold text-[#2B2622]">{i.name}</td>
+                        <td className="py-2 px-3 text-[#8A8378]">{i.supplierRef || "—"}</td>
+                        <td className="py-2 px-3">{i.currentStock} {i.unit}</td>
+                        <td className="py-2 px-3 font-bold">{qty} {i.unit}</td>
+                        <td className="py-2 px-3 text-right rf-mono">{i.costPerUnit > 0 ? money(totalCents / 100) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── Vue 2 : Journal des Mouvements ───────────────────────── */}
       {subView === "movements" && (
         <div className="bg-white rounded-2xl border border-black/10 overflow-hidden shadow-xs">
@@ -545,6 +623,17 @@ export default function StockManager({
       )}
 
       {/* ── Modale Déclaration de Perte ───────────────────────────── */}
+      {inventoryOpen && (
+        <InventoryModal
+          ingredients={activeIngredients}
+          onClose={() => setInventoryOpen(false)}
+          onSave={(counts) => {
+            onInventory?.(counts);
+            setInventoryOpen(false);
+          }}
+        />
+      )}
+
       {wasteModalOpen && (
         <WasteModal
           ingredients={ingredients}
@@ -844,6 +933,68 @@ function DeliveryModal({ ingredients, initialIngredientId, onClose, onSave, onSa
           className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#2E9E5B] shadow-xs"
         >
           Valider la réception
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Inventaire physique : seules les lignes saisies sont envoyées, l'écart devient un ajustement côté serveur */
+function InventoryModal({ ingredients, onClose, onSave }) {
+  const [counts, setCounts] = useState({});
+  const [search, setSearch] = useState("");
+  const sorted = [...ingredients].sort((a, b) => a.category.localeCompare(b.category, "fr") || a.name.localeCompare(b.name, "fr"));
+  const shown = sorted.filter((i) => i.name.toLowerCase().includes(search.toLowerCase()));
+  const lines = ingredients
+    .filter((i) => counts[i.id] !== undefined && counts[i.id] !== "" && Number(counts[i.id]) >= 0)
+    .map((i) => ({ ing: i, counted: Number(counts[i.id]) }));
+  const valueGap = lines.reduce((s, l) => s + (l.counted - l.ing.currentStock) * (l.ing.costPerUnit || 0), 0);
+
+  return (
+    <Modal title="📋 Inventaire physique" onClose={onClose} wide>
+      <input className={inputCls + " mb-3"} placeholder="Rechercher un ingrédient…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="max-h-[50vh] overflow-y-auto rf-scrollbar divide-y divide-black/5 border border-black/10 rounded-xl">
+        {shown.map((i) => {
+          const v = counts[i.id] ?? "";
+          const gap = v === "" ? null : Math.round((Number(v) - i.currentStock) * 1000) / 1000;
+          return (
+            <div key={i.id} className="flex items-center gap-3 px-3 py-2 text-xs">
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-[#2B2622] truncate">{i.name}</p>
+                <p className="text-[#8A8378]">{i.category} · théorique {i.currentStock} {i.unit}</p>
+              </div>
+              {gap !== null && gap !== 0 && (
+                <span className="font-bold" style={{ color: gap < 0 ? "#C1361B" : "#2E9E5B" }}>
+                  {gap > 0 ? "+" : ""}{gap} {i.unit}
+                </span>
+              )}
+              <div className="w-24 shrink-0">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                className={inputCls + " text-right"}
+                placeholder="Compté"
+                value={v}
+                onChange={(e) => setCounts((prev) => ({ ...prev, [i.id]: e.target.value }))}
+              />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-[#5B5346] mt-3">
+        {lines.length} ligne(s) comptée(s) · écart valorisé <b>{money(valueGap)}</b> HT
+      </p>
+      <div className="flex gap-2 mt-3 pt-2 border-t border-black/5">
+        <button onClick={onClose} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
+        <button
+          disabled={lines.length === 0}
+          onClick={() => onSave(lines.map((l) => ({ ingredientId: l.ing.id, counted: l.counted })))}
+          className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#3E7CB1] shadow-xs disabled:opacity-40"
+        >
+          Valider l'inventaire
         </button>
       </div>
     </Modal>

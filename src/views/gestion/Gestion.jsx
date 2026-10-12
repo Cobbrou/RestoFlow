@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Receipt, CreditCard, Banknote, Wallet, ShieldCheck, Boxes, FileSpreadsheet, Printer, Upload } from "lucide-react";
 import { CATEGORIES } from "../../data/categories.js";
 import { productsFromCsv, CSV_TEMPLATE } from "../../utils/catalogImport.js";
-import { isAvailable, money, deduplicateHistory, parseOptionsText, formatOptionsText } from "../../utils/index.js";
+import { isAvailable, money, deduplicateHistory, parseOptionsText, formatOptionsText, PAYMENT_LABELS } from "../../utils/index.js";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
@@ -493,6 +493,7 @@ function ProductForm({ product, categories, recipes, ingredients, onCancel, onSa
   const [cat,            setCat]            = useState(product?.cat            ?? categories[0]?.id);
   const [price,          setPrice]          = useState(product?.price          ?? "");
   const [happyHourPrice, setHappyHourPrice] = useState(product?.happyHourPrice ?? "");
+  const [hours, setHours] = useState(product?.hours ?? "");
   const [desc,           setDesc]           = useState(product?.desc           ?? "");
   const [emoji,          setEmoji]          = useState(product?.emoji          ?? "🍽️");
   const [allergens,      setAllergens]      = useState((product?.allergens     ?? []).join(", "));
@@ -543,6 +544,10 @@ function ProductForm({ product, categories, recipes, ingredients, onCancel, onSa
           <input type="number" step="0.5" min={0} className={inputCls} value={happyHourPrice} onChange={(e) => setHappyHourPrice(e.target.value)} placeholder="Optionnel" />
         </Field>
       </div>
+
+      <Field label="Créneaux de vente (vide : toute la journée)">
+        <input className={inputCls} value={hours} onChange={(e) => setHours(e.target.value)} placeholder="Ex : 11:30-14:30, 19:00-22:30" />
+      </Field>
 
       <Field label="Description courte">
         <input className={inputCls} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Ex : Bœuf charolais, cheddar affiné, oignons confits" />
@@ -684,6 +689,7 @@ function ProductForm({ product, categories, recipes, ingredients, onCancel, onSa
           onClick={() => onSave({
             name: name.trim(), cat, price: Number(price),
             happyHourPrice: happyHourPrice !== "" && !isNaN(Number(happyHourPrice)) ? Number(happyHourPrice) : null,
+            hours: hours.trim() || null,
             desc: desc.trim(),
             emoji: emoji || "🍽️",
             allergens: allergens.split(",").map((s) => s.trim()).filter(Boolean),
@@ -775,6 +781,7 @@ function MenuForm({ menu, products, onCancel, onSave }) {
   const [price,  setPrice]  = useState(menu?.price  ?? "");
   const [emoji,  setEmoji]  = useState(menu?.emoji  ?? "📋");
   const [desc,   setDesc]   = useState(menu?.desc   ?? "");
+  const [hours,  setHours]  = useState(menu?.hours  ?? "");
   const [groups, setGroups] = useState(
     menu?.groups ?? [{ id: uid("grp"), title: "Entrée", count: 1, productIds: [] }]
   );
@@ -823,6 +830,9 @@ function MenuForm({ menu, products, onCancel, onSave }) {
       </div>
       <Field label="Description (optionnelle)">
         <input className={inputCls + " mb-2"} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Ex : Entrée + Plat + Boisson" />
+      </Field>
+      <Field label="Créneaux de vente (vide : toute la journée)">
+        <input className={inputCls + " mb-2"} value={hours} onChange={(e) => setHours(e.target.value)} placeholder="Ex : 11:30-14:30 (formule midi)" />
       </Field>
       <p className="text-[11px] text-[#8A8378] mb-3">
         Composez le menu en étapes de choix (ex. «&nbsp;Entrée&nbsp;» au choix parmi plusieurs plats). Le serveur devra sélectionner une option par étape avant d'ajouter le menu à la commande.
@@ -877,7 +887,7 @@ function MenuForm({ menu, products, onCancel, onSave }) {
       <div className="flex gap-2 mt-4">
         <button onClick={onCancel} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Annuler</button>
         <button disabled={!valid}
-          onClick={() => onSave({ name: name.trim(), price: Number(price), emoji: emoji || "📋", desc: desc.trim(), groups })}
+          onClick={() => onSave({ name: name.trim(), price: Number(price), emoji: emoji || "📋", desc: desc.trim(), hours: hours.trim() || null, groups })}
           className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
           style={{ background: "#C1440E" }}>
           Enregistrer
@@ -891,8 +901,8 @@ function MenuForm({ menu, products, onCancel, onSave }) {
    HISTORIQUE DES PAIEMENTS
 ══════════════════════════════════════════════════════════════ */
 
-const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, autre: Wallet, partage: Users };
-const METHOD_LABELS = { carte: "Carte",    especes: "Espèces", autre: "Autre",  partage: "Partagé" };
+const METHOD_ICONS  = { carte: CreditCard, especes: Banknote, cheque: Wallet, titre_resto: Wallet, autre: Wallet, partage: Users };
+const METHOD_LABELS = { ...PAYMENT_LABELS, carte: "Carte", titre_resto: "Titre-resto" };
 
 function HistoryManager({ history, config, pushToast, canRefund }) {
   const [search,               setSearch]               = useState("");
@@ -972,7 +982,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
           />
         </div>
         <div className="flex gap-1">
-          {[null, "carte", "especes", "partage", "autre"].map((m) => {
+          {[null, "carte", "especes", "titre_resto", "cheque", "partage", "autre"].map((m) => {
             const Icon   = m ? METHOD_ICONS[m] : Receipt;
             const active = methodFilter === m;
             return (
@@ -1143,6 +1153,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
                   <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="px-2 py-1 rounded-lg border border-black/15">
                     <option value="carte">Carte</option>
                     <option value="especes">Espèces</option>
+                    <option value="cheque">Chèque</option>
                     <option value="autre">Autre</option>
                   </select>
                 </label>

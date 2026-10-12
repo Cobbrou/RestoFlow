@@ -27,6 +27,8 @@ import { useModules } from "../../hooks/useModules.js";
 export const PAYMENT_METHODS = [
   { id: "carte",   label: "Carte",   icon: CreditCard, emoji: "💳" },
   { id: "especes", label: "Espèces", icon: Banknote,   emoji: "💵" },
+  { id: "titre_resto", label: "Titre-resto", icon: Wallet, emoji: "🎫" },
+  { id: "cheque",  label: "Chèque",  icon: Wallet,     emoji: "✍️" },
   { id: "autre",   label: "Autre",   icon: Wallet,     emoji: "👛" },
 ];
 
@@ -38,7 +40,7 @@ export const PAYMENT_METHODS = [
  *  - Liaison TPE Bancaire
  *  - Pourboires & modularité à la carte
  */
-export default function PaymentModal({ order, table, config = {}, onCancel, onConfirm, onPartialCheckout }) {
+export default function PaymentModal({ order, table, config = {}, onCancel, onConfirm: onConfirmProp, onPartialCheckout: onPartialProp }) {
   const { hasAdvancedSplits, hasTips } = useModules();
 
   // Articles facturables (hors brouillons) : note complète, puis reste à encaisser (tickets de convive déduits)
@@ -57,6 +59,11 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   // Reste à encaisser : note complète moins les tickets de convive déjà émis
   const total = useMemo(() => Math.max(0, Math.round((full.totalTTC - paidTotal) * 100) / 100), [full, paidTotal]);
   const discountAmount = Math.max(0, Math.round((subtotal - total) * 100) / 100);
+
+  // Ticket sur demande (loi AGEC) ; note restaurant due d'office à partir de 25 € TTC
+  const [printReceipt, setPrintReceipt] = useState(() => total >= 25);
+  const onConfirm = (method, payments, meta) => onConfirmProp(method, payments, { ...meta, printReceipt });
+  const onPartialCheckout = onPartialProp && ((lines, payments, amount) => onPartialProp(lines, payments, amount, printReceipt));
 
   // Pourboire (Tip)
   const [tip, setTip] = useState(0);
@@ -797,7 +804,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
               {/* Sélection moyen pour règlement partiel */}
               <div className="flex items-center justify-between bg-white rounded-2xl p-3 border border-black/10">
                 <span className="text-xs font-bold text-[#5B5346]">Moyen de règlement :</span>
-                <div className="flex gap-1.5">
+                <div className="flex flex-wrap justify-end gap-1.5">
                   {PAYMENT_METHODS.map((m) => (
                     <button
                       key={m.id}
@@ -1178,7 +1185,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
 
                 {/* Choix moyen pour ce montant */}
                 <div className="pt-2 border-t border-black/10 flex items-center justify-between gap-3">
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     {PAYMENT_METHODS.map((m) => (
                       <button
                         key={m.id}
@@ -1230,6 +1237,10 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
           </button>
 
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-[#5B5346] cursor-pointer">
+              <input type="checkbox" checked={printReceipt} onChange={(e) => setPrintReceipt(e.target.checked)} />
+              Imprimer le ticket
+            </label>
             {mode === "single" ? (
               <button
                 disabled={!singleMethod}
