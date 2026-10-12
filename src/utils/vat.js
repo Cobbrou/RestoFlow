@@ -61,20 +61,20 @@ function splitLine(amount, rate, vatSplit) {
  */
 export function calculateVatBreakdown(items = [], discount = null) {
   const validItems = items.filter((i) => i.status !== "draft");
-  const subtotal = validItems.reduce((acc, it) => acc + (it.price || 0) * (it.qty || 1), 0);
+  // En centimes entiers, comme computeVatBreakdown / computeDiscountCents (server/src/billing/pricing.ts) :
+  // le serveur refuse des règlements qui s'écartent d'un centime de son total
+  const subtotalCents = validItems.reduce((acc, it) => acc + Math.round((it.price || 0) * 100) * (it.qty || 1), 0);
+  const subtotal = subtotalCents / 100;
 
-  // Calcul du montant de remise en euros
-  let discountAmount = 0;
+  let discountCents = 0;
   if (discount) {
-    // Recalcul depuis type/valeur, comme le serveur (server/src/billing/pricing.ts)
-    if (discount.type === "percent") {
-      discountAmount = Math.round(subtotal * (Math.min(100, discount.value) / 100) * 100) / 100;
-    } else if (discount.type === "fixed") {
-      discountAmount = Math.min(subtotal, Math.round(discount.value * 100) / 100);
-    }
+    const value = Math.max(0, Number(discount.value) || 0);
+    if (discount.type === "percent") discountCents = Math.round((subtotalCents * Math.min(100, value)) / 100);
+    else if (discount.type === "fixed") discountCents = Math.round(value * 100);
   }
-  discountAmount = Math.min(subtotal, Math.max(0, discountAmount));
-  const finalTotalTTC = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+  discountCents = Math.min(subtotalCents, discountCents);
+  const discountAmount = discountCents / 100;
+  const finalTotalTTC = (subtotalCents - discountCents) / 100;
 
   // Regroupement par taux de TVA
   const byRate = {};

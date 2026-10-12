@@ -124,7 +124,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
       });
     }
     return list;
-  }, [total, guestCount]);
+  }, [effectiveTotal, guestCount]);
 
   // ── Mode Proportionnel / Libre ─────────────────────────────
   const [customAmountStr, setCustomAmountStr] = useState("");

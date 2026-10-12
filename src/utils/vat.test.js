@@ -16,6 +16,13 @@ describe("TVA & Fiscalité - calculateVatBreakdown", () => {
     expect(res.rates.map((r) => [r.rate, r.ttc])).toEqual([[10, 15], [20, 5]]);
   });
 
+  it("arrondit la remise en % au centime comme le serveur", () => {
+    // 10,35 € à -10 % : 103,5 ct arrondis à 104 (le calcul flottant donnait 103)
+    const res = calculateVatBreakdown([{ name: "Plat", price: 10.35, qty: 1, vatRate: 10, status: "served" }], { type: "percent", value: 10 });
+    expect(res.totalTTC).toBe(9.31);
+    expect(res.discountAmount).toBe(1.04);
+  });
+
   it("calcule correctement la ventilation pour un produit unique à 10%", () => {
     const items = [{ name: "Plat du jour", price: 15.0, qty: 1, vatRate: 10, status: "served" }];
     const res = calculateVatBreakdown(items);
