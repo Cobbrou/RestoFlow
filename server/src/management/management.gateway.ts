@@ -143,6 +143,49 @@ export class ManagementGateway {
     return res;
   }
 
+  // ── Pointage (tracé dans le JET) ──
+  // Tout équipier connecté pointe ; staffId fourni pour un rejeu hors-ligne après changement d'opérateur (comme operatorId à l'encaissement)
+  @RequirePermissions("salle.view", "cuisine.view", "caisse.checkout", "dashboard.view", "gestion.staff")
+  @SubscribeMessage("shift:clock")
+  async clock(@ConnectedSocket() client: Socket, @MessageBody() data: { id?: string; staffId?: string; action: string; at?: number }) {
+    const res = await this.broadcast("shifts:open", async () => {
+      const shift = await this.management.clock({ ...data, staffId: data?.staffId || client.data.user.staffId });
+      if (shift) await this.journal.log(data.action === "in" ? "SHIFT_IN" : "SHIFT_OUT", this.actor(client), { shiftId: shift.id, staffId: shift.staffId });
+      return this.management.listOpenShifts();
+    });
+    return res;
+  }
+
+  @RequirePermissions("salle.view", "cuisine.view", "caisse.checkout", "dashboard.view", "gestion.staff")
+  @SubscribeMessage("shift:open_list")
+  async openShifts() {
+    return { ok: true, shifts: await this.management.listOpenShifts() };
+  }
+
+  @RequirePermissions("gestion.staff")
+  @SubscribeMessage("shift:list")
+  async listShifts(@MessageBody() data: { from: number; to: number }) {
+    try {
+      const from = new Date(Number(data?.from));
+      const to = new Date(Number(data?.to));
+      if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime())) return { ok: false, error: "Période invalide" };
+      return { ok: true, shifts: await this.management.listShifts(from, to) };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  @RequirePermissions("gestion.staff")
+  @SubscribeMessage("shift:close")
+  async closeShift(@ConnectedSocket() client: Socket, @MessageBody() data: { id: string; endAt: number }) {
+    const res = await this.broadcast("shifts:open", async () => {
+      await this.management.closeShift(data?.id, data?.endAt, client.data.user.name);
+      return this.management.listOpenShifts();
+    });
+    if (res.ok) await this.journal.log("SHIFT_CLOSE", this.actor(client), { shiftId: data?.id, endAt: data?.endAt });
+    return res;
+  }
+
   private actor(client: Socket) {
     return { staffId: client.data.user.staffId, name: client.data.user.name };
   }

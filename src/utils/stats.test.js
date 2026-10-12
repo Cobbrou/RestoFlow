@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { salesByHour, salesByServer } from "./stats.js";
+import { salesByHour, salesByServer, hoursByStaff, formatMinutes } from "./stats.js";
 
 const at = (h, m = 0) => new Date(2026, 9, 12, h, m).getTime();
 const history = [
@@ -26,5 +26,24 @@ describe("salesByServer", () => {
       { name: "Léa", ca: 25.1, tickets: 2, average: 12.55, tips: 1 },
       { name: "Marco", ca: 0.2, tickets: 1, average: 0.2, tips: 0 },
     ]);
+  });
+});
+
+describe("hoursByStaff", () => {
+  it("cumule les services clos et compte un service en cours jusqu'à maintenant", () => {
+    const h = (x) => new Date(2026, 9, 12, x).toISOString();
+    const rows = hoursByStaff(
+      [
+        { staffId: "a", startAt: h(9), endAt: h(12) },
+        { staffId: "a", startAt: h(18), endAt: null },
+        { staffId: "b", startAt: h(10), endAt: h(11) },
+      ],
+      new Date(2026, 9, 12, 19, 30).getTime()
+    );
+    expect(rows).toEqual([
+      { staffId: "a", minutes: 270, shifts: 2, open: true },
+      { staffId: "b", minutes: 60, shifts: 1, open: false },
+    ]);
+    expect(formatMinutes(125)).toBe("2 h 05");
   });
 });

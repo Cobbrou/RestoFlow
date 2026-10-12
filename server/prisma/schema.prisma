@@ -30,6 +30,19 @@ model Staff {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   orders    Order[]
+  shifts    Shift[]
+}
+
+// Pointage : un service par arrivée/départ ; endAt null = en poste
+model Shift {
+  id       String    @id
+  staffId  String
+  staff    Staff     @relation(fields: [staffId], references: [id])
+  startAt  DateTime
+  endAt    DateTime?
+  closedBy String?   // Gestionnaire ayant clos un départ oublié
+
+  @@index([staffId, endAt])
 }
 
 model Table {

@@ -37,3 +37,24 @@ export function salesByServer(history = []) {
       tips: s.tipCents / 100,
     }));
 }
+
+/**
+ * Heures pointées par équipier sur une liste de services ; un service en cours compte jusqu'à `now`.
+ * @returns [{ staffId, minutes, shifts, open }] du plus grand nombre d'heures au plus petit
+ */
+export function hoursByStaff(shifts = [], now = Date.now()) {
+  const map = new Map();
+  for (const s of shifts) {
+    const start = new Date(s.startAt).getTime();
+    const end = s.endAt ? new Date(s.endAt).getTime() : now;
+    const row = map.get(s.staffId) || { staffId: s.staffId, minutes: 0, shifts: 0, open: false };
+    row.minutes += Math.max(0, Math.round((end - start) / 60000));
+    row.shifts++;
+    row.open ||= !s.endAt;
+    map.set(s.staffId, row);
+  }
+  return [...map.values()].sort((a, b) => b.minutes - a.minutes);
+}
+
+/** 125 → « 2 h 05 » */
+export const formatMinutes = (m) => `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;

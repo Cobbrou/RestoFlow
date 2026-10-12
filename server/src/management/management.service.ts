@@ -249,4 +249,54 @@ export class ManagementService {
     await this.prisma.role.delete({ where: { id } });
     return this.listRoles();
   }
+
+  // ── Pointage ─────────────────────────────────────────────────────────
+
+  /** Services en cours (tous équipiers) : diffusés pour afficher qui est en poste */
+  listOpenShifts() {
+    return this.prisma.shift.findMany({ where: { endAt: null }, orderBy: { startAt: "asc" } });
+  }
+
+  /** Services commencés sur la période [from, to[ ; ceux encore ouverts y figurent aussi */
+  listShifts(from: Date, to: Date) {
+    return this.prisma.shift.findMany({
+      where: { OR: [{ startAt: { gte: from, lt: to } }, { endAt: null }] },
+      orderBy: { startAt: "asc" },
+    });
+  }
+
+  /**
+   * Arrivée ou départ d'un équipier. Rejouable hors-ligne : l'heure saisie sur la tablette fait foi
+   * (bornée aux dernières 24 h), une arrivée déjà en cours ou un départ sans service ouvert ne change rien.
+   */
+  async clock(data: { id?: string; staffId: string; action: string; at?: number }) {
+    const staff = await this.prisma.staff.findUnique({ where: { id: data.staffId }, select: { id: true, active: true } });
+    if (!staff?.active) throw new NotFoundException("Équipier introuvable ou inactif");
+    const now = Date.now();
+    const at = new Date(Number.isFinite(Number(data.at)) && Number(data.at) <= now && Number(data.at) > now - 86400000 ? Number(data.at) : now);
+    const open = await this.prisma.shift.findFirst({ where: { staffId: staff.id, endAt: null } });
+
+    if (data.action === "in") {
+      if (open) return open;
+      const id = clientId(data.id, "shift");
+      return (await this.prisma.shift.findUnique({ where: { id } })) ?? this.prisma.shift.create({ data: { id, staffId: staff.id, startAt: at } });
+    }
+    if (data.action === "out") {
+      if (!open) return null;
+      return this.prisma.shift.update({ where: { id: open.id }, data: { endAt: at < open.startAt ? open.startAt : at } });
+    }
+    throw new BadRequestException("Pointage : action « in » ou « out » attendue");
+  }
+
+  /** Départ oublié : le gestionnaire saisit l'heure réelle de fin */
+  async closeShift(id: string, endAt: number, closedBy: string) {
+    const shift = await this.prisma.shift.findUnique({ where: { id } });
+    if (!shift) throw new NotFoundException("Service introuvable");
+    if (shift.endAt) return shift;
+    const end = new Date(Number(endAt));
+    if (!Number.isFinite(end.getTime()) || end <= shift.startAt || end.getTime() > Date.now()) {
+      throw new BadRequestException("Heure de fin invalide (après l'arrivée, pas dans le futur)");
+    }
+    return this.prisma.shift.update({ where: { id }, data: { endAt: end, closedBy } });
+  }
 }

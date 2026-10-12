@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Users,
   ShieldCheck,
@@ -11,9 +11,12 @@ import {
   SlidersHorizontal,
   Check,
   Sparkles,
+  Clock,
 } from "lucide-react";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { PERMISSION_MODULES, ALL_PERMISSIONS } from "../../data/staff.js";
+import { getSocket } from "../../services/socket.js";
+import { hoursByStaff, formatMinutes } from "../../utils/stats.js";
 
 const PRESET_COLORS = [
   "#C1440E", // RestoFlow Rust
@@ -36,7 +39,7 @@ export default function StaffRoleManager({
   onUpdateRole,
   onDeleteRole,
 }) {
-  const [subTab, setSubTab] = useState("staff"); // staff | roles | matrix
+  const [subTab, setSubTab] = useState("staff"); // staff | roles | matrix | hours
   const [editingStaff, setEditingStaff] = useState(null); // null | 'new' | staffObject
   const [editingRole, setEditingRole] = useState(null);   // null | 'new' | roleObject
   const [filterRoleId, setFilterRoleId] = useState(null);
@@ -93,6 +96,16 @@ export default function StaffRoleManager({
           >
             <SlidersHorizontal size={14} /> Matrice des droits
           </button>
+          <button
+            onClick={() => setSubTab("hours")}
+            className="rf-tap flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold"
+            style={{
+              background: subTab === "hours" ? "#2B2622" : "transparent",
+              color: subTab === "hours" ? "#FAF6EE" : "#5B5346",
+            }}
+          >
+            <Clock size={14} /> Heures pointées
+          </button>
         </div>
 
         {subTab === "staff" && (
@@ -115,6 +128,8 @@ export default function StaffRoleManager({
           </button>
         )}
       </div>
+
+      {subTab === "hours" && <ShiftHours staff={staff} />}
 
       {/* ─── VUE 1 : PERSONNEL & AFFECTATIONS ─── */}
       {subTab === "staff" && (
@@ -908,5 +923,105 @@ function RoleFormModal({ role, onClose, onSave }) {
         </button>
       </div>
     </Modal>
+  );
+}
+
+/* ─── Heures pointées : cumul par équipier et départs oubliés à clore ─── */
+const PERIODS = {
+  week: { label: "7 derniers jours", range: () => [Date.now() - 7 * 86400000, Date.now() + 60000] },
+  month: { label: "Ce mois", range: () => { const d = new Date(); return [new Date(d.getFullYear(), d.getMonth(), 1).getTime(), Date.now() + 60000]; } },
+  lastMonth: { label: "Mois dernier", range: () => { const d = new Date(); return [new Date(d.getFullYear(), d.getMonth() - 1, 1).getTime(), new Date(d.getFullYear(), d.getMonth(), 1).getTime()]; } },
+};
+
+function ShiftHours({ staff }) {
+  const [period, setPeriod] = useState("week");
+  const [shifts, setShifts] = useState([]);
+  const [error, setError] = useState("");
+  const [closing, setClosing] = useState({}); // shiftId → "AAAA-MM-JJTHH:MM"
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const [from, to] = PERIODS[period].range();
+    const load = () => {
+      if (!socket.connected) return setError("Hors ligne : heures indisponibles");
+      socket.emit("shift:list", { from, to }, (res) => {
+        if (res?.ok) { setShifts(res.shifts); setError(""); } else setError(res?.error || "Chargement impossible");
+      });
+    };
+    load();
+    socket.on("shifts:open", load);
+    return () => socket.off("shifts:open", load);
+  }, [period]);
+
+  const name = (id) => staff.find((s) => s.id === id)?.name || "Équipier supprimé";
+  const rows = hoursByStaff(shifts);
+  const open = shifts.filter((s) => !s.endAt);
+  const fmt = (d) => new Date(d).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+  const close = (id) => {
+    const value = closing[id];
+    if (!value) return;
+    getSocket()?.emit("shift:close", { id, endAt: new Date(value).getTime() }, (res) => {
+      if (res?.ok === false) setError(res.error);
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 p-1 rounded-xl bg-black/5 w-fit">
+        {Object.entries(PERIODS).map(([id, p]) => (
+          <button key={id} onClick={() => setPeriod(id)}
+            className="rf-tap px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: period === id ? "#2B2622" : "transparent", color: period === id ? "#FAF6EE" : "#5B5346" }}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {error && <p className="text-xs font-semibold text-[#C1361B]">{error}</p>}
+
+      {open.length > 0 && (
+        <div className="bg-white rounded-2xl border border-black/10 p-4">
+          <p className="text-sm font-bold text-[#2B2622] mb-2">En poste ({open.length})</p>
+          <div className="divide-y divide-black/5">
+            {open.map((s) => (
+              <div key={s.id} className="flex items-center gap-2 py-2 text-xs flex-wrap">
+                <span className="font-semibold text-[#2B2622] flex-1 min-w-[140px]">{name(s.staffId)} · depuis {fmt(s.startAt)}</span>
+                <div className="w-52"><input type="datetime-local" className={inputCls} value={closing[s.id] || ""}
+                  onChange={(e) => setClosing((prev) => ({ ...prev, [s.id]: e.target.value }))} /></div>
+                <button onClick={() => close(s.id)} disabled={!closing[s.id]}
+                  className="rf-tap px-3 py-2 rounded-lg font-bold text-white bg-[#2B2622] disabled:opacity-40">
+                  Pointer le départ
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-black/10 overflow-hidden">
+        <table className="w-full text-left text-xs">
+          <thead>
+            <tr className="border-b border-black/10 text-[#8A8378] font-bold uppercase tracking-wider">
+              <th className="py-3 px-4">Équipier</th>
+              <th className="py-3 px-3 text-right">Services</th>
+              <th className="py-3 px-4 text-right">Heures</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-black/5">
+            {rows.map((r) => (
+              <tr key={r.staffId}>
+                <td className="py-2.5 px-4 font-semibold text-[#2B2622]">{name(r.staffId)}{r.open && <span className="ml-1.5 text-[10px] text-[#2E9E5B]">● en poste</span>}</td>
+                <td className="py-2.5 px-3 text-right">{r.shifts}</td>
+                <td className="py-2.5 px-4 text-right rf-mono font-bold">{formatMinutes(r.minutes)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={3} className="py-8 text-center text-[#8A8378]">Aucun pointage sur la période</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
