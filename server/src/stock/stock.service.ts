@@ -13,59 +13,22 @@ export interface StockMovementInput {
   reason?: string;
 }
 
+/** Nombre saisi, ou la valeur par défaut si le champ est vide ou invalide (0 reste 0, ex. seuil d'alerte) */
+export const numOr = (v: unknown, fallback: number) =>
+  v === undefined || v === null || v === "" || !Number.isFinite(Number(v)) ? fallback : Number(v);
+
 @Injectable()
 export class StockService {
   constructor(private prisma: PrismaService) {}
 
+  /** Ingrédients au format client (sync:init, stock:updated) : statut de stock et valeur */
   async findAllIngredients() {
-    const ingredients = await this.prisma.ingredient.findMany({
-      orderBy: { name: "asc" },
-      include: {
-        recipeItems: {
-          include: {
-            product: {
-              select: { id: true, name: true, price: true, available: true },
-            },
-          },
-        },
-      },
-    });
-
-    return ingredients.map((ing) => {
-      const isOut = ing.currentStock <= 0;
-      const isLow = !isOut && ing.currentStock <= ing.minThreshold;
-      const status = isOut ? "out" : isLow ? "low" : "ok";
-      return {
-        ...ing,
-        status,
-        stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
-      };
-    });
-  }
-
-  async getInventorySummary() {
-    const ingredients = await this.prisma.ingredient.findMany();
-    const totalItems = ingredients.length;
-    let outCount = 0;
-    let lowCount = 0;
-    let totalValue = 0;
-
-    for (const ing of ingredients) {
-      if (ing.currentStock <= 0) {
-        outCount++;
-      } else if (ing.currentStock <= ing.minThreshold) {
-        lowCount++;
-      }
-      totalValue += ing.currentStock * ing.costPerUnit;
-    }
-
-    return {
-      totalItems,
-      outCount,
-      lowCount,
-      okCount: totalItems - outCount - lowCount,
-      totalStockValue: Number(totalValue.toFixed(2)),
-    };
+    const ingredients = await this.prisma.ingredient.findMany({ orderBy: { name: "asc" } });
+    return ingredients.map((ing) => ({
+      ...ing,
+      status: ing.currentStock <= 0 ? "out" : ing.currentStock <= ing.minThreshold ? "low" : "ok",
+      stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
+    }));
   }
 
   async createIngredient(data: {
@@ -88,7 +51,7 @@ export class StockService {
         category: data.category,
         unit: data.unit,
         currentStock: Number(data.currentStock) || 0,
-        minThreshold: Number(data.minThreshold) || 5,
+        minThreshold: numOr(data.minThreshold, 5),
         idealStock: Number(data.idealStock) || 20,
         costPerUnit: Number(data.costPerUnit) || 0,
         supplier: data.supplier || null,
@@ -353,15 +316,15 @@ export class StockService {
     return deductionMap;
   }
 
-  // itemIds : lignes déjà vendues à déstocker (vente comptoir) ; par défaut, les brouillons partant en cuisine
-  async deductForOrder(orderId: string, itemIds?: string[]) {
+  // itemIds : lignes à déstocker, celles réellement envoyées en cuisine ou vendues au comptoir
+  async deductForOrder(orderId: string, itemIds: string[]) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, table: true },
     });
     if (!order) return null;
 
-    const draftItems = order.items.filter((i) => (itemIds ? itemIds.includes(i.id) : i.status === "draft"));
+    const draftItems = order.items.filter((i) => itemIds.includes(i.id));
     if (draftItems.length === 0) return null;
 
     const deductionMap = await this.ingredientNeeds(draftItems);
@@ -414,36 +377,7 @@ export class StockService {
       }
     });
 
-    const refreshedIngredients = await this.prisma.ingredient.findMany({ orderBy: { name: "asc" } });
-    const recentMovements = await this.prisma.stockMovement.findMany({
-      take: 60,
-      orderBy: { createdAt: "desc" },
-      include: { ingredient: { select: { name: true, unit: true, category: true } } },
-    });
-
-    return {
-      stockAlerts,
-      affectedProducts,
-      refreshedIngredients: refreshedIngredients.map((ing) => ({
-        ...ing,
-        status: ing.currentStock <= 0 ? "out" : ing.currentStock <= ing.minThreshold ? "low" : "ok",
-        stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
-      })),
-      recentMovements: recentMovements.map((m) => ({
-        id: m.id,
-        ingredientId: m.ingredientId,
-        ingredientName: m.ingredient?.name || "Inconnu",
-        category: m.ingredient?.category || "Général",
-        unit: m.ingredient?.unit || "u",
-        type: m.type,
-        quantity: m.quantity,
-        unitCost: m.unitCost,
-        orderId: m.orderId,
-        staffId: m.staffId,
-        reason: m.reason,
-        createdAt: m.createdAt.getTime(),
-      })),
-    };
+    return { stockAlerts, affectedProducts };
   }
 
   /**

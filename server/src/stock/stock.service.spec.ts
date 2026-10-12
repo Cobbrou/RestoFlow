@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { StockService } from "./stock.service";
+import { StockService, numOr } from "./stock.service";
 
 describe("StockService.recordMovement", () => {
   const make = (stockAfterIncrement: number) => {
@@ -32,5 +32,15 @@ describe("StockService.recordMovement", () => {
     const res = await service.recordMovement({ ingredientId: "ing1", type: "WASTE", quantity: -5 });
     expect(tx.ingredient.update).toHaveBeenLastCalledWith({ where: { id: "ing1" }, data: { currentStock: 0 } });
     expect(res.ingredient.currentStock).toBe(0);
+  });
+});
+
+describe("numOr", () => {
+  it("garde 0 (seuil d'alerte), défaut seulement si vide ou invalide", () => {
+    expect(numOr(0, 5)).toBe(0);
+    expect(numOr("2.5", 5)).toBe(2.5);
+    expect(numOr("", 5)).toBe(5);
+    expect(numOr(undefined, 5)).toBe(5);
+    expect(numOr("abc", 5)).toBe(5);
   });
 });

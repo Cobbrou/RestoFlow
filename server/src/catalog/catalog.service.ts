@@ -1,14 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { normalizeOptionGroups } from "../billing/pricing";
+import { numOr } from "../stock/stock.service";
 
 @Injectable()
 export class CatalogService {
   constructor(private prisma: PrismaService) {}
-
-  async getCategories() {
-    return this.prisma.category.findMany();
-  }
 
   async getProducts() {
     const products = await this.prisma.product.findMany();
@@ -104,7 +101,7 @@ export class CatalogService {
 
     const ingCategory = ["boissons", "bieres", "vins", "cafes"].includes(data.cat) ? "Boissons" : "Épicerie";
     const initialStock = Number(data.initialStock) || 0;
-    const minThreshold = Number(data.minThreshold) || 5;
+    const minThreshold = numOr(data.minThreshold, 5);
     const costPerUnit = Number(data.costPerUnit) || 0;
 
     return await this.prisma.$transaction(async (tx) => {

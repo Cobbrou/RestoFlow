@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ClosingService, ticketCovers } from "./closing.service";
+import { ClosingService, aggregateTickets, ticketCovers } from "./closing.service";
 
 describe("ticketCovers", () => {
   it("prend les couverts saisis, 1 par défaut, 0 pour un avoir", () => {
@@ -84,5 +84,45 @@ describe("ClosingService.generateFecExport : numérotation", () => {
     expect(fec.content).toContain("|ECR000041|");
     expect(fec.content).toContain("|ECR000042|");
     expect(fec.content).not.toContain("|ECR000001|");
+  });
+
+});
+
+describe("aggregateTickets (commun aux rapports X et Z)", () => {
+  it("cumule en centimes : TVA par taux, règlements, remises, pourboires, avoirs et anciens tickets", () => {
+    const tickets = [
+      {
+        total: 10.1, subtotal: 11.1, tip: 0.2, covers: 2, type: "SALE",
+        discount: JSON.stringify({ amount: 1 }),
+        vatDetails: JSON.stringify({ rates: [{ rate: 10, ht: 9.18, vat: 0.92, ttc: 10.1 }] }),
+        payments: JSON.stringify([{ method: "especes", amount: 10.3 }]),
+      },
+      {
+        total: 0.2, tip: 0, type: "SALE",
+        vatDetails: JSON.stringify({ rates: [{ rate: 20, ht: 0.17, vat: 0.03, ttc: 0.2 }] }),
+        payments: JSON.stringify([{ method: "carte", amount: 0.2 }]),
+      },
+      // Ancien ticket sans ventilation : 10 % par défaut, mode du ticket
+      { total: 11, paymentMethod: "carte" },
+      // Avoir : montants négatifs, aucun couvert
+      {
+        total: -0.2, type: "CREDIT_NOTE",
+        vatDetails: JSON.stringify({ rates: [{ rate: 20, ht: -0.17, vat: -0.03, ttc: -0.2 }] }),
+        payments: JSON.stringify([{ method: "carte", amount: -0.2 }]),
+      },
+    ];
+    const t = aggregateTickets(tickets);
+    expect(t.totalNet).toBe(21.1);
+    expect(t.totalGross).toBe(22.1);
+    expect(t.totalDiscounts).toBe(1);
+    expect(t.totalTips).toBe(0.2);
+    expect(t.totalHT).toBe(19.18);
+    expect(t.totalVAT).toBe(1.92);
+    expect(t.coversCount).toBe(4);
+    expect(t.paymentsBreakdown).toEqual({ carte: 11, especes: 10.3, autre: 0 });
+    expect(t.vatBreakdown).toEqual([
+      { rate: 10, ht: 9.18, vat: 0.92, ttc: 10.1 },
+      { rate: 20, ht: 0, vat: 0, ttc: 0 },
+    ]);
   });
 });

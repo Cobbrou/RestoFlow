@@ -11,6 +11,7 @@ import { PrinterModule } from "../printer/printer.module";
 import { RecipesModule } from "../recipes/recipes.module";
 import { ClosingModule } from "../closing/closing.module";
 import { CatalogModule } from "../catalog/catalog.module";
+import { ManagementModule } from "../management/management.module";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { CatalogModule } from "../catalog/catalog.module";
     RecipesModule,
     ClosingModule,
     CatalogModule,
+    ManagementModule,
   ],
   providers: [WebsocketGateway],
   exports: [WebsocketGateway],

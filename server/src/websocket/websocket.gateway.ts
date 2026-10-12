@@ -22,6 +22,7 @@ import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { JournalService } from "../journal/journal.service";
+import { ManagementService } from "../management/management.service";
 import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
@@ -60,7 +61,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     private recipesService: RecipesService,
     private closingService: ClosingService,
     private catalogService: CatalogService,
-    private journal: JournalService
+    private journal: JournalService,
+    private management: ManagementService
   ) {}
 
   async handleConnection(client: Socket) {
@@ -94,12 +96,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         where: { active: true },
         select: { id: true, name: true, roleId: true, active: true, avatarBg: true },
       }),
-      this.prisma.role.findMany(),
+      this.management.listRoles(),
     ]);
-    return {
-      staff,
-      roles: roles.map((r) => ({ ...r, permissions: JSON.parse(r.permissions || "[]") })),
-    };
+    return { staff, roles };
   }
 
   /**
@@ -107,110 +106,38 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
    * tickets, Z, mouvements de stock et coordonnées de l'équipe selon les permissions de la session
    */
   public async getFullState(user: SessionPayload) {
-    const [
+    const can = (perms: string[]) => hasAnyPermission(user, perms);
+    const [tables, orders, products, menus, roles, staff, history, ingredients, recipes, stockMovements, config, reservations, closings] =
+      await Promise.all([
+        this.management.listTables(),
+        this.ordersService.findActive(),
+        this.catalogService.getProducts(),
+        this.catalogService.getMenus(),
+        this.management.listRoles(),
+        this.management.listStaff(), // 🔒 jamais de PIN
+        can(SENSITIVE.history) ? this.ordersService.findHistory(100) : [],
+        this.stockService.findAllIngredients(),
+        this.recipesService.listItems(),
+        can(SENSITIVE.stockMovements) ? this.stockService.getMovements(60) : [],
+        this.configService.getConfig(),
+        this.prisma.reservation.findMany({ orderBy: [{ date: "asc" }, { time: "asc" }] }),
+        can(SENSITIVE.closings) ? this.closingService.getClosingsHistory(50) : [],
+      ]);
+
+    return {
       tables,
-      rawOrders,
+      orders,
       products,
       menus,
       roles,
-      staff,
-      rawHistory,
-      rawIngredients,
-      rawRecipes,
-      rawMovements,
-      rawConfig,
-      rawReservations,
-      closings,
-    ] = await Promise.all([
-      this.prisma.table.findMany({ orderBy: { number: "asc" } }),
-      this.prisma.order.findMany({
-        where: { status: "open" },
-        include: { items: true, table: true },
-      }),
-      this.catalogService.getProducts(),
-      this.catalogService.getMenus(),
-      this.prisma.role.findMany(),
-      // 🔒 Sécurité Axe 1 : EXCLUSION TOTALE des PINs
-      this.prisma.staff.findMany({
-        select: {
-          id: true,
-          name: true,
-          roleId: true,
-          email: true,
-          phone: true,
-          active: true,
-          avatarBg: true,
-        },
-      }),
-      this.prisma.orderHistory.findMany({
-        take: 100,
-        orderBy: { createdAt: "desc" },
-      }),
-      this.prisma.ingredient.findMany({
-        orderBy: { name: "asc" },
-      }),
-      this.recipesService.listItems(),
-      this.prisma.stockMovement.findMany({
-        take: 60,
-        orderBy: { createdAt: "desc" },
-        include: {
-          ingredient: {
-            select: { name: true, unit: true, category: true },
-          },
-        },
-      }),
-      this.configService.getConfig(),
-      this.prisma.reservation.findMany({
-        orderBy: [{ date: "asc" }, { time: "asc" }],
-      }),
-      this.closingService.getClosingsHistory(50),
-    ]);
-
-    const parsedOrders = rawOrders.map((o) => this.ordersService.formatOrder(o));
-
-    const parsedRoles = roles.map((r) => ({
-      ...r,
-      permissions: JSON.parse(r.permissions || "[]"),
-    }));
-
-    const parsedHistory = rawHistory.map(toClientHistory);
-
-    const parsedIngredients = rawIngredients.map((ing) => ({
-      ...ing,
-      status: ing.currentStock <= 0 ? "out" : ing.currentStock <= ing.minThreshold ? "low" : "ok",
-      stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
-    }));
-
-    const parsedMovements = rawMovements.map((m) => ({
-      id: m.id,
-      ingredientId: m.ingredientId,
-      ingredientName: m.ingredient?.name || "Inconnu",
-      category: m.ingredient?.category || "Général",
-      unit: m.ingredient?.unit || "u",
-      type: m.type,
-      quantity: m.quantity,
-      unitCost: m.unitCost,
-      orderId: m.orderId,
-      staffId: m.staffId,
-      reason: m.reason,
-      createdAt: m.createdAt.getTime(),
-    }));
-
-    const can = (perms: string[]) => hasAnyPermission(user, perms);
-    return {
-      tables,
-      orders: parsedOrders,
-      products,
-      menus,
-      roles: parsedRoles,
       staff: can(SENSITIVE.staffContacts) ? staff : staff.map(({ email: _e, phone: _p, ...s }) => s),
-      history: can(SENSITIVE.history) ? parsedHistory : [],
-      ingredients: parsedIngredients,
-      recipes: rawRecipes,
-      stockMovements: can(SENSITIVE.stockMovements) ? parsedMovements : [],
-      config: rawConfig,
-      reservations: rawReservations,
-      closings: can(SENSITIVE.closings) ? closings : [],
+      history: history.map(toClientHistory),
+      ingredients,
+      recipes,
+      stockMovements,
+      config,
+      reservations,
+      closings,
     };
   }
 
@@ -417,10 +344,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const restocked =
         item.status === "new" &&
         (await this.stockService.returnForVoid(item, voidQty, data.orderId, label, actor.staffId, reason));
-      if (restocked) {
-        this.server.to(STAFF_ROOM).emit("stock:updated", await this.stockService.findAllIngredients());
-        this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", await this.stockService.getMovements(60));
-      }
+      if (restocked) await this.broadcastStock();
 
       this.server.to(STAFF_ROOM).emit("order:updated", order);
       this.server.to(STAFF_ROOM).emit("kitchen:item_voided", {
@@ -528,7 +452,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   /** Déstockage des lignes envoyées (ou vendues au comptoir) et diffusion des stocks à jour */
-  private async deductStock(orderId: string, itemIds?: string[]) {
+  private async deductStock(orderId: string, itemIds: string[]) {
     const stockResult = await this.stockService.deductForOrder(orderId, itemIds);
     if (!stockResult) return;
     for (const msg of stockResult.stockAlerts) {
@@ -537,8 +461,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (stockResult.affectedProducts.length > 0) {
       this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
     }
-    this.server.to(STAFF_ROOM).emit("stock:updated", stockResult.refreshedIngredients);
-    this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", stockResult.recentMovements);
+    await this.broadcastStock();
+  }
+
+  /** Stocks à jour pour tous les postes ; mouvements (coûts, motifs) pour ceux qui gèrent le stock */
+  private async broadcastStock() {
+    const [ingredients, movements] = await Promise.all([
+      this.stockService.findAllIngredients(),
+      this.stockService.getMovements(60),
+    ]);
+    this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
+    this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
   }
 
   /**
@@ -845,10 +778,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   // ── Stocks & Recettes (StockService & RecipesService) ───────────────
 
   @SubscribeMessage("stock:request_sync")
-  async handleStockSync() {
+  async handleStockSync(@ConnectedSocket() client: Socket) {
     const [ingredients, movements] = await Promise.all([
       this.stockService.findAllIngredients(),
-      this.stockService.getMovements(100),
+      hasAnyPermission(client.data.user, SENSITIVE.stockMovements) ? this.stockService.getMovements(100) : [],
     ]);
     return { ok: true, ingredients, movements };
   }
@@ -871,20 +804,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         orderId: data.orderId,
       });
 
-      const [refreshedIngredients, movements] = await Promise.all([
-        this.prisma.ingredient.findMany({ orderBy: { name: "asc" } }),
-        this.stockService.getMovements(60),
-      ]);
-
-      const formattedIngredients = refreshedIngredients.map((ing) => ({
-        ...ing,
-        status: ing.currentStock <= 0 ? "out" : ing.currentStock <= ing.minThreshold ? "low" : "ok",
-        stockValue: Number((ing.currentStock * ing.costPerUnit).toFixed(2)),
-      }));
-
-      this.server.to(STAFF_ROOM).emit("stock:updated", formattedIngredients);
-      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
-
+      await this.broadcastStock();
       if (result.affectedProducts.length > 0) {
         this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
       }
@@ -900,10 +820,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleCreateIngredient(@MessageBody() data: any) {
     try {
       const created = await this.stockService.createIngredient(data);
-      const ingredients = await this.stockService.findAllIngredients();
-      const movements = await this.stockService.getMovements(60);
-      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
-      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
+      await this.broadcastStock();
       return { ok: true, ingredient: created };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -916,10 +833,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       const { id, ...rest } = data;
       const updated = await this.stockService.updateIngredient(id, rest);
-      const ingredients = await this.stockService.findAllIngredients();
-      const movements = await this.stockService.getMovements(60);
-      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
-      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
+      await this.broadcastStock();
       return { ok: true, ingredient: updated };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -931,8 +845,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleDeleteIngredient(@MessageBody() data: { id: string }) {
     try {
       await this.stockService.deleteIngredient(data.id);
-      const ingredients = await this.stockService.findAllIngredients();
-      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
+      this.server.to(STAFF_ROOM).emit("stock:updated", await this.stockService.findAllIngredients());
       return { ok: true, id: data.id };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -944,8 +857,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleRestoreIngredient(@MessageBody() data: { id: string }) {
     try {
       await this.stockService.restoreIngredient(data.id);
-      const ingredients = await this.stockService.findAllIngredients();
-      this.server.to(STAFF_ROOM).emit("stock:updated", ingredients);
+      this.server.to(STAFF_ROOM).emit("stock:updated", await this.stockService.findAllIngredients());
       return { ok: true, id: data.id };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -983,15 +895,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   async handleCreateProductWithStock(@MessageBody() data: any) {
     try {
       const result = await this.catalogService.createProductWithStock(data);
-      const allProducts = await this.catalogService.getProducts();
-      const allIngredients = await this.stockService.findAllIngredients();
-      const movements = await this.stockService.getMovements(60);
-      const parsedRecipes = await this.recipesService.listItems();
-
-      this.server.to(STAFF_ROOM).emit("catalog:products_updated", allProducts);
-      this.server.to(STAFF_ROOM).emit("stock:updated", allIngredients);
-      this.server.to(permRooms(SENSITIVE.stockMovements)).emit("stock:movements_updated", movements);
-      this.server.to(STAFF_ROOM).emit("recipe:updated", parsedRecipes);
+      this.server.to(STAFF_ROOM).emit("catalog:products_updated", await this.catalogService.getProducts());
+      this.server.to(STAFF_ROOM).emit("recipe:updated", await this.recipesService.listItems());
+      await this.broadcastStock();
 
       return { ok: true, ...result };
     } catch (err: any) {

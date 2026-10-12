@@ -5,6 +5,7 @@ import * as crypto from "crypto";
 import { GENESIS_TICKET, signTicket } from "../billing/fiscal";
 import { JournalService } from "../journal/journal.service";
 import { orderLabel } from "../orders/orders.service";
+import { toCents, toEuros } from "../billing/pricing";
 import { GENESIS_PERIOD, PeriodType, aggregateClosings, monthOf, periodBounds, signPeriodClosing } from "./period";
 
 export interface ZClosingInput {
@@ -27,6 +28,71 @@ export interface FecExportOptions {
 export function ticketCovers(ticket: { type?: string | null; covers?: number | null }): number {
   if (ticket.type === "CREDIT_NOTE") return 0;
   return ticket.covers != null && ticket.covers >= 0 ? ticket.covers : 1;
+}
+
+const parseOr = (v: unknown, fallback: any) => {
+  if (!v) return fallback;
+  try {
+    return typeof v === "string" ? JSON.parse(v) : v;
+  } catch {
+    return fallback;
+  }
+};
+
+/**
+ * Cumul des tickets d'une session de caisse, commun aux rapports X et Z.
+ * Calculé en centimes entiers ; un ticket sans ventilation TVA (ancien format) est compté à 10 %.
+ */
+export function aggregateTickets(tickets: any[]) {
+  let gross = 0, discounts = 0, net = 0, ht = 0, vat = 0, tips = 0, coversCount = 0;
+  const payments: Record<string, number> = { carte: 0, especes: 0, autre: 0 };
+  const vatMap = new Map<number, { ht: number; vat: number; ttc: number }>();
+
+  for (const t of tickets) {
+    const total = toCents(t.total);
+    net += total;
+    tips += toCents(t.tip);
+    gross += toCents(t.subtotal ?? t.total);
+    discounts += toCents(parseOr(t.discount, null)?.amount);
+
+    const rates = parseOr(t.vatDetails, null)?.rates;
+    if (Array.isArray(rates)) {
+      for (const r of rates) {
+        const acc = vatMap.get(Number(r.rate)) || { ht: 0, vat: 0, ttc: 0 };
+        acc.ht += toCents(r.ht);
+        acc.vat += toCents(r.vat);
+        acc.ttc += toCents(r.ttc);
+        vatMap.set(Number(r.rate), acc);
+        ht += toCents(r.ht);
+        vat += toCents(r.vat);
+      }
+    } else {
+      const defaultHT = Math.round((total * 100) / 110);
+      ht += defaultHT;
+      vat += total - defaultHT;
+    }
+
+    const pays = parseOr(t.payments, null);
+    for (const pay of Array.isArray(pays) ? pays : [{ method: t.paymentMethod, amount: t.total }]) {
+      const method = pay.method || "carte";
+      payments[method] = (payments[method] || 0) + toCents(pay.amount);
+    }
+    coversCount += ticketCovers(t);
+  }
+
+  return {
+    totalGross: toEuros(gross),
+    totalDiscounts: toEuros(discounts),
+    totalNet: toEuros(net),
+    totalHT: toEuros(ht),
+    totalVAT: toEuros(vat),
+    totalTips: toEuros(tips),
+    coversCount,
+    paymentsBreakdown: Object.fromEntries(Object.entries(payments).map(([k, c]) => [k, toEuros(c)])) as Record<string, number>,
+    vatBreakdown: [...vatMap.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([rate, c]) => ({ rate, ht: toEuros(c.ht), vat: toEuros(c.vat), ttc: toEuros(c.ttc) })),
+  };
 }
 
 @Injectable()
@@ -105,150 +171,46 @@ export class ClosingService {
     });
 
     const sessionOpenedAt = lastZ ? lastZ.closedAt : (unclosedTickets[0]?.createdAt || new Date());
-    const sessionNow = new Date();
+    const totals = aggregateTickets(unclosedTickets);
 
-    let totalGross = 0;
-    let totalDiscounts = 0;
-    let totalNet = 0;
-    let totalHT = 0;
-    let totalVAT = 0;
-    let coversCount = 0;
-
-    const paymentsBreakdown: Record<string, number> = {
-      carte: 0,
-      especes: 0,
-      autre: 0,
-      partage: 0,
-    };
-
-    const vatMap: Record<number, { ht: number; vat: number; ttc: number }> = {};
+    // Propre au X : articles vendus et ventes par serveur
     const itemSalesMap: Record<string, { name: string; qty: number; total: number; cat?: string }> = {};
     const serverSalesMap: Record<string, { tickets: number; total: number }> = {};
-    let totalTips = 0;
-
     for (const ticket of unclosedTickets) {
-      totalNet += ticket.total;
-      totalTips += Number((ticket as any).tip || 0);
-      const sub = ticket.subtotal != null ? ticket.subtotal : ticket.total;
-      totalGross += sub;
-
-      if (ticket.discount) {
-        try {
-          const disc = typeof ticket.discount === "string" ? JSON.parse(ticket.discount) : ticket.discount;
-          totalDiscounts += Number(disc.amount || 0);
-        } catch {
-          // ignore parsing error
-        }
+      for (const it of parseOr(ticket.items, [])) {
+        const key = it.productId || it.name;
+        if (!itemSalesMap[key]) itemSalesMap[key] = { name: it.name, qty: 0, total: 0, cat: it.cat };
+        itemSalesMap[key].qty += Number(it.qty || 1);
+        itemSalesMap[key].total += Number(it.price || 0) * Number(it.qty || 1);
       }
-
-      // Ventilation TVA
-      if (ticket.vatDetails) {
-        try {
-          const vatData = typeof ticket.vatDetails === "string" ? JSON.parse(ticket.vatDetails) : ticket.vatDetails;
-          const rates = vatData.rates || [];
-          for (const r of rates) {
-            const rate = Number(r.rate);
-            if (!vatMap[rate]) vatMap[rate] = { ht: 0, vat: 0, ttc: 0 };
-            vatMap[rate].ht += Number(r.ht || 0);
-            vatMap[rate].vat += Number(r.vat || 0);
-            vatMap[rate].ttc += Number(r.ttc || 0);
-            totalHT += Number(r.ht || 0);
-            totalVAT += Number(r.vat || 0);
-          }
-        } catch {
-          // fallback
-          const defaultHT = Math.round((ticket.total / 1.1) * 100) / 100;
-          totalHT += defaultHT;
-          totalVAT += ticket.total - defaultHT;
-        }
-      } else {
-        const defaultHT = Math.round((ticket.total / 1.1) * 100) / 100;
-        totalHT += defaultHT;
-        totalVAT += ticket.total - defaultHT;
-      }
-
-      // Modes de règlements
-      if (ticket.payments) {
-        try {
-          const pays = typeof ticket.payments === "string" ? JSON.parse(ticket.payments) : ticket.payments;
-          for (const p of pays) {
-            const method = p.method || "carte";
-            paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + Number(p.amount || 0);
-          }
-        } catch {
-          const method = ticket.paymentMethod || "carte";
-          paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
-        }
-      } else {
-        const method = ticket.paymentMethod || "carte";
-        paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
-      }
-
-      // Articles vendus
-      if (ticket.items) {
-        try {
-          const items = typeof ticket.items === "string" ? JSON.parse(ticket.items) : ticket.items;
-          for (const it of items) {
-            const key = it.productId || it.name;
-            if (!itemSalesMap[key]) {
-              itemSalesMap[key] = { name: it.name, qty: 0, total: 0, cat: it.cat };
-            }
-            itemSalesMap[key].qty += Number(it.qty || 1);
-            itemSalesMap[key].total += Number(it.price || 0) * Number(it.qty || 1);
-          }
-        } catch {}
-      }
-
-      // Serveurs
       const srv = ticket.server || "Salle";
       if (!serverSalesMap[srv]) serverSalesMap[srv] = { tickets: 0, total: 0 };
       serverSalesMap[srv].tickets += 1;
       serverSalesMap[srv].total += ticket.total;
-
-      coversCount += ticketCovers(ticket);
     }
-
-    const vatBreakdown = Object.keys(vatMap).map((k) => ({
-      rate: Number(k),
-      ht: Math.round(vatMap[Number(k)].ht * 100) / 100,
-      vat: Math.round(vatMap[Number(k)].vat * 100) / 100,
-      ttc: Math.round(vatMap[Number(k)].ttc * 100) / 100,
-    }));
 
     const topItems = Object.values(itemSalesMap)
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 10);
 
     const ticketsCount = unclosedTickets.length;
-    const averageTicket = ticketsCount > 0 ? Math.round((totalNet / ticketsCount) * 100) / 100 : 0;
+    const { paymentsBreakdown: pb, ...rest } = totals;
 
     return {
       type: "X",
       title: "RAPPORT X — LECTURE DE CAISSE EN DIRECT",
       isInterim: true,
       openedAt: sessionOpenedAt,
-      generatedAt: sessionNow,
+      generatedAt: new Date(),
       ticketsCount,
-      coversCount,
-      totalGross: Math.round(totalGross * 100) / 100,
-      totalDiscounts: Math.round(totalDiscounts * 100) / 100,
-      totalNet: Math.round(totalNet * 100) / 100,
-      totalHT: Math.round(totalHT * 100) / 100,
-      totalVAT: Math.round(totalVAT * 100) / 100,
-      totalTips: Math.round(totalTips * 100) / 100,
-      averageTicket,
-      paymentsBreakdown: {
-        carte: Math.round((paymentsBreakdown.carte || 0) * 100) / 100,
-        especes: Math.round((paymentsBreakdown.especes || 0) * 100) / 100,
-        autre: Math.round((paymentsBreakdown.autre || 0) * 100) / 100,
-        partage: Math.round((paymentsBreakdown.partage || 0) * 100) / 100,
-      },
-      vatBreakdown,
+      ...rest,
+      averageTicket: ticketsCount > 0 ? Math.round((totals.totalNet / ticketsCount) * 100) / 100 : 0,
+      paymentsBreakdown: { carte: pb.carte, especes: pb.especes, autre: pb.autre, partage: pb.partage || 0 },
       topItems,
       serverSales: serverSalesMap,
       lastZReportNumber: lastZ?.reportNumber || null,
       lastZDate: lastZ?.closedAt || null,
-      currentGrandTotal: Math.round(((lastZ?.grandTotal || cfg.grandTotal || 0) + totalNet) * 100) / 100,
+      currentGrandTotal: toEuros(toCents(lastZ?.grandTotal || cfg.grandTotal || 0) + toCents(totals.totalNet)),
     };
   }
 
@@ -293,93 +255,20 @@ export class ClosingService {
     const grandTotalBefore = lastZ?.grandTotal || cfg.grandTotal || 0;
     const openedAt = lastZ ? lastZ.closedAt : (unclosedTickets[0]?.createdAt || now);
 
-    // Calculs financiers
-    let totalGross = 0;
-    let totalDiscounts = 0;
-    let totalNet = 0;
-    let totalHT = 0;
-    let totalVAT = 0;
-    let coversCount = 0;
-    let totalTips = 0;
-
-    const paymentsBreakdown: Record<string, number> = {
-      carte: 0,
-      especes: 0,
-      autre: 0,
-    };
-
-    const vatMap: Record<number, { ht: number; vat: number; ttc: number }> = {};
-
-    for (const ticket of unclosedTickets) {
-      totalNet += ticket.total;
-      totalTips += Number((ticket as any).tip || 0);
-      const sub = ticket.subtotal != null ? ticket.subtotal : ticket.total;
-      totalGross += sub;
-
-      if (ticket.discount) {
-        try {
-          const disc = typeof ticket.discount === "string" ? JSON.parse(ticket.discount) : ticket.discount;
-          totalDiscounts += Number(disc.amount || 0);
-        } catch {}
-      }
-
-      if (ticket.vatDetails) {
-        try {
-          const vatData = typeof ticket.vatDetails === "string" ? JSON.parse(ticket.vatDetails) : ticket.vatDetails;
-          for (const r of vatData.rates || []) {
-            const rate = Number(r.rate);
-            if (!vatMap[rate]) vatMap[rate] = { ht: 0, vat: 0, ttc: 0 };
-            vatMap[rate].ht += Number(r.ht || 0);
-            vatMap[rate].vat += Number(r.vat || 0);
-            vatMap[rate].ttc += Number(r.ttc || 0);
-            totalHT += Number(r.ht || 0);
-            totalVAT += Number(r.vat || 0);
-          }
-        } catch {
-          const defaultHT = Math.round((ticket.total / 1.1) * 100) / 100;
-          totalHT += defaultHT;
-          totalVAT += ticket.total - defaultHT;
-        }
-      } else {
-        const defaultHT = Math.round((ticket.total / 1.1) * 100) / 100;
-        totalHT += defaultHT;
-        totalVAT += ticket.total - defaultHT;
-      }
-
-      if (ticket.payments) {
-        try {
-          const pays = typeof ticket.payments === "string" ? JSON.parse(ticket.payments) : ticket.payments;
-          for (const p of pays) {
-            const method = p.method || "carte";
-            paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + Number(p.amount || 0);
-          }
-        } catch {
-          const method = ticket.paymentMethod || "carte";
-          paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
-        }
-      } else {
-        const method = ticket.paymentMethod || "carte";
-        paymentsBreakdown[method] = (paymentsBreakdown[method] || 0) + ticket.total;
-      }
-
-      coversCount += ticketCovers(ticket);
-    }
-
+    // Calculs financiers (communs avec le rapport X)
     const round2 = (n: number) => Math.round(n * 100) / 100;
-    const finalGross = round2(totalGross);
-    const finalDiscounts = round2(totalDiscounts);
-    const finalNet = round2(totalNet);
-    const finalHT = round2(totalHT);
-    const finalVAT = round2(totalVAT);
-    const finalTips = round2(totalTips);
-    const grandTotal = round2(grandTotalBefore + finalNet);
-
-    const vatBreakdown = Object.keys(vatMap).map((k) => ({
-      rate: Number(k),
-      ht: round2(vatMap[Number(k)].ht),
-      vat: round2(vatMap[Number(k)].vat),
-      ttc: round2(vatMap[Number(k)].ttc),
-    }));
+    const {
+      totalGross: finalGross,
+      totalDiscounts: finalDiscounts,
+      totalNet: finalNet,
+      totalHT: finalHT,
+      totalVAT: finalVAT,
+      totalTips: finalTips,
+      coversCount,
+      paymentsBreakdown,
+      vatBreakdown,
+    } = aggregateTickets(unclosedTickets);
+    const grandTotal = toEuros(toCents(grandTotalBefore) + toCents(finalNet));
 
     const openingCash = round2(input.openingCash || 0);
     const theoreticalCash = round2(openingCash + (paymentsBreakdown.especes || 0));

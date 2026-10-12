@@ -5,14 +5,6 @@ import { PrismaService } from "../prisma/prisma.service";
 export class TablesService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.table.findMany({ orderBy: { number: "asc" } });
-  }
-
-  async findOne(id: string) {
-    return this.prisma.table.findUnique({ where: { id } });
-  }
-
   async toggleAlert(tableId: string) {
     const table = await this.prisma.table.findUnique({ where: { id: tableId } });
     if (!table) throw new NotFoundException("Table introuvable");
