@@ -186,6 +186,18 @@ export class ManagementGateway {
     return res;
   }
 
+  // Rapport en lecture : montants des pourboires et heures de chacun
+  @RequirePermissions("gestion.staff", "caisse.close")
+  @SubscribeMessage("tips:distribution")
+  async tipsDistribution(@MessageBody() data: { from: number; to: number; options?: any }) {
+    try {
+      const report = await this.management.tipsDistribution(new Date(Number(data?.from)), new Date(Number(data?.to)), data?.options ?? {});
+      return { ok: true, report };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
   private actor(client: Socket) {
     return { staffId: client.data.user.staffId, name: client.data.user.name };
   }

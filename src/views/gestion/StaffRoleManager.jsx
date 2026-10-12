@@ -12,11 +12,14 @@ import {
   Check,
   Sparkles,
   Clock,
+  HandCoins,
 } from "lucide-react";
 import Modal, { Field, inputCls } from "../../components/Modal.jsx";
 import { PERMISSION_MODULES, ALL_PERMISSIONS } from "../../data/staff.js";
 import { getSocket } from "../../services/socket.js";
 import { hoursByStaff, formatMinutes } from "../../utils/stats.js";
+import { money } from "../../utils/index.js";
+import { triggerFileDownload } from "../../utils/fec.js";
 
 const PRESET_COLORS = [
   "#C1440E", // RestoFlow Rust
@@ -39,7 +42,7 @@ export default function StaffRoleManager({
   onUpdateRole,
   onDeleteRole,
 }) {
-  const [subTab, setSubTab] = useState("staff"); // staff | roles | matrix | hours
+  const [subTab, setSubTab] = useState("staff"); // staff | roles | matrix | hours | tips
   const [editingStaff, setEditingStaff] = useState(null); // null | 'new' | staffObject
   const [editingRole, setEditingRole] = useState(null);   // null | 'new' | roleObject
   const [filterRoleId, setFilterRoleId] = useState(null);
@@ -106,6 +109,16 @@ export default function StaffRoleManager({
           >
             <Clock size={14} /> Heures pointées
           </button>
+          <button
+            onClick={() => setSubTab("tips")}
+            className="rf-tap flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold"
+            style={{
+              background: subTab === "tips" ? "#2B2622" : "transparent",
+              color: subTab === "tips" ? "#FAF6EE" : "#5B5346",
+            }}
+          >
+            <HandCoins size={14} /> Pourboires
+          </button>
         </div>
 
         {subTab === "staff" && (
@@ -130,6 +143,7 @@ export default function StaffRoleManager({
       </div>
 
       {subTab === "hours" && <ShiftHours staff={staff} />}
+      {subTab === "tips" && <TipsDistribution roles={roles} />}
 
       {/* ─── VUE 1 : PERSONNEL & AFFECTATIONS ─── */}
       {subTab === "staff" && (
@@ -1022,6 +1036,187 @@ function ShiftHours({ staff }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/* ─── Répartition des pourboires selon les heures pointées (calculée par le serveur) ─── */
+const TIPS_MODES = [
+  { id: "hours", label: "Au prorata des heures" },
+  { id: "weighted", label: "Heures × coefficient du rôle" },
+  { id: "equal", label: "Parts égales entre présents" },
+];
+const TIPS_PREFS_KEY = "rf_tips_options";
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+function TipsDistribution({ roles }) {
+  const [prefs, setPrefs] = useState(() => {
+    const defaults = { mode: "hours", excludedRoleIds: [], roleWeights: {} };
+    try {
+      return { ...defaults, ...JSON.parse(localStorage.getItem(TIPS_PREFS_KEY) || "{}") };
+    } catch {
+      return defaults;
+    }
+  });
+  const [from, setFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // lundi
+    return isoDay(d);
+  });
+  const [to, setTo] = useState(() => isoDay(new Date()));
+  const [extra, setExtra] = useState("");
+  const [report, setReport] = useState(null);
+  const [error, setError] = useState("");
+
+  // Options mémorisées sur ce poste
+  const update = (patch) => {
+    const next = { ...prefs, ...patch };
+    setPrefs(next);
+    setReport(null);
+    try {
+      localStorage.setItem(TIPS_PREFS_KEY, JSON.stringify(next));
+    } catch {
+      // Préférence non mémorisée : sans conséquence
+    }
+  };
+
+  const compute = () => {
+    const socket = getSocket();
+    if (!socket?.connected) return setError("Hors ligne : calcul impossible");
+    const start = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    end.setDate(end.getDate() + 1); // date de fin incluse
+    socket.emit(
+      "tips:distribution",
+      { from: start.getTime(), to: end.getTime(), options: { ...prefs, extraCents: Math.round((Number(extra) || 0) * 100) } },
+      (res) => {
+        if (res?.ok) {
+          setReport(res.report);
+          setError("");
+        } else setError(res?.error || "Calcul impossible");
+      }
+    );
+  };
+
+  const roleName = (id) => roles.find((r) => r.id === id)?.name || id;
+
+  const exportCsv = () => {
+    const cell = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const rows = [["Équipier", "Rôle", "Heures", "Part (€)"]].concat(
+      report.rows.map((r) => [r.name, roleName(r.roleId), formatMinutes(r.minutes), (r.shareCents / 100).toFixed(2).replace(".", ",")])
+    );
+    triggerFileDownload("﻿" + rows.map((r) => r.map(cell).join(";")).join("\r\n"), `pourboires-${from}-au-${to}.csv`);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-black/10 p-4 space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Field label="Du">
+            <input type="date" className={inputCls} value={from} onChange={(e) => { setFrom(e.target.value); setReport(null); }} />
+          </Field>
+          <Field label="Au (inclus)">
+            <input type="date" className={inputCls} value={to} onChange={(e) => { setTo(e.target.value); setReport(null); }} />
+          </Field>
+          <Field label="Montant ajouté (€, ex. tronc espèces)">
+            <input type="number" min="0" step="0.01" className={inputCls} value={extra} placeholder="0"
+              onChange={(e) => { setExtra(e.target.value); setReport(null); }} />
+          </Field>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-[#5B5346] uppercase tracking-wider mb-2">Mode de répartition</p>
+          <div className="flex flex-wrap gap-2">
+            {TIPS_MODES.map((m) => (
+              <button key={m.id} onClick={() => update({ mode: m.id })}
+                className="rf-tap px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                style={prefs.mode === m.id
+                  ? { background: "#2B2622", color: "#FAF6EE", borderColor: "#2B2622" }
+                  : { borderColor: "rgba(0,0,0,.15)", color: "#5B5346" }}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-[#5B5346] uppercase tracking-wider mb-2">
+            Rôles concernés{prefs.mode === "weighted" && " et coefficients"}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {roles.map((r) => {
+              const included = !prefs.excludedRoleIds.includes(r.id);
+              return (
+                <div key={r.id} className="flex items-center gap-2 text-xs">
+                  <label className="flex items-center gap-2 flex-1 cursor-pointer">
+                    <input type="checkbox" checked={included}
+                      onChange={() => update({
+                        excludedRoleIds: included ? [...prefs.excludedRoleIds, r.id] : prefs.excludedRoleIds.filter((x) => x !== r.id),
+                      })} />
+                    <span className="font-semibold text-[#2B2622]">{r.name}</span>
+                  </label>
+                  {prefs.mode === "weighted" && included && (
+                    <div className="w-20">
+                      <input type="number" min="0" step="0.1" className={inputCls} title="Coefficient du rôle"
+                        value={prefs.roleWeights[r.id] ?? 1}
+                        onChange={(e) => update({ roleWeights: { ...prefs.roleWeights, [r.id]: e.target.value === "" ? 1 : Number(e.target.value) } })} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <button onClick={compute} className="rf-tap px-4 py-2 rounded-xl text-sm font-bold text-white" style={{ background: "#C1440E" }}>
+          Calculer la répartition
+        </button>
+        {error && <p className="text-xs font-semibold text-[#C1361B]">{error}</p>}
+      </div>
+
+      {report && (
+        <div className="bg-white rounded-2xl border border-black/10 overflow-hidden">
+          <div className="p-4 flex items-center justify-between gap-3 flex-wrap border-b border-black/5">
+            <p className="text-xs text-[#5B5346]">
+              Pourboires encaissés <b>{money(report.collectedCents / 100)}</b>
+              {report.extraCents > 0 && <> + ajout <b>{money(report.extraCents / 100)}</b></>}
+              {" "}· à répartir <b>{money(report.tipCents / 100)}</b>
+            </p>
+            <button onClick={exportCsv} disabled={report.rows.length === 0}
+              className="rf-tap px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#2B2622] disabled:opacity-40">
+              Exporter CSV
+            </button>
+          </div>
+          {report.undistributedCents > 0 && (
+            <p className="px-4 pt-3 text-xs font-semibold text-[#C1361B]">
+              {money(report.undistributedCents / 100)} non réparti : aucun équipier concerné n'a pointé sur la période.
+            </p>
+          )}
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-black/10 text-[#8A8378] font-bold uppercase tracking-wider">
+                <th className="py-3 px-4">Équipier</th>
+                <th className="py-3 px-3">Rôle</th>
+                <th className="py-3 px-3 text-right">Heures</th>
+                <th className="py-3 px-4 text-right">Part</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/5">
+              {report.rows.map((r) => (
+                <tr key={r.staffId} style={{ opacity: r.eligible ? 1 : 0.5 }}>
+                  <td className="py-2.5 px-4 font-semibold text-[#2B2622]">{r.name}</td>
+                  <td className="py-2.5 px-3">{roleName(r.roleId)}{!r.eligible && " (exclu)"}</td>
+                  <td className="py-2.5 px-3 text-right">{formatMinutes(r.minutes)}</td>
+                  <td className="py-2.5 px-4 text-right rf-mono font-bold">{money(r.shareCents / 100)}</td>
+                </tr>
+              ))}
+              {report.rows.length === 0 && (
+                <tr><td colSpan={4} className="py-8 text-center text-[#8A8378]">Aucun pointage sur la période</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,6 +3,8 @@ import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
 import { SessionPayload } from "../auth/auth.service";
 import { normalizeHours } from "../catalog/catalog.service";
+import { toCents } from "../billing/pricing";
+import { distributeTips, TipsOptions } from "./tips";
 
 const PIN = /^\d{4,6}$/;
 const newId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -298,5 +300,38 @@ export class ManagementService {
       throw new BadRequestException("Heure de fin invalide (après l'arrivée, pas dans le futur)");
     }
     return this.prisma.shift.update({ where: { id }, data: { endAt: end, closedBy } });
+  }
+
+  /**
+   * Répartition des pourboires encaissés sur [from, to[ (avoirs déduits) selon les heures pointées.
+   * extraCents : montant ajouté à la main (tronc commun en espèces, par exemple).
+   */
+  async tipsDistribution(from: Date, to: Date, options: TipsOptions & { extraCents?: number } = {}) {
+    if (!(to > from)) throw new BadRequestException("Période invalide");
+    const mode = options.mode ?? "hours";
+    if (!["hours", "weighted", "equal"].includes(mode)) throw new BadRequestException("Mode de répartition inconnu");
+    const extraCents = Math.round(Number(options.extraCents) || 0);
+    if (extraCents < 0) throw new BadRequestException("Montant ajouté invalide");
+
+    const [tickets, shifts, staff] = await Promise.all([
+      this.prisma.orderHistory.findMany({ where: { createdAt: { gte: from, lt: to } }, select: { tip: true } }),
+      this.prisma.shift.findMany({ where: { startAt: { lt: to }, OR: [{ endAt: null }, { endAt: { gt: from } }] } }),
+      this.prisma.staff.findMany({ select: { id: true, name: true, roleId: true } }),
+    ]);
+    const collectedCents = tickets.reduce((sum, t) => sum + toCents(t.tip ?? 0), 0);
+    const tipCents = Math.max(0, collectedCents) + extraCents;
+    const roleWeights = Object.fromEntries(
+      Object.entries(options.roleWeights ?? {}).filter(([, v]) => Number.isFinite(Number(v)) && Number(v) >= 0).map(([k, v]) => [k, Number(v)])
+    );
+    return {
+      collectedCents,
+      extraCents,
+      ...distributeTips(tipCents, shifts, staff, { from: from.getTime(), to: to.getTime() }, {
+        mode,
+        roleWeights,
+        excludedRoleIds: Array.isArray(options.excludedRoleIds) ? options.excludedRoleIds : [],
+        excludedStaffIds: Array.isArray(options.excludedStaffIds) ? options.excludedStaffIds : [],
+      }),
+    };
   }
 }
