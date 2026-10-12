@@ -21,6 +21,9 @@ if (!process.env.JWT_SECRET) {
   );
 }
 
+/** Durée d'une session : son début vaut exp - SESSION_MS */
+export const SESSION_MS = 12 * 3600 * 1000;
+
 // Anti brute-force du PIN : verrouillage après N échecs consécutifs par équipier
 // ponytail: compteur en mémoire mono-processus, à déplacer en base si plusieurs instances serveur
 const MAX_PIN_ATTEMPTS = 5;
@@ -36,7 +39,7 @@ export class AuthService {
 
   generateToken(staff: { id: string; name: string; roleId: string; permissions: string[] }): string {
     const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-    const exp = Date.now() + 12 * 3600 * 1000; // 12 heures
+    const exp = Date.now() + SESSION_MS;
     const payload: SessionPayload = {
       staffId: staff.id,
       name: staff.name,

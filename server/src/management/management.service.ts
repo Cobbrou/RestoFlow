@@ -279,6 +279,7 @@ export class ManagementService {
     const open = await this.prisma.shift.findFirst({ where: { staffId: staff.id, endAt: null } });
 
     if (data.action === "in") {
+      // ponytail: deux arrivées simultanées depuis deux tablettes peuvent ouvrir deux services ; index unique partiel (staffId où endAt IS NULL) si cela arrive
       if (open) return open;
       const id = clientId(data.id, "shift");
       return (await this.prisma.shift.findUnique({ where: { id } })) ?? this.prisma.shift.create({ data: { id, staffId: staff.id, startAt: at } });
