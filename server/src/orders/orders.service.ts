@@ -471,12 +471,20 @@ export class OrdersService {
     return { dbProduct, menu: null, name: dbProduct.name, price: effectivePrice(dbProduct, hh, at), vatRate: dbProduct.vatRate };
   }
 
-  async changeQty(orderId: string, itemId: string, delta: number) {
-    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
-    if (!item) throw new NotFoundException("Article non trouvé");
-    if (item.status !== 'draft') {
-      throw new BadRequestException(`Impossible de modifier un article en statut "${item.status}". Seuls les articles brouillons peuvent être modifiés.`);
+  /** Article brouillon de cette commande, encore ouverte : seul cas modifiable sans annulation */
+  private async draftItemOf(orderId: string, itemId: string, verb: string) {
+    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId }, include: { order: true } });
+    if (!item || item.orderId !== orderId) throw new NotFoundException("Article introuvable");
+    if (item.order.status !== "open") throw new BadRequestException("Commande déjà encaissée");
+    if (item.status !== "draft") {
+      throw new BadRequestException(`Impossible de ${verb} un article en statut "${item.status}". Seuls les articles brouillons peuvent l'être.`);
     }
+    return item;
+  }
+
+  async changeQty(orderId: string, itemId: string, delta: number) {
+    if (!Number.isInteger(delta) || delta === 0) throw new BadRequestException("Variation de quantité invalide");
+    const item = await this.draftItemOf(orderId, itemId, "modifier");
 
     const newQty = item.qty + delta;
     if (newQty <= 0) {
@@ -496,11 +504,7 @@ export class OrdersService {
   }
 
   async removeItem(orderId: string, itemId: string) {
-    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
-    if (!item) throw new NotFoundException('Article introuvable');
-    if (item.status !== 'draft') {
-      throw new BadRequestException(`Impossible de supprimer un article en statut "${item.status}". Seuls les articles brouillons peuvent être supprimés.`);
-    }
+    await this.draftItemOf(orderId, itemId, "supprimer");
     await this.prisma.orderItem.delete({ where: { id: itemId } });
     const updated = await this.prisma.order.findUnique({
       where: { id: orderId },

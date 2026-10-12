@@ -24,6 +24,30 @@ describe("OrdersService : article déjà envoyé en cuisine", () => {
   });
 });
 
+describe("OrdersService.changeQty / removeItem", () => {
+  const make = (item: any) => {
+    const prisma: any = {
+      orderItem: { findUnique: vi.fn().mockResolvedValue(item), update: vi.fn(), delete: vi.fn() },
+      order: { findUnique: vi.fn().mockResolvedValue({ id: "o1", items: [] }) },
+    };
+    return { prisma, service: new OrdersService(prisma) };
+  };
+  const draft = { id: "it1", orderId: "o1", qty: 2, status: "draft", order: { status: "open" } };
+
+  it("refuse un article d'une autre commande, une commande encaissée ou une variation invalide", async () => {
+    const { prisma, service } = make(draft);
+    await expect(service.changeQty("o2", "it1", 1)).rejects.toThrow("Article introuvable");
+    await expect(service.removeItem("o2", "it1")).rejects.toThrow("Article introuvable");
+    await expect(service.changeQty("o1", "it1", 0.5)).rejects.toThrow("Variation de quantité invalide");
+    await expect(make({ ...draft, order: { status: "closed" } }).service.removeItem("o1", "it1")).rejects.toThrow("déjà encaissée");
+    expect(prisma.orderItem.update).not.toHaveBeenCalled();
+    expect(prisma.orderItem.delete).not.toHaveBeenCalled();
+
+    await service.changeQty("o1", "it1", 1);
+    expect(prisma.orderItem.update).toHaveBeenCalledWith({ where: { id: "it1" }, data: { qty: 3 } });
+  });
+});
+
 describe("OrdersService.cancelOffPremise", () => {
   const make = (order: any) => {
     const prisma: any = {
