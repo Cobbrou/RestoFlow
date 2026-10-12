@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell,
 } from "recharts";
 import { orderKitchenStatus, money } from "../../utils/index.js";
+import { salesByHour, salesByServer } from "../../utils/stats.js";
 
 /**
  * Dashboard — Tableau de bord du back-office.
@@ -14,6 +15,7 @@ import { orderKitchenStatus, money } from "../../utils/index.js";
  *  - Graphique CA des 7 derniers jours (AreaChart)
  *  - Répartition live des commandes en cuisine (PieChart)
  *  - Top produits vendus (BarChart horizontal)
+ *  - CA par heure et par serveur (sur les tickets synchronisés : 100 derniers)
  *
  * Filtre temporel : Aujourd'hui | Cette semaine | Historique complet
  */
@@ -56,6 +58,9 @@ export default function Dashboard({ history, orders, tables }) {
       .slice(0, 6)
       .map(([name, qty]) => ({ name, qty }));
   }, [filtered]);
+
+  const byHour   = useMemo(() => salesByHour(filtered), [filtered]);
+  const byServer = useMemo(() => salesByServer(filtered), [filtered]);
 
   // Commandes en cuisine (live)
   const liveByStatus = useMemo(() => {
@@ -161,6 +166,58 @@ export default function Dashboard({ history, orders, tables }) {
               <Bar dataKey="qty" fill="#4A7856" radius={[0, 6, 6, 0]} barSize={16} />
             </BarChart>
           </ResponsiveContainer>
+        </div>
+
+        {/* CA par heure */}
+        <div className="col-span-2 rounded-2xl border border-black/10 bg-white p-4">
+          <p className="text-sm font-semibold text-[#2B2622] mb-2">Chiffre d'affaires par heure</p>
+          {byHour.length === 0 ? (
+            <p className="text-xs text-[#9A917E] py-10 text-center">Aucune vente sur la période</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={byHour}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#EFE7D2" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#8A8378" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#8A8378" }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  formatter={(v, _k, p) => [`${money(v)} · ${p.payload.tickets} ticket(s)`, "CA"]}
+                  contentStyle={{ borderRadius: 8, border: "1px solid #EFE7D2", fontSize: 12 }}
+                />
+                <Bar dataKey="ca" fill="#C1440E" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* CA par serveur */}
+        <div className="rounded-2xl border border-black/10 bg-white p-4">
+          <p className="text-sm font-semibold text-[#2B2622] mb-2">Par serveur</p>
+          {byServer.length === 0 ? (
+            <p className="text-xs text-[#9A917E] py-10 text-center">Aucune vente sur la période</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[#8A8378] text-left">
+                  <th className="py-1 font-semibold">Serveur</th>
+                  <th className="py-1 font-semibold text-right">CA</th>
+                  <th className="py-1 font-semibold text-right">Tickets</th>
+                  <th className="py-1 font-semibold text-right">Moyen</th>
+                  <th className="py-1 font-semibold text-right">Pourb.</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/5">
+                {byServer.map((s) => (
+                  <tr key={s.name}>
+                    <td className="py-1.5 font-semibold text-[#2B2622]">{s.name}</td>
+                    <td className="py-1.5 text-right rf-mono">{money(s.ca)}</td>
+                    <td className="py-1.5 text-right">{s.tickets}</td>
+                    <td className="py-1.5 text-right rf-mono">{money(s.average)}</td>
+                    <td className="py-1.5 text-right rf-mono">{money(s.tips)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
