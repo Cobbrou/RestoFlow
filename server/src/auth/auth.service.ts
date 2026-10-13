@@ -13,7 +13,10 @@ export interface SessionPayload {
 }
 
 // 🔒 Jamais de secret par défaut versionné : sans JWT_SECRET, clé aléatoire par démarrage
-// (les sessions sont alors invalidées à chaque redémarrage du serveur)
+// (les sessions sont alors invalidées à chaque redémarrage du serveur), refusé en production
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
+  throw new Error("JWT_SECRET obligatoire en production (voir deploy/DEPLOIEMENT.md).");
+}
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
 if (!process.env.JWT_SECRET) {
   new Logger("AuthService").warn(
