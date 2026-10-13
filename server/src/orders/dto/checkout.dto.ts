@@ -28,6 +28,11 @@ export class CheckoutDto {
   @IsString()
   operatorId?: string;
 
+  // Jeton de session de cet équipier : sans lui, le ticket est attribué à la session qui envoie
+  @IsOptional()
+  @IsString()
+  operatorToken?: string;
+
   // Ticket par convive : [{ itemId, qty }] encaissés sur un ticket séparé (validés par le serveur)
   @IsOptional()
   @IsArray()

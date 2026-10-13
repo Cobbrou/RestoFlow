@@ -672,10 +672,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CheckoutDto
   ) {
     try {
-      // Rejeu hors-ligne : le ticket porte l'équipier d'origine, le journal garde aussi la session qui rejoue
+      // Rejeu hors-ligne : le ticket porte l'équipier d'origine (prouvé par son jeton), le journal garde aussi la session qui rejoue
       const session = client.data.user;
       const operator =
-        data.operatorId && data.operatorId !== session.staffId
+        data.operatorId && data.operatorId !== session.staffId && this.authService.isOperatorToken(data.operatorToken, data.operatorId)
           ? await this.prisma.staff.findUnique({ where: { id: data.operatorId }, select: { id: true, name: true } })
           : null;
       const res = await this.billingService.processCheckout({ ...data, serverName: operator?.name || session.name });

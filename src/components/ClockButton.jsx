@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Clock } from "lucide-react";
-import { getSocket } from "../services/socket.js";
+import { getSocket, getSessionToken } from "../services/socket.js";
 import { emitOrQueue } from "../services/emitOrQueue.js";
 import { uid } from "../data/seed.js";
 
@@ -33,11 +33,11 @@ export default function ClockButton({ currentStaff, dark }) {
     if (mine) {
       if (!confirm(`Pointer le départ de ${currentStaff.name} ?`)) return;
       setOpenShifts((prev) => prev.filter((s) => s.id !== mine.id));
-      emitOrQueue("shift:clock", { staffId: currentStaff.id, action: "out", at });
+      emitOrQueue("shift:clock", { staffId: currentStaff.id, action: "out", at, operatorToken: getSessionToken() });
     } else {
       const id = uid("shift");
       setOpenShifts((prev) => [...prev, { id, staffId: currentStaff.id, startAt: new Date(at).toISOString(), endAt: null }]);
-      emitOrQueue("shift:clock", { id, staffId: currentStaff.id, action: "in", at });
+      emitOrQueue("shift:clock", { id, staffId: currentStaff.id, action: "in", at, operatorToken: getSessionToken() });
     }
   };
 

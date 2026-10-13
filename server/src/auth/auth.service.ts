@@ -32,6 +32,9 @@ const pinFailures = new Map<string, { count: number; lockedUntil: number }>();
 
 export const PIN = /^\d{4,6}$/;
 
+/** Rejeu hors-ligne : une action mise en file garde le jeton de son auteur, accepté jusqu'à 24 h après expiration */
+export const REPLAY_GRACE_MS = 24 * 3600 * 1000;
+
 // Copie côté client : src/utils/permissions.js (pinLengthFor)
 const SENSITIVE_PIN_PERMISSIONS = ["gestion.staff", "caisse.settings", "caisse.close", "caisse.fec"];
 /** PIN à 6 chiffres pour un profil sensible, 4 sinon */
@@ -60,7 +63,7 @@ export class AuthService {
     return `${header}.${body}.${signature}`;
   }
 
-  verifyToken(token: string): SessionPayload | null {
+  verifyToken(token: string, graceMs = 0): SessionPayload | null {
     try {
       if (!token) return null;
       const parts = token.split(".");
@@ -70,11 +73,15 @@ export class AuthService {
       const given = Buffer.from(signature, "base64url");
       if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
       const payload: SessionPayload = JSON.parse(Buffer.from(body, "base64url").toString());
-      if (!payload.exp || Date.now() > payload.exp) return null;
+      if (!payload.exp || Date.now() > payload.exp + graceMs) return null;
       return payload;
     } catch {
       return null;
     }
+  }
+
+  isOperatorToken(token: unknown, staffId: unknown): boolean {
+    return typeof token === "string" && typeof staffId === "string" && this.verifyToken(token, REPLAY_GRACE_MS)?.staffId === staffId;
   }
 
   /**
