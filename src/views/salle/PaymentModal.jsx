@@ -19,7 +19,7 @@ import {
   Wifi,
   HeartHandshake,
 } from "lucide-react";
-import { Dialog } from "../../components/Modal.jsx";
+import Modal, { Dialog } from "../../components/Modal.jsx";
 import { money, orderLabel } from "../../utils/index.js";
 import TpeModal from "../../components/TpeModal.jsx";
 import { calculateVatBreakdown, partialNetCents } from "../../utils/vat.js";
@@ -91,6 +91,10 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   // Historique des règlements effectués dans cette session d'encaissement
   // Chaque élément : { id, label, amount, method, items, paidAt }
   const [payments, setPayments] = useState([]);
+
+  // Fermeture volontaire (Annuler, ×) avec des règlements saisis : confirmation avant de les perdre
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const requestCancel = () => (payments.length === 0 ? onCancel() : setConfirmCancel(true));
 
   // Montant déjà réglé et reste à payer
   const paidAmount = useMemo(
@@ -418,7 +422,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
           </div>
 
           <button
-            onClick={onCancel}
+            onClick={requestCancel}
             aria-label="Fermer"
             className="rf-tap p-2 rounded-full bg-black/5 hover:bg-black/10 text-[#5B5346]"
             title="Fermer"
@@ -1234,7 +1238,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
         {/* ── PIED DU MODAL / BOUTONS D'ACTION ─────────────────── */}
         <div className="px-5 py-3.5 bg-white border-t border-black/10 flex items-center justify-between gap-3">
           <button
-            onClick={onCancel}
+            onClick={requestCancel}
             className="rf-tap px-4 py-2.5 rounded-xl text-xs font-bold text-[#5B5346] bg-black/5 hover:bg-black/10"
           >
             Annuler
@@ -1281,19 +1285,44 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
         </div>
       </Dialog>
 
-        {/* Modal TPE interactif */}
-        {tpeSession && (
-          <TpeModal
-            amount={tpeSession.amount}
-            restaurantName={config?.name || "RestoFlow"}
-            onCancel={() => setTpeSession(null)}
-            onSuccess={(tpeRes) => {
-              const cb = tpeSession.callback;
-              setTpeSession(null);
-              cb?.(tpeRes);
-            }}
-          />
-        )}
+      {/* Modal TPE interactif */}
+      {tpeSession && (
+        <TpeModal
+          amount={tpeSession.amount}
+          restaurantName={config?.name || "RestoFlow"}
+          onCancel={() => setTpeSession(null)}
+          onSuccess={(tpeRes) => {
+            const cb = tpeSession.callback;
+            setTpeSession(null);
+            cb?.(tpeRes);
+          }}
+        />
+      )}
+
+      {confirmCancel && (
+        <Modal title="Abandonner l'encaissement ?" onClose={() => setConfirmCancel(false)}>
+          <p className="text-sm text-[#2B2622]">
+            {payments.length} règlement{payments.length > 1 ? "s" : ""} saisi{payments.length > 1 ? "s" : ""} ({money(paidAmount)}) {payments.length > 1 ? "seront perdus" : "sera perdu"}.
+          </p>
+          <p className="text-xs text-[#6B6355] mt-1.5">Un paiement carte déjà débité sur le TPE devra être ressaisi ou remboursé.</p>
+          <div className="flex gap-2 mt-5">
+            <button
+              type="button"
+              onClick={() => setConfirmCancel(false)}
+              className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#2B2622]"
+            >
+              Reprendre l'encaissement
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-[#C1361B] bg-[#C1361B]/10 hover:bg-[#C1361B]/15"
+            >
+              Abandonner
+            </button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
