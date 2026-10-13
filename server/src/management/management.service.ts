@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
-import { PIN, SessionPayload } from "../auth/auth.service";
+import { PIN, SessionPayload, pinLengthFor } from "../auth/auth.service";
 import { normalizeHours } from "../catalog/catalog.service";
 import { toCents } from "../billing/pricing";
 import { distributeTips, TipsOptions } from "./tips";
@@ -140,21 +140,24 @@ export class ManagementService {
     });
   }
 
-  private async staffFields(data: any, creating: boolean, actor: Actor) {
+  private async staffFields(data: any, actor: Actor, current?: { roleId: string }) {
     const fields: any = {};
-    if (data?.name !== undefined || creating) {
+    if (data?.name !== undefined || !current) {
       const name = String(data?.name || "").trim();
       if (!name) throw new BadRequestException("Nom du collaborateur obligatoire");
       fields.name = name;
     }
-    if (data?.roleId !== undefined || creating) {
-      await this.assertCanManageRole(actor, String(data?.roleId));
-      fields.roleId = data.roleId;
-    }
-    // PIN : jamais stocké ni renvoyé en clair ; vide en modification = inchangé
-    if (data?.pin || creating) {
-      if (!PIN.test(String(data?.pin || ""))) throw new BadRequestException("Le code PIN doit comporter 4 à 6 chiffres");
-      fields.pin = await bcrypt.hash(String(data.pin), 10);
+    const newRole = data?.roleId !== undefined || !current ? await this.assertCanManageRole(actor, String(data?.roleId)) : null;
+    if (newRole) fields.roleId = newRole.id;
+    const currentPinLength = current ? pinLengthFor(current.roleId, (await this.roleById(current.roleId)).permissions) : null;
+    const pinLength = newRole ? pinLengthFor(newRole.id, newRole.permissions) : currentPinLength;
+    // PIN : jamais stocké ni renvoyé en clair ; vide en modification = inchangé, sauf si le nouveau rôle exige une autre longueur
+    if (data?.pin || !current) {
+      const pin = String(data?.pin || "");
+      if (!PIN.test(pin) || pin.length !== pinLength) throw new BadRequestException(`Le code PIN de ce rôle doit comporter ${pinLength} chiffres`);
+      fields.pin = await bcrypt.hash(pin, 10);
+    } else if (pinLength !== currentPinLength) {
+      throw new BadRequestException(`Ce rôle exige un PIN à ${pinLength} chiffres : saisissez un nouveau PIN`);
     }
     if (data?.email !== undefined) fields.email = data.email || null;
     if (data?.phone !== undefined) fields.phone = data.phone || null;
@@ -164,7 +167,7 @@ export class ManagementService {
   }
 
   async createStaff(data: any, actor: Actor) {
-    const fields = await this.staffFields(data, true, actor);
+    const fields = await this.staffFields(data, actor);
     await this.prisma.staff.create({
       data: { id: clientId(data.id, "stf"), avatarBg: "#C1440E", ...fields },
     });
@@ -175,7 +178,7 @@ export class ManagementService {
     const target = await this.prisma.staff.findUnique({ where: { id } });
     if (!target) throw new NotFoundException("Collaborateur introuvable");
     await this.assertCanManageRole(actor, target.roleId);
-    const fields = await this.staffFields(data, false, actor);
+    const fields = await this.staffFields(data, actor, target);
     if (id === actor.staffId && (fields.active === false || (fields.roleId && fields.roleId !== "admin"))) {
       await this.assertAnotherActiveAdmin(id);
     }
@@ -198,9 +201,15 @@ export class ManagementService {
    * sinon changer le PIN d'un collègue mieux doté suffirait à prendre sa place
    */
   private async assertCanManageRole(actor: Actor, roleId: string) {
+    const role = await this.roleById(roleId);
+    assertCanGrant(actor, role.id, role.permissions);
+    return role;
+  }
+
+  private async roleById(roleId: string) {
     const role = await this.prisma.role.findUnique({ where: { id: roleId } });
     if (!role) throw new BadRequestException("Rôle inconnu");
-    assertCanGrant(actor, role.id, JSON.parse(role.permissions || "[]"));
+    return { id: role.id, permissions: JSON.parse(role.permissions || "[]") as string[] };
   }
 
   private async assertAnotherActiveAdmin(exceptId: string) {

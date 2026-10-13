@@ -32,6 +32,12 @@ const pinFailures = new Map<string, { count: number; lockedUntil: number }>();
 
 export const PIN = /^\d{4,6}$/;
 
+// Copie côté client : src/utils/permissions.js (pinLengthFor)
+const SENSITIVE_PIN_PERMISSIONS = ["gestion.staff", "caisse.settings", "caisse.close", "caisse.fec"];
+/** PIN à 6 chiffres pour un profil sensible, 4 sinon */
+export const pinLengthFor = (roleId: string, permissions: string[] = []) =>
+  roleId === "admin" || permissions.some((p) => SENSITIVE_PIN_PERMISSIONS.includes(p)) ? 6 : 4;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -102,6 +108,12 @@ export class AuthService {
       throw new UnauthorizedException("Équipier introuvable ou compte inactif");
     }
 
+    const permissions: string[] = JSON.parse(staff.role?.permissions || "[]");
+    const pinLength = pinLengthFor(staff.roleId, permissions);
+    if (pin.length !== pinLength) {
+      throw new UnauthorizedException(`Ce profil exige un PIN à ${pinLength} chiffres : faites-le redéfinir par un gestionnaire`);
+    }
+
     // 🔒 Tentative comptée avant la comparaison, sans await entre lecture et écriture du compteur :
     // des requêtes simultanées ne lisent pas toutes un compteur périmé
     const now = Date.now();
@@ -124,7 +136,6 @@ export class AuthService {
     pinFailures.delete(staffId);
     await this.journal.log("AUTH_OK", { staffId, name: staff.name }, { roleId: staff.roleId });
 
-    const permissions: string[] = JSON.parse(staff.role.permissions || "[]");
     const safeStaff = {
       id: staff.id,
       name: staff.name,
