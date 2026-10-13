@@ -4,7 +4,7 @@
   "description": "Backend NestJS & temps-réel Socket.IO pour RestoFlow",
   "main": "dist/src/main.js",
   "scripts": {
-    "build": "nest build",
+    "build": "prisma generate && nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node --env-file=.env dist/src/main.js",
