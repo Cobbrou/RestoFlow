@@ -385,7 +385,8 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   return (
     <div
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-3 sm:p-5"
-      onClick={onCancel}
+      // Un tap hors de la fenêtre ne doit jamais effacer des paiements déjà saisis
+      onClick={payments.length === 0 ? onCancel : undefined}
     >
       <div
         className="rf-anim-pop bg-[#FAF6EE] rounded-3xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-black/10"
