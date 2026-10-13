@@ -2,6 +2,7 @@ import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, Conne
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server, Socket } from "socket.io";
 import { WsAuthGuard, STAFF_ROOM, SENSITIVE, authenticateSocket, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
+import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
 import { AuthService, SESSION_MS } from "../auth/auth.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
@@ -15,7 +16,7 @@ import { ManagementService } from "./management.service";
  * (tables:list, menus:list, staff:list, roles:list) à tous les terminaux.
  */
 @WebSocketGateway({ cors: { origin: ALLOWED_ORIGINS } })
-@UseGuards(WsAuthGuard, WsPermissionsGuard)
+@UseGuards(ScalarIdsGuard, WsAuthGuard, WsPermissionsGuard)
 @UseInterceptors(ClientActionInterceptor)
 export class ManagementGateway {
   @WebSocketServer()

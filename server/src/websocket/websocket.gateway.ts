@@ -26,6 +26,7 @@ import { ManagementService } from "../management/management.service";
 import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
+import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
 import { Public } from "../auth/decorators/public.decorator";
 import { ALLOWED_ORIGINS } from "../cors";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
@@ -39,7 +40,7 @@ import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto"
   },
 })
 // 🔒 Toute action exige une session valide (sauf @Public), puis les permissions déclarées
-@UseGuards(WsAuthGuard, WsPermissionsGuard)
+@UseGuards(ScalarIdsGuard, WsAuthGuard, WsPermissionsGuard)
 // Idempotence : une action déjà appliquée (même clientActionId) n'est jamais rejouée
 @UseInterceptors(ClientActionInterceptor)
 @Injectable()
