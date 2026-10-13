@@ -33,6 +33,25 @@ export function encodeCp1252(text: string): Buffer {
   );
 }
 
+// 🔒 Jamais la machine elle-même (API d'admin Caddy, base…) ni une adresse locale au lien
+const NOT_A_PRINTER = new net.BlockList();
+NOT_A_PRINTER.addSubnet("0.0.0.0", 8);
+NOT_A_PRINTER.addSubnet("127.0.0.0", 8);
+NOT_A_PRINTER.addSubnet("169.254.0.0", 16);
+NOT_A_PRINTER.addAddress("::", "ipv6");
+NOT_A_PRINTER.addAddress("::1", "ipv6");
+NOT_A_PRINTER.addSubnet("fe80::", 10, "ipv6");
+
+/** Motif de refus d'une adresse d'imprimante réseau (IP littérale du LAN et port TCP valide), null si acceptable */
+export function printerAddressError(ip: unknown, port: unknown = 9100): string | null {
+  const family = typeof ip === "string" ? net.isIP(ip) : 0;
+  if (!family) return `Adresse IP d'imprimante invalide : ${String(ip)}`;
+  if (NOT_A_PRINTER.check(ip as string, family === 4 ? "ipv4" : "ipv6")) return `Adresse IP non autorisée pour une imprimante : ${ip}`;
+  const p = Number(port);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return `Port d'imprimante invalide : ${String(port)}`;
+  return null;
+}
+
 @Injectable()
 export class PrinterService {
   private readonly logger = new Logger(PrinterService.name);
@@ -46,9 +65,8 @@ export class PrinterService {
     buffer: Buffer | Uint8Array,
     timeoutMs = 3500
   ): Promise<PrinterSendResult> {
-    if (!ip || !ip.trim()) {
-      return { success: false, error: "Adresse IP d'imprimante manquante" };
-    }
+    const refused = printerAddressError(ip, port);
+    if (refused) return { success: false, error: refused };
 
     const payload = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
 
@@ -100,9 +118,8 @@ export class PrinterService {
    * Teste la joignabilité d'une imprimante réseau sur son port raw 9100
    */
   async testPrinter(ip: string, port = 9100, timeoutMs = 2500): Promise<PrinterTestResult> {
-    if (!ip || !ip.trim()) {
-      return { success: false, error: "Adresse IP manquante" };
-    }
+    const refused = printerAddressError(ip, port);
+    if (refused) return { success: false, error: refused };
 
     const startTime = Date.now();
 

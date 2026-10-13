@@ -730,21 +730,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Impression Matérielle Directe (Axe 4) ───────────────────────────
 
-  // Anti-SSRF : seules les IP d'imprimantes déclarées dans la configuration sont joignables
-  private async assertKnownPrinterIp(ip: string) {
+  // Anti-SSRF : seules les imprimantes déclarées sont joignables, sur leur port configuré (jamais celui du client)
+  private async knownPrinter(ip: string) {
     const cfg = await this.configService.getConfig();
-    const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
-    if (!allowedIps.includes(ip)) {
-      throw new Error(`IP ${ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.`);
-    }
+    const printer = (cfg.printers || []).find((p: any) => p.ip && p.ip === ip);
+    if (!printer) throw new Error(`IP ${ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.`);
+    return { ip: printer.ip as string, port: Number(printer.port) || 9100 };
   }
 
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("printer:test")
-  async handlePrinterTest(@MessageBody() data: { ip: string; port?: number }) {
+  async handlePrinterTest(@MessageBody() data: { ip: string }) {
     try {
-      await this.assertKnownPrinterIp(data.ip);
-      const res = await this.printerService.testPrinter(data.ip, data.port || 9100);
+      const printer = await this.knownPrinter(data?.ip);
+      const res = await this.printerService.testPrinter(printer.ip, printer.port);
       return res;
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -754,13 +753,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   // Addition imprimée par un serveur (caisse.checkout) ou test depuis les réglages
   @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("printer:send_raw")
-  async handlePrinterSendRaw(@MessageBody() data: { ip: string; port?: number; buffer: number[] | string }) {
+  async handlePrinterSendRaw(@MessageBody() data: { ip: string; buffer: number[] | string }) {
     try {
-      await this.assertKnownPrinterIp(data.ip);
+      const printer = await this.knownPrinter(data?.ip);
       const buffer = Array.isArray(data.buffer)
         ? Buffer.from(data.buffer)
         : Buffer.from(data.buffer, "base64");
-      const res = await this.printerService.sendRaw(data.ip, data.port || 9100, buffer);
+      const res = await this.printerService.sendRaw(printer.ip, printer.port, buffer);
       return res;
     } catch (err: any) {
       return { success: false, error: err.message };
