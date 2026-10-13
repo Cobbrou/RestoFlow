@@ -14,6 +14,8 @@ body {
   height: 100%;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Pas de zoom au double tap (taps rapides en service), le zoom au pincement reste possible */
+  touch-action: manipulation;
 }
 
 #root {
