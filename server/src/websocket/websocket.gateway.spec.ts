@@ -18,6 +18,37 @@ const makeGateway = (deps: { config?: any; printer?: any } = {}) =>
     {} as any
   );
 
+describe("Synchronisation initiale : coordonnées", () => {
+  const list = (rows: any[] = []) => vi.fn().mockResolvedValue(rows);
+  const gateway = new WebsocketGateway(
+    { reservation: { findMany: list([{ id: "r1", customerName: "Martin", phone: "0612345678", email: "m@exemple.fr" }]) } } as any,
+    {} as any,
+    { findActive: list() } as any,
+    {} as any,
+    { getConfig: vi.fn().mockResolvedValue({}) } as any,
+    { findAllIngredients: list() } as any,
+    {} as any,
+    {} as any,
+    { listItems: list() } as any,
+    {} as any,
+    { getProducts: list(), getMenus: list() } as any,
+    {} as any,
+    { listTables: list(), listRoles: list(), listStaff: list([{ id: "s1", name: "Léa", email: "lea@exemple.fr", phone: "0600000000" }]) } as any
+  );
+  const user = (permissions: string[]) => ({ staffId: "s1", name: "Léa", roleId: "r", permissions, exp: Date.now() + 60000 });
+
+  it("retire téléphone et e-mail des clients et de l'équipe sans la permission correspondante", async () => {
+    const state = await gateway.getFullState(user(["cuisine.view"]));
+    expect(state.reservations).toEqual([{ id: "r1", customerName: "Martin" }]);
+    expect(state.staff).toEqual([{ id: "s1", name: "Léa" }]);
+  });
+
+  it("garde les coordonnées des clients pour qui gère les réservations", async () => {
+    const state = await gateway.getFullState(user(["salle.reservations"]));
+    expect(state.reservations[0]).toMatchObject({ phone: "0612345678", email: "m@exemple.fr" });
+  });
+});
+
 describe("Impression directe depuis un poste", () => {
   const setup = () => {
     const printer = { sendRaw: vi.fn().mockResolvedValue({ success: true }), testPrinter: vi.fn().mockResolvedValue({ success: true }) };

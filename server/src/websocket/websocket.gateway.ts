@@ -25,7 +25,7 @@ import { JournalService } from "../journal/journal.service";
 import { ManagementService } from "../management/management.service";
 import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
-import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission, withoutContacts } from "../auth/guards/ws-auth.guard";
 import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
 import { Public } from "../auth/decorators/public.decorator";
 import { ALLOWED_ORIGINS } from "../cors";
@@ -143,13 +143,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       products,
       menus,
       roles,
-      staff: can(SENSITIVE.staffContacts) ? staff : staff.map(({ email: _e, phone: _p, ...s }) => s),
+      staff: can(SENSITIVE.staffContacts) ? staff : staff.map(withoutContacts),
       history: history.map(toClientHistory),
       ingredients,
       recipes,
       stockMovements,
       config,
-      reservations,
+      reservations: can(SENSITIVE.reservationContacts) ? reservations : reservations.map(withoutContacts),
       closings,
     };
   }
