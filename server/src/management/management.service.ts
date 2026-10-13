@@ -1,12 +1,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
-import { SessionPayload } from "../auth/auth.service";
+import { PIN, SessionPayload } from "../auth/auth.service";
 import { normalizeHours } from "../catalog/catalog.service";
 import { toCents } from "../billing/pricing";
 import { distributeTips, TipsOptions } from "./tips";
 
-const PIN = /^\d{4,6}$/;
 const newId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 const clientId = (id: any, prefix: string) => (typeof id === "string" && /^[\w-]{3,64}$/.test(id) ? id : newId(prefix));
 

@@ -30,6 +30,8 @@ const MAX_PIN_ATTEMPTS = 5;
 const PIN_LOCK_MS = 5 * 60 * 1000;
 const pinFailures = new Map<string, { count: number; lockedUntil: number }>();
 
+export const PIN = /^\d{4,6}$/;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -83,19 +85,13 @@ export class AuthService {
     return { ...user, name: staff.name, roleId: staff.roleId, permissions: JSON.parse(staff.role?.permissions || "[]") };
   }
 
-  async verifyPin(pin: string, staffId?: string) {
-    if (!pin || pin.length < 4) {
-      throw new UnauthorizedException("Code PIN invalide (4 chiffres requis)");
+  async verifyPin(pin: unknown, staffId?: unknown) {
+    // 🔒 Un objet ({ not: "" }) deviendrait un filtre Prisma au lieu d'un identifiant
+    if (typeof pin !== "string" || !PIN.test(pin)) {
+      throw new UnauthorizedException("Code PIN invalide (4 à 6 chiffres)");
     }
-    if (!staffId) {
+    if (typeof staffId !== "string" || !staffId) {
       throw new UnauthorizedException("Sélectionnez un équipier avant de saisir le PIN");
-    }
-
-    const failure = pinFailures.get(staffId);
-    if (failure && failure.lockedUntil > Date.now()) {
-      const minutes = Math.ceil((failure.lockedUntil - Date.now()) / 60000);
-      await this.journal.log("AUTH_LOCKED", { staffId }, { minutes });
-      throw new UnauthorizedException(`Trop de tentatives. Réessayez dans ${minutes} min`);
     }
 
     const staff = await this.prisma.staff.findFirst({
@@ -106,13 +102,23 @@ export class AuthService {
       throw new UnauthorizedException("Équipier introuvable ou compte inactif");
     }
 
+    // 🔒 Tentative comptée avant la comparaison, sans await entre lecture et écriture du compteur :
+    // des requêtes simultanées ne lisent pas toutes un compteur périmé
+    const now = Date.now();
+    const failure = pinFailures.get(staffId) ?? { count: 0, lockedUntil: 0 };
+    if (failure.lockedUntil > now) {
+      const minutes = Math.ceil((failure.lockedUntil - now) / 60000);
+      await this.journal.log("AUTH_LOCKED", { staffId }, { minutes });
+      throw new UnauthorizedException(`Trop de tentatives. Réessayez dans ${minutes} min`);
+    }
+    const attempt = failure.count + 1;
+    pinFailures.set(staffId, {
+      count: attempt >= MAX_PIN_ATTEMPTS ? 0 : attempt,
+      lockedUntil: attempt >= MAX_PIN_ATTEMPTS ? now + PIN_LOCK_MS : 0,
+    });
+
     if (!(await bcrypt.compare(pin, staff.pin))) {
-      const count = (failure?.count || 0) + 1;
-      pinFailures.set(staffId, {
-        count: count >= MAX_PIN_ATTEMPTS ? 0 : count,
-        lockedUntil: count >= MAX_PIN_ATTEMPTS ? Date.now() + PIN_LOCK_MS : 0,
-      });
-      await this.journal.log("AUTH_FAIL", { staffId, name: staff.name }, { attempt: count });
+      await this.journal.log("AUTH_FAIL", { staffId, name: staff.name }, { attempt });
       throw new UnauthorizedException("Code PIN incorrect");
     }
     pinFailures.delete(staffId);
