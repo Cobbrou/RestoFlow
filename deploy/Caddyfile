@@ -4,6 +4,13 @@
 	# Certificat signé par l'autorité locale de Caddy (à installer sur chaque tablette, voir DEPLOIEMENT.md)
 	tls internal
 
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		-Server
+	}
+
 	handle /api/* {
 		reverse_proxy 127.0.0.1:3000
 	}
