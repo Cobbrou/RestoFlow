@@ -164,6 +164,7 @@ export default function ReservationModal({
                 <input
                   type="text"
                   placeholder="Rechercher nom, téléphone, note..."
+                  aria-label="Rechercher nom, téléphone, note"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="bg-transparent text-xs outline-none flex-1 text-[#2B2622] placeholder:text-[#9A917E]"
