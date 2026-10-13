@@ -649,99 +649,77 @@ function ProductCard({ p, isMobile, onTap, portionsLeft, config, now, canManageA
   const offHours = !isWithinHours(p.hours, new Date(now || Date.now()));
 
   return (
-    <button
-      onClick={onTap}
-      className={`rf-tap rf-anim-pop relative text-left rounded-xl border bg-white ${isMobile ? "p-3.5" : "p-3"} flex gap-3 items-start ${!isOutOfStock ? "border-black/10 hover:border-black/25" : "border-[#C1361B]/30"}`}
-      style={{ opacity: isOutOfStock ? 0.6 : offHours ? 0.45 : 1 }}
-    >
-      {offHours && (
-        <span className="absolute bottom-1.5 right-1.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-black/10 text-[#2B2622] z-10" title="Hors créneau de vente">
-          🕒 {p.hours}
-        </span>
-      )}
-      {isOutOfStock ? (
-        <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
-          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" style={{ background: "#C1361B", color: "#FFF7ED" }}>
-            <Ban size={9} /> RUPTURE
+    <div className="relative flex">
+      <button
+        onClick={onTap}
+        className={`rf-tap rf-anim-pop relative flex-1 text-left rounded-xl border bg-white ${isMobile ? "p-3.5" : "p-3"} flex gap-3 items-start ${!isOutOfStock ? "border-black/10 hover:border-black/25" : "border-[#C1361B]/30"}`}
+        style={{ opacity: isOutOfStock ? 0.6 : offHours ? 0.45 : 1 }}
+      >
+        {offHours && (
+          <span className="absolute bottom-1.5 right-1.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-black/10 text-[#2B2622] z-10" title="Hors créneau de vente">
+            🕒 {p.hours}
           </span>
-          {canManageAvailability && (
-            <span
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleAvailability?.();
-              }}
-              title="Responsable de salle : Remettre en vente"
-              className="text-[9px] px-1.5 py-0.5 rounded-full bg-black/10 hover:bg-black/20 text-[#2B2622] font-bold cursor-pointer"
-            >
-              Remettre
+        )}
+        {isOutOfStock ? (
+          <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
+            <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" style={{ background: "#C1361B", color: "#FFF7ED" }}>
+              <Ban size={9} /> RUPTURE
             </span>
-          )}
-        </div>
-      ) : portionsLeft !== null && portionsLeft <= 4 ? (
-        <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
-          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs" style={{ background: "#D9A441", color: "#FFF7ED" }}>
-            Plus que {portionsLeft}
-          </span>
-          {canManageAvailability && (
-            <span
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleAvailability?.();
-              }}
-              title="Responsable de salle : Basculer en rupture"
-              className="text-[9px] px-1.5 py-0.5 rounded-full bg-black/10 hover:bg-black/20 text-[#2B2622] font-bold cursor-pointer"
-            >
-              86
+          </div>
+        ) : portionsLeft !== null && portionsLeft <= 4 ? (
+          <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
+            <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs" style={{ background: "#D9A441", color: "#FFF7ED" }}>
+              Plus que {portionsLeft}
             </span>
-          )}
+          </div>
+        ) : null}
+        <div className={`rounded-lg flex items-center justify-center shrink-0 ${isMobile ? "w-14 h-14 text-3xl" : "w-12 h-12 text-2xl"}`}
+          style={{ background: (cat?.accent || "#999") + "22", filter: !isOutOfStock ? "none" : "grayscale(1)" }}>
+          {p.emoji || "🍽️"}
         </div>
-      ) : canManageAvailability ? (
-        <span
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleAvailability?.();
-          }}
-          title="Responsable de salle : Marquer rupture (86)"
-          className="absolute top-1.5 right-1.5 opacity-0 hover:opacity-100 text-[8px] px-1.5 py-0.5 rounded-full bg-black/10 text-[#5B5346] font-bold cursor-pointer transition-opacity z-10"
-        >
-          86
-        </span>
-      ) : null}
-      <div className={`rounded-lg flex items-center justify-center shrink-0 ${isMobile ? "w-14 h-14 text-3xl" : "w-12 h-12 text-2xl"}`}
-        style={{ background: (cat?.accent || "#999") + "22", filter: !isOutOfStock ? "none" : "grayscale(1)" }}>
-        {p.emoji || "🍽️"}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between gap-1">
-          <span className={`font-semibold text-[#2B2622] leading-tight ${isMobile ? "text-[15px]" : "text-sm"}`}>
-            {p.name}
-            {p.isMenu && <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#6B422622", color: "#6B4226" }}>MENU</span>}
-          </span>
-          {!isOutOfStock && (
-            <span className={`rounded-full bg-[#2B2622] text-[#FAF6EE] flex items-center justify-center shrink-0 ${isMobile ? "w-8 h-8" : "w-6 h-6"}`}>
-              {p.isMenu ? <LayoutList size={isMobile ? 14 : 12} /> : <Plus size={isMobile ? 14 : 12} />}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-1">
+            <span className={`font-semibold text-[#2B2622] leading-tight ${isMobile ? "text-[15px]" : "text-sm"}`}>
+              {p.name}
+              {p.isMenu && <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#6B422622", color: "#6B4226" }}>MENU</span>}
             </span>
-          )}
-        </div>
-        <p className={`text-[#8A8378] mt-0.5 leading-snug ${isMobile ? "text-xs" : "text-[11px]"}`}>{p.desc}</p>
-        <div className="flex items-center justify-between mt-1.5 flex-wrap gap-1">
-          <div className="flex items-center gap-1.5">
-            {hasHhDiscount ? (
-              <>
-                <span className="line-through text-[#8A8378] text-[10px]">{money(p.price)}</span>
-                <span className={`font-bold text-[#C1440E] ${isMobile ? "text-sm" : "text-xs"}`}>{money(effectivePrice)}</span>
-                <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full bg-[#C1440E15] text-[#C1440E]">
-                  HAPPY HOUR
-                </span>
-              </>
-            ) : (
-              <span className={`font-bold text-[#2B2622] ${isMobile ? "text-sm" : "text-xs"}`}>{money(p.price)}</span>
+            {!isOutOfStock && (
+              <span className={`rounded-full bg-[#2B2622] text-[#FAF6EE] flex items-center justify-center shrink-0 ${isMobile ? "w-8 h-8" : "w-6 h-6"}`}>
+                {p.isMenu ? <LayoutList size={isMobile ? 14 : 12} /> : <Plus size={isMobile ? 14 : 12} />}
+              </span>
             )}
           </div>
-          {p.allergens?.length > 0 && <span className="text-[9px] text-[#B5451B]">{p.allergens.join(", ")}</span>}
+          <p className={`text-[#8A8378] mt-0.5 leading-snug ${isMobile ? "text-xs" : "text-[11px]"}`}>{p.desc}</p>
+          <div className="flex items-center justify-between mt-1.5 flex-wrap gap-1">
+            <div className="flex items-center gap-1.5">
+              {hasHhDiscount ? (
+                <>
+                  <span className="line-through text-[#8A8378] text-[10px]">{money(p.price)}</span>
+                  <span className={`font-bold text-[#C1440E] ${isMobile ? "text-sm" : "text-xs"}`}>{money(effectivePrice)}</span>
+                  <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full bg-[#C1440E15] text-[#C1440E]">
+                    HAPPY HOUR
+                  </span>
+                </>
+              ) : (
+                <span className={`font-bold text-[#2B2622] ${isMobile ? "text-sm" : "text-xs"}`}>{money(p.price)}</span>
+              )}
+            </div>
+            {p.allergens?.length > 0 && <span className="text-[9px] text-[#B5451B]">{p.allergens.join(", ")}</span>}
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+      {/* Hors du bouton de la carte : deux contrôles imbriqués ne sont ni accessibles ni fiables au toucher */}
+      {canManageAvailability && (
+        <button
+          type="button"
+          onClick={onToggleAvailability}
+          aria-label={`${isOutOfStock ? "Remettre en vente" : "Marquer en rupture (86)"} : ${p.name}`}
+          className="rf-tap absolute bottom-1.5 left-1.5 z-10 min-h-7 px-2.5 rounded-full bg-[#2B2622]/80 hover:bg-[#2B2622] text-xs font-bold text-[#FAF6EE]"
+        >
+          {isOutOfStock ? "Remettre" : "86"}
+        </button>
+      )}
+    </div>
   );
 }
 
