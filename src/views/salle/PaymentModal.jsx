@@ -19,6 +19,7 @@ import {
   Wifi,
   HeartHandshake,
 } from "lucide-react";
+import { Dialog } from "../../components/Modal.jsx";
 import { money, orderLabel } from "../../utils/index.js";
 import TpeModal from "../../components/TpeModal.jsx";
 import { calculateVatBreakdown, partialNetCents } from "../../utils/vat.js";
@@ -383,14 +384,14 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-3 sm:p-5"
-      // Un tap hors de la fenêtre ne doit jamais effacer des paiements déjà saisis
-      onClick={payments.length === 0 ? onCancel : undefined}
-    >
-      <div
+    <>
+      <Dialog
+        onClose={onCancel}
+        label="Encaissement"
+        // Un tap hors de la fenêtre ou Échap ne doit jamais effacer des paiements déjà saisis
+        dismissible={payments.length === 0}
+        overlayClassName="bg-black/60 p-3 sm:p-5"
         className="rf-anim-pop bg-[#FAF6EE] rounded-3xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-black/10"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* ── EN-TÊTE MODAL ───────────────────────────────────── */}
         <div className="px-5 py-3.5 bg-white border-b border-black/10 flex items-center justify-between">
@@ -418,6 +419,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
 
           <button
             onClick={onCancel}
+            aria-label="Fermer"
             className="rf-tap p-2 rounded-full bg-black/5 hover:bg-black/10 text-[#5B5346]"
             title="Fermer"
           >
@@ -529,6 +531,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                       <strong className="text-[#2E9E5B] ml-0.5">{money(p.amount)}</strong>
                       <button
                         onClick={() => removePayment(p.id)}
+                        aria-label="Annuler ce règlement"
                         className="text-[#8A8378] hover:text-[#C1361B] ml-1 p-0.5 rounded"
                         title="Annuler ce règlement"
                       >
@@ -1276,21 +1279,21 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
             )}
           </div>
         </div>
-      </div>
+      </Dialog>
 
-      {/* Modal TPE interactif */}
-      {tpeSession && (
-        <TpeModal
-          amount={tpeSession.amount}
-          restaurantName={config?.name || "RestoFlow"}
-          onCancel={() => setTpeSession(null)}
-          onSuccess={(tpeRes) => {
-            const cb = tpeSession.callback;
-            setTpeSession(null);
-            cb?.(tpeRes);
-          }}
-        />
-      )}
-    </div>
+        {/* Modal TPE interactif */}
+        {tpeSession && (
+          <TpeModal
+            amount={tpeSession.amount}
+            restaurantName={config?.name || "RestoFlow"}
+            onCancel={() => setTpeSession(null)}
+            onSuccess={(tpeRes) => {
+              const cb = tpeSession.callback;
+              setTpeSession(null);
+              cb?.(tpeRes);
+            }}
+          />
+        )}
+    </>
   );
 }

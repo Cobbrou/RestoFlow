@@ -3,6 +3,7 @@ import {
   LayoutGrid, Table2, Clock, Users, CheckCircle2,
   Flame, Printer, X, BellRing, ChefHat, Wine, Layers, Volume2, Ban, Search
 } from "lucide-react";
+import { Dialog } from "../../components/Modal.jsx";
 import {
   tableStatus, STATUS_META, orderKitchenStatus,
   kitchenStartTs, timerLevel, TIMER_LEVELS, formatTimer, noteIndicatesAllergy, isAvailable, orderLabel, formatPickup
@@ -242,50 +243,48 @@ function OutOfStockPanel({ products, onToggle, onClose }) {
     .sort((a, b) => Number(isAvailable(a)) - Number(isAvailable(b)) || a.name.localeCompare(b.name));
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label="Ruptures 86"
-        className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl bg-[#1E1A15] border border-white/10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-          <h2 className="text-[#F2ECDD] font-semibold flex items-center gap-2"><Ban size={16} /> 86 · Ruptures</h2>
-          <button onClick={onClose} className="rf-tap p-1.5 rounded-full bg-white/5 text-[#C9C2B0]" aria-label="Fermer"><X size={16} /></button>
-        </div>
-        <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2">
-          <Search size={14} className="text-[#9A917E]" />
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Rechercher un plat…"
-            aria-label="Rechercher un plat"
-            className="flex-1 bg-transparent outline-none text-sm text-[#F2ECDD] placeholder:text-[#6B6355]"
-          />
-        </div>
-        <div className="flex-1 overflow-y-auto rf-scrollbar p-2 space-y-1">
-          {list.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => onToggle(p.id)}
-              className="rf-tap w-full flex items-center justify-between gap-3 px-3 py-3 rounded-xl text-left hover:bg-white/5"
-            >
-              <span className={`text-sm font-medium ${isAvailable(p) ? "text-[#F2ECDD]" : "text-[#9A917E] line-through"}`}>
-                {p.emoji || "🍽️"} {p.name}
-              </span>
-              <span
-                className="text-[11px] font-extrabold px-2.5 py-1 rounded-full shrink-0"
-                style={isAvailable(p) ? { background: "rgba(255,255,255,.08)", color: "#C9C2B0" } : { background: "#C1361B", color: "#FFF7ED" }}
-              >
-                {isAvailable(p) ? "Marquer 86" : "RUPTURE · Remettre"}
-              </span>
-            </button>
-          ))}
-          {list.length === 0 && <p className="text-sm text-[#9A917E] text-center py-6">Aucun produit.</p>}
-        </div>
+    <Dialog
+      onClose={onClose}
+      label="Ruptures 86"
+      overlayClassName="bg-black/70 p-4"
+      className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl bg-[#1E1A15] border border-white/10"
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+        <h2 className="text-[#F2ECDD] font-semibold flex items-center gap-2"><Ban size={16} /> 86 · Ruptures</h2>
+        <button onClick={onClose} className="rf-tap p-1.5 rounded-full bg-white/5 text-[#C9C2B0]" aria-label="Fermer"><X size={16} /></button>
       </div>
-    </div>
+      <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2">
+        <Search size={14} className="text-[#9A917E]" />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Rechercher un plat…"
+          aria-label="Rechercher un plat"
+          className="flex-1 bg-transparent outline-none text-sm text-[#F2ECDD] placeholder:text-[#6B6355]"
+        />
+      </div>
+      <div className="flex-1 overflow-y-auto rf-scrollbar p-2 space-y-1">
+        {list.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onToggle(p.id)}
+            className="rf-tap w-full flex items-center justify-between gap-3 px-3 py-3 rounded-xl text-left hover:bg-white/5"
+          >
+            <span className={`text-sm font-medium ${isAvailable(p) ? "text-[#F2ECDD]" : "text-[#9A917E] line-through"}`}>
+              {p.emoji || "🍽️"} {p.name}
+            </span>
+            <span
+              className="text-[11px] font-extrabold px-2.5 py-1 rounded-full shrink-0"
+              style={isAvailable(p) ? { background: "rgba(255,255,255,.08)", color: "#C9C2B0" } : { background: "#C1361B", color: "#FFF7ED" }}
+            >
+              {isAvailable(p) ? "Marquer 86" : "RUPTURE · Remettre"}
+            </span>
+          </button>
+        ))}
+        {list.length === 0 && <p className="text-sm text-[#9A917E] text-center py-6">Aucun produit.</p>}
+      </div>
+    </Dialog>
   );
 }
 
@@ -675,90 +674,87 @@ function KitchenByTable({
       </div>
 
       {open && (
-        <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6"
-          onClick={() => setOpenId(null)}
+        <Dialog
+          onClose={() => setOpenId(null)}
+          label={`Table ${open.number}`}
+          overlayClassName="bg-black/60 p-6"
+          className="rf-ticket rf-anim-pop rounded-sm p-5 w-full max-w-md max-h-[80vh] overflow-y-auto rf-scrollbar"
         >
-          <div
-            className="rf-ticket rf-anim-pop rounded-sm p-5 w-full max-w-md max-h-[80vh] overflow-y-auto rf-scrollbar"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="rf-mono flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-lg">TABLE {open.number}</span>
-                {openOrder && (
-                  <button
-                    onClick={() => onPrintTicket?.(openOrder, open)}
-                    className="p-1 rounded hover:bg-black/10 transition-colors text-black/70 hover:text-black flex items-center gap-1 text-xs"
-                    title="Imprimer bon"
-                  >
-                    <Printer size={15} />
-                    <span>Imprimer</span>
-                  </button>
-                )}
-              </div>
-              <button onClick={() => setOpenId(null)}><X size={18} /></button>
+          <div className="rf-mono flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <span className="font-bold text-lg">TABLE {open.number}</span>
+              {openOrder && (
+                <button
+                  onClick={() => onPrintTicket?.(openOrder, open)}
+                  className="p-1 rounded hover:bg-black/10 transition-colors text-black/70 hover:text-black flex items-center gap-1 text-xs"
+                  title="Imprimer bon"
+                >
+                  <Printer size={15} />
+                  <span>Imprimer</span>
+                </button>
+              )}
             </div>
-
-            {openOrder ? (
-              <>
-                <div className="rf-mono text-xs opacity-70 mb-1">
-                  Commande #{openOrder.id.slice(-4).toUpperCase()} · serveur {openOrder.server}
-                </div>
-                <div className="mb-2">
-                  <TicketTimer
-                    startTs={kitchenStartTs(openOrder)}
-                    ready={orderKitchenStatus(openOrder) === "ready"}
-                  />
-                </div>
-                <div className="border-t border-dashed border-black/20 my-2" />
-                <div className="space-y-2">
-                  {(openOrder.items || [])
-                    .filter((i) => i.status !== "draft" && isItemForStation(i))
-                    .map((it) => {
-                      const icon =
-                        it.status === "served"
-                          ? "✅"
-                          : it.status === "ready"
-                          ? "🟢"
-                          : it.status === "preparing"
-                          ? "🔵"
-                          : "🟡";
-                      const isAllergy = noteIndicatesAllergy(it.notes);
-                      const product = products?.find((p) => p.id === it.productId);
-                      return (
-                        <div key={it.id} className="rf-mono text-[13px]">
-                          {isAllergy && <AllergyBadge item={it} product={product} compact />}
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <div>{icon} {it.qty} × {it.name}</div>
-                              {it.composition?.length > 0 && (
-                                <div className="text-[11px] opacity-80 pl-4 space-y-0.5 mt-0.5">
-                                  {it.composition.map((g, i) => (
-                                    <div key={i}>
-                                      • {g.title ? `${g.title} : ` : ""}
-                                      {Array.isArray(g.names) ? g.names.join(", ") : (g.names || "")}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {it.options && <div className="text-[12px] font-bold pl-4">» {it.options}</div>}
-                              {it.notes && !isAllergy && (
-                                <div className="text-[11px] opacity-70 pl-4">↳ {it.notes}</div>
-                              )}
-                            </div>
-                            <span className="text-[10px] opacity-60 uppercase shrink-0">{it.status}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </>
-            ) : (
-              <p className="rf-mono text-sm opacity-60 py-4">Aucune commande active pour cette table.</p>
-            )}
+            <button type="button" onClick={() => setOpenId(null)} aria-label="Fermer"><X size={18} /></button>
           </div>
-        </div>
+
+          {openOrder ? (
+            <>
+              <div className="rf-mono text-xs opacity-70 mb-1">
+                Commande #{openOrder.id.slice(-4).toUpperCase()} · serveur {openOrder.server}
+              </div>
+              <div className="mb-2">
+                <TicketTimer
+                  startTs={kitchenStartTs(openOrder)}
+                  ready={orderKitchenStatus(openOrder) === "ready"}
+                />
+              </div>
+              <div className="border-t border-dashed border-black/20 my-2" />
+              <div className="space-y-2">
+                {(openOrder.items || [])
+                  .filter((i) => i.status !== "draft" && isItemForStation(i))
+                  .map((it) => {
+                    const icon =
+                      it.status === "served"
+                        ? "✅"
+                        : it.status === "ready"
+                        ? "🟢"
+                        : it.status === "preparing"
+                        ? "🔵"
+                        : "🟡";
+                    const isAllergy = noteIndicatesAllergy(it.notes);
+                    const product = products?.find((p) => p.id === it.productId);
+                    return (
+                      <div key={it.id} className="rf-mono text-[13px]">
+                        {isAllergy && <AllergyBadge item={it} product={product} compact />}
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div>{icon} {it.qty} × {it.name}</div>
+                            {it.composition?.length > 0 && (
+                              <div className="text-[11px] opacity-80 pl-4 space-y-0.5 mt-0.5">
+                                {it.composition.map((g, i) => (
+                                  <div key={i}>
+                                    • {g.title ? `${g.title} : ` : ""}
+                                    {Array.isArray(g.names) ? g.names.join(", ") : (g.names || "")}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {it.options && <div className="text-[12px] font-bold pl-4">» {it.options}</div>}
+                            {it.notes && !isAllergy && (
+                              <div className="text-[11px] opacity-70 pl-4">↳ {it.notes}</div>
+                            )}
+                          </div>
+                          <span className="text-[10px] opacity-60 uppercase shrink-0">{it.status}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </>
+          ) : (
+            <p className="rf-mono text-sm opacity-60 py-4">Aucune commande active pour cette table.</p>
+          )}
+        </Dialog>
       )}
     </div>
   );
