@@ -20,6 +20,7 @@ import { getSocket } from "../../services/socket.js";
 import { hoursByStaff, formatMinutes } from "../../utils/stats.js";
 import { money } from "../../utils/index.js";
 import { triggerFileDownload } from "../../utils/fec.js";
+import { csvRows } from "../../utils/csv.js";
 
 const PRESET_COLORS = [
   "#C1440E", // RestoFlow Rust
@@ -1102,11 +1103,10 @@ function TipsDistribution({ roles }) {
   const roleName = (id) => roles.find((r) => r.id === id)?.name || id;
 
   const exportCsv = () => {
-    const cell = (v) => `"${String(v).replace(/"/g, '""')}"`;
     const rows = [["Équipier", "Rôle", "Heures", "Part (€)"]].concat(
       report.rows.map((r) => [r.name, roleName(r.roleId), formatMinutes(r.minutes), (r.shareCents / 100).toFixed(2).replace(".", ",")])
     );
-    triggerFileDownload("﻿" + rows.map((r) => r.map(cell).join(";")).join("\r\n"), `pourboires-${from}-au-${to}.csv`);
+    triggerFileDownload("﻿" + csvRows(rows), `pourboires-${from}-au-${to}.csv`);
   };
 
   return (
