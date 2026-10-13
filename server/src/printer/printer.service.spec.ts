@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encodeCp1252, printerAddressError, PrinterService } from "./printer.service";
+import { encodeCp1252, escposText, printerAddressError, PrinterService } from "./printer.service";
 
 describe("Impression : encodage Windows-1252", () => {
   it("encode accents, œ et € sur un octet, remplace l'inimprimable", () => {
@@ -30,5 +30,13 @@ describe("Impression : adresses joignables", () => {
     const service = new PrinterService();
     expect(await service.sendRaw("127.0.0.1", 2019, Buffer.from("POST /load"))).toMatchObject({ success: false });
     expect(await service.testPrinter("localhost", 9100)).toMatchObject({ success: false });
+  });
+});
+
+describe("Impression : texte libre dans un ticket", () => {
+  it("neutralise les caractères de contrôle, garde accents et symboles", () => {
+    expect(escposText("Steak\x1b\x70\x00\x19\nsaignant\x7f")).toBe("Steak p   saignant ");
+    expect(escposText("Bœuf 5€ — à point")).toBe("Bœuf 5€ — à point");
+    expect(escposText(undefined)).toBe("");
   });
 });

@@ -17,7 +17,7 @@ import { BillingService } from "../billing/billing.service";
 import { ConfigService } from "../config/config.service";
 import { StockService } from "../stock/stock.service";
 import { TablesService } from "../tables/tables.service";
-import { PrinterService, ESCPOS_INIT, encodeCp1252 } from "../printer/printer.service";
+import { PrinterService, ESCPOS_INIT, encodeCp1252, escposText as t } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
@@ -405,8 +405,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       (p: any) => p.type === "kitchen" && p.interface === "network" && p.enabled && p.ip
     );
     if (!kitchenPrinter) return;
-    const rawText = `${ESCPOS_INIT}\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${label.toUpperCase()}\nPar: ${by}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
-      `${qty}x ${name}\nMotif: ${reason}\n\n\n\x1d\x56\x01`;
+    const rawText = `${ESCPOS_INIT}\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${t(label).toUpperCase()}\nPar: ${t(by)}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
+      `${qty}x ${t(name)}\nMotif: ${t(reason)}\n\n\n\x1d\x56\x01`;
     await this.printOrThrow(kitchenPrinter, rawText);
   }
 
@@ -514,9 +514,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     ] as [any, any[]][]) {
       if (!printer || stationItems.length === 0) continue;
       this.logger.log(`Impression automatique du bon (${stationItems.length} article(s)) vers ${printer.ip}:${printer.port || 9100}`);
-      const rawText = `${ESCPOS_INIT}\x1b\x61\x01--- ${title} ---\n${orderLabel(order).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${order.server}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
+      const rawText = `${ESCPOS_INIT}\x1b\x61\x01--- ${title} ---\n${t(orderLabel(order)).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${t(order.server)}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
         stationItems
-          .map((i: any) => `${i.qty}x ${i.name} ${i.notes ? `(${i.notes})` : ""}${i.options ? `\n   > ${i.options}` : ""}`)
+          .map((i: any) => `${i.qty}x ${t(i.name)} ${i.notes ? `(${t(i.notes)})` : ""}${i.options ? `\n   > ${t(i.options)}` : ""}`)
           .join("\n") +
         `\n\n\n\x1d\x56\x01`;
       await this.printOrThrow(printer, rawText).catch((e) => errors.push(e.message));
@@ -713,15 +713,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const vatLines = (historyRecord.vatDetails?.rates || [])
         .map((r: any) => `TVA ${String(r.rate).padEnd(4)}% HT ${eur(r.ht).padStart(9)}  TVA ${eur(r.vat).padStart(8)}`)
         .join("\n");
-      const rawText = `${ESCPOS_INIT}\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
+      const rawText = `${ESCPOS_INIT}\x1b\x61\x01${t(cfg.name || "RestoFlow")}\n${t(cfg.legalName)}\n${t(cfg.address)} ${t(cfg.city)}\nSIRET: ${t(cfg.siret)}\nTVA: ${t(cfg.vatNumber)}\n\nFacture: ${historyRecord.ticketNumber}\n${t(historyRecord.orderLabel) || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
         historyRecord.items
-          .map((i: any) => `${i.qty}x ${String(i.name).slice(0, 20).padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
+          .map((i: any) => `${i.qty}x ${t(i.name).slice(0, 20).padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${t(i.options)}` : ""}`)
           .join("\n") +
         (discount > 0.004 ? `\nRemise: -${eur(discount)}` : "") +
         `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\x1b\x61\x00` +
         (vatLines ? `${vatLines}\n` : "") +
         (historyRecord.tip > 0 ? `Pourboire (hors TVA): ${eur(historyRecord.tip)}\n` : "") +
-        `\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01` +
+        `\n\x1b\x61\x01${t(cfg.footerNote || "Merci de votre visite")}\n\n\n\x1d\x56\x01` +
         // Tiroir-caisse : uniquement si une partie est réglée en espèces
         (paidCash ? `\x1b\x70\x00\x19\xfa` : "");
       await this.printOrThrow(caissePrinter, rawText);
