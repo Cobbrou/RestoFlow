@@ -115,11 +115,13 @@ export default function App() {
   );
 
   // ── Utilitaires toasts ─────────────────────────────────────
+  const dismissToast = useCallback((id) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+  // Les erreurs restent affichées jusqu'à fermeture : un message manqué en plein service coûte plus cher qu'un tap
   const pushToast = useCallback((text, kind) => {
     const id = uid("toast");
     setToasts((t) => [...t, { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
-  }, []);
+    if (kind !== "warn") setTimeout(() => dismissToast(id), 6000);
+  }, [dismissToast]);
 
   // Session absente/expirée côté serveur : retour à l'écran PIN
   const handleAuthRequired = useCallback(() => {
@@ -353,7 +355,7 @@ export default function App() {
         onOpenPinModal={() => setIsPinModalOpen(true)}
         onLogout={handleLogout}
       />
-      <ToastStack toasts={toasts} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
       {zOverdueSince && role !== "cuisine" && (
         <div className="px-4 py-2 bg-amber-100 border-b border-amber-300 text-amber-900 text-sm font-semibold flex items-center justify-between gap-3">
