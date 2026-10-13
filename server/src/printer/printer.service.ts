@@ -39,6 +39,21 @@ export function encodeCp1252(text: string): Buffer {
  */
 export const escposText = (value: unknown) => String(value ?? "").replace(/[\x00-\x1f\x7f]/g, " "); // eslint-disable-line no-control-regex
 
+export const MAX_TEXT_TICKET_LENGTH = 20000;
+const ESCPOS_BEEP = "\x1b\x42\x02\x02";
+const ESCPOS_FEED_CUT = "\n\n\n\x1d\x56\x01";
+
+/**
+ * Ticket texte préparé par un poste (addition, réimpression) : le serveur pose lui-même les commandes ESC/POS,
+ * le texte ne garde que ses retours à la ligne. Jamais d'ouverture du tiroir hors encaissement en espèces.
+ */
+export function textTicket(text: unknown, { beep = false } = {}): Buffer {
+  if (typeof text !== "string" || !text.trim()) throw new Error("Ticket vide");
+  if (text.length > MAX_TEXT_TICKET_LENGTH) throw new Error("Ticket trop long");
+  const lines = text.split("\n").map(escposText).join("\n");
+  return encodeCp1252(`${ESCPOS_INIT}${beep ? ESCPOS_BEEP : ""}${lines}${ESCPOS_FEED_CUT}`);
+}
+
 // 🔒 Jamais la machine elle-même (API d'admin Caddy, base…) ni une adresse locale au lien
 const NOT_A_PRINTER = new net.BlockList();
 NOT_A_PRINTER.addSubnet("0.0.0.0", 8);

@@ -27,9 +27,9 @@ describe("Impression directe depuis un poste", () => {
 
   it("utilise le port configuré, jamais celui fourni par le client", async () => {
     const { printer, gateway } = setup();
-    await gateway.handlePrinterSendRaw({ ip: "192.168.1.50", port: 22, buffer: [0x1b, 0x40] } as any);
+    await gateway.handlePrintText({ ip: "192.168.1.50", port: 22, text: "Addition" } as any);
     await gateway.handlePrinterTest({ ip: "192.168.1.50", port: 22 } as any);
-    expect(printer.sendRaw).toHaveBeenCalledWith("192.168.1.50", 9101, Buffer.from([0x1b, 0x40]));
+    expect(printer.sendRaw).toHaveBeenCalledWith("192.168.1.50", 9101, expect.any(Buffer));
     expect(printer.testPrinter).toHaveBeenCalledWith("192.168.1.50", 9101);
   });
 
@@ -52,8 +52,26 @@ describe("Impression directe depuis un poste", () => {
 
   it("refuse une IP absente de la configuration", async () => {
     const { printer, gateway } = setup();
-    expect(await gateway.handlePrinterSendRaw({ ip: "127.0.0.1", buffer: [] })).toMatchObject({ success: false });
-    expect(await gateway.handlePrinterSendRaw({ ip: undefined as any, buffer: [] })).toMatchObject({ success: false });
+    expect(await gateway.handlePrintText({ ip: "127.0.0.1", text: "Addition" })).toMatchObject({ success: false });
+    expect(await gateway.handlePrintText({ ip: undefined as any, text: "Addition" })).toMatchObject({ success: false });
+    expect(printer.sendRaw).not.toHaveBeenCalled();
+  });
+
+  it("une addition imprimée depuis un poste n'ouvre jamais le tiroir-caisse", async () => {
+    const { printer, gateway } = setup();
+    const drawerKick = "\x1b\x70\x00\x19\xfa";
+    await gateway.handlePrintText({ ip: "192.168.1.50", text: `TOTAL 42,00${drawerKick}\nMerci` });
+
+    const [, , bytes] = printer.sendRaw.mock.calls[0];
+    expect(bytes.includes(Buffer.from([0x1b, 0x70]))).toBe(false);
+    expect(bytes.toString("latin1")).toContain("TOTAL 42,00 p  \xfa\nMerci");
+  });
+
+  it("refuse un ticket vide, trop long ou qui n'est pas du texte", async () => {
+    const { printer, gateway } = setup();
+    for (const text of ["", "  \n", "x".repeat(20001), [0x1b, 0x70] as any, undefined as any]) {
+      expect(await gateway.handlePrintText({ ip: "192.168.1.50", text })).toMatchObject({ success: false });
+    }
     expect(printer.sendRaw).not.toHaveBeenCalled();
   });
 });

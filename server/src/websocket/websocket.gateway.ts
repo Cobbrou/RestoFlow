@@ -17,7 +17,7 @@ import { BillingService } from "../billing/billing.service";
 import { ConfigService } from "../config/config.service";
 import { StockService } from "../stock/stock.service";
 import { TablesService } from "../tables/tables.service";
-import { PrinterService, ESCPOS_INIT, encodeCp1252, escposText as t } from "../printer/printer.service";
+import { PrinterService, ESCPOS_INIT, encodeCp1252, escposText as t, textTicket } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
@@ -764,15 +764,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // Addition imprimée par un serveur (caisse.checkout) ou test depuis les réglages
   @RequirePermissions("caisse.checkout", "caisse.settings")
-  @SubscribeMessage("printer:send_raw")
-  async handlePrinterSendRaw(@MessageBody() data: { ip: string; buffer: number[] | string }) {
+  @SubscribeMessage("printer:print_text")
+  async handlePrintText(@MessageBody() data: { ip: string; text: string; beep?: boolean }) {
     try {
-      const printer = await this.knownPrinter(data?.ip);
-      const buffer = Array.isArray(data.buffer)
-        ? Buffer.from(data.buffer)
-        : Buffer.from(data.buffer, "base64");
-      const res = await this.printerService.sendRaw(printer.ip, printer.port, buffer);
-      return res;
+      const ticket = textTicket(data?.text, { beep: data?.beep === true });
+      const printer = await this.knownPrinter(data.ip);
+      return await this.printerService.sendRaw(printer.ip, printer.port, ticket);
     } catch (err: any) {
       return { success: false, error: err.message };
     }
