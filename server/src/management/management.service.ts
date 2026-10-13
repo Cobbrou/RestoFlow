@@ -148,9 +148,7 @@ export class ManagementService {
       fields.name = name;
     }
     if (data?.roleId !== undefined || creating) {
-      const role = await this.prisma.role.findUnique({ where: { id: String(data?.roleId) } });
-      if (!role) throw new BadRequestException("Rôle inconnu");
-      assertCanGrant(actor, role.id, JSON.parse(role.permissions || "[]"));
+      await this.assertCanManageRole(actor, String(data?.roleId));
       fields.roleId = data.roleId;
     }
     // PIN : jamais stocké ni renvoyé en clair ; vide en modification = inchangé
@@ -176,7 +174,7 @@ export class ManagementService {
   async updateStaff(id: string, data: any, actor: Actor) {
     const target = await this.prisma.staff.findUnique({ where: { id } });
     if (!target) throw new NotFoundException("Collaborateur introuvable");
-    assertCanGrant(actor, target.roleId); // un compte admin (PIN, rôle…) n'est modifiable que par un admin
+    await this.assertCanManageRole(actor, target.roleId);
     const fields = await this.staffFields(data, false, actor);
     if (id === actor.staffId && (fields.active === false || (fields.roleId && fields.roleId !== "admin"))) {
       await this.assertAnotherActiveAdmin(id);
@@ -189,10 +187,20 @@ export class ManagementService {
     if (id === actor.staffId) throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte");
     const target = await this.prisma.staff.findUnique({ where: { id } });
     if (!target) throw new NotFoundException("Collaborateur introuvable");
-    assertCanGrant(actor, target.roleId);
+    await this.assertCanManageRole(actor, target.roleId);
     if (target.roleId === "admin") await this.assertAnotherActiveAdmin(id);
     await this.prisma.staff.delete({ where: { id } });
     return this.listStaff();
+  }
+
+  /**
+   * 🔒 Un compte ou un rôle n'est géré que par qui détient tous ses droits :
+   * sinon changer le PIN d'un collègue mieux doté suffirait à prendre sa place
+   */
+  private async assertCanManageRole(actor: Actor, roleId: string) {
+    const role = await this.prisma.role.findUnique({ where: { id: roleId } });
+    if (!role) throw new BadRequestException("Rôle inconnu");
+    assertCanGrant(actor, role.id, JSON.parse(role.permissions || "[]"));
   }
 
   private async assertAnotherActiveAdmin(exceptId: string) {
@@ -235,14 +243,16 @@ export class ManagementService {
   async updateRole(id: string, data: any, actor: Actor) {
     if (id === "admin") throw new BadRequestException("Le rôle administrateur n'est pas modifiable");
     const fields = this.roleFields(data);
+    await this.assertCanManageRole(actor, id);
     if (fields.permissions) assertCanGrant(actor, null, JSON.parse(fields.permissions));
     await this.prisma.role.update({ where: { id }, data: fields });
     return this.listRoles();
   }
 
-  async deleteRole(id: string) {
+  async deleteRole(id: string, actor: Actor) {
     const role = await this.prisma.role.findUnique({ where: { id } });
     if (!role) throw new NotFoundException("Rôle introuvable");
+    assertCanGrant(actor, role.id, JSON.parse(role.permissions || "[]"));
     if (role.isSystem) throw new BadRequestException("Un rôle système ne peut pas être supprimé");
     if (await this.prisma.staff.count({ where: { roleId: id } })) {
       throw new ConflictException("Ce rôle est encore attribué à des collaborateurs");

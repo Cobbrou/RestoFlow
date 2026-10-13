@@ -13,6 +13,47 @@ describe("Équipe et rôles : pas d'escalade de droits", () => {
   it("l'admin peut tout attribuer", () => {
     expect(() => assertCanGrant({ staffId: "a", roleId: "admin", permissions: [] }, "admin", ["caisse.fec"])).not.toThrow();
   });
+
+  describe("un compte ou un rôle mieux doté reste hors de portée", () => {
+    const make = () => {
+      const roles: Record<string, string[]> = { gerant: ["gestion.staff", "caisse.fec"], serveur: ["salle.order"] };
+      const staff: Record<string, any> = { s2: { id: "s2", roleId: "gerant" }, s3: { id: "s3", roleId: "serveur" } };
+      const writes: string[] = [];
+      const prisma: any = {
+        staff: {
+          findUnique: async ({ where }: any) => staff[where.id] ?? null,
+          update: async ({ where }: any) => writes.push(`staff:${where.id}`),
+          delete: async ({ where }: any) => writes.push(`delete:${where.id}`),
+          findMany: async () => [],
+          count: async () => 0,
+        },
+        role: {
+          findUnique: async ({ where }: any) =>
+            roles[where.id] ? { id: where.id, isSystem: false, permissions: JSON.stringify(roles[where.id]) } : null,
+          update: async ({ where }: any) => writes.push(`role:${where.id}`),
+          delete: async ({ where }: any) => writes.push(`role-delete:${where.id}`),
+          findMany: async () => [],
+        },
+      };
+      return { writes, service: new ManagementService(prisma) };
+    };
+
+    it("refuse de changer le PIN, de supprimer ou de modifier le rôle d'un collègue aux droits supérieurs", async () => {
+      const { writes, service } = make();
+      await expect(service.updateStaff("s2", { pin: "9999" }, manager)).rejects.toThrow("caisse.fec");
+      await expect(service.deleteStaff("s2", manager)).rejects.toThrow("caisse.fec");
+      await expect(service.updateRole("gerant", { permissions: ["gestion.staff"] }, manager)).rejects.toThrow("caisse.fec");
+      await expect(service.deleteRole("gerant", manager)).rejects.toThrow("caisse.fec");
+      expect(writes).toEqual([]);
+    });
+
+    it("autorise la gestion d'un compte dont il détient tous les droits", async () => {
+      const { writes, service } = make();
+      await service.updateStaff("s3", { pin: "9999" }, manager);
+      await service.updateRole("serveur", { name: "Serveur" }, manager);
+      expect(writes).toEqual(["staff:s3", "role:serveur"]);
+    });
+  });
 });
 
 describe("Pointage", () => {

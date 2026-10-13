@@ -139,7 +139,7 @@ export class ManagementGateway {
   @RequirePermissions("gestion.staff")
   @SubscribeMessage("role:delete")
   async deleteRole(@ConnectedSocket() client: Socket, @MessageBody() data: { id: string }) {
-    const res = await this.broadcast("roles:list", () => this.management.deleteRole(data?.id));
+    const res = await this.broadcast("roles:list", () => this.management.deleteRole(data?.id, client.data.user));
     if (res.ok) await this.journal.log("ROLE_DELETE", this.actor(client), { roleId: data?.id });
     return res;
   }
