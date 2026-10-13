@@ -153,11 +153,11 @@ npm run dev            # http://localhost:5173
 |---|---|---|
 | Léa Martin | Serveur | `1011` |
 | Marco Rossi | Serveur | `2022` |
-| Inès Benali | Chef de rang | `3033` |
+| Inès Benali | Chef de rang | `303303` |
 | Antoine Dubois | Cuisine | `4044` |
-| Sarah Laurent | Admin | `5055` |
+| Sarah Laurent | Admin | `505505` |
 
-> Ces PINs ne servent qu'à la démo. Changez-les avant toute mise en service.
+> Ces PINs ne servent qu'à la démo. Changez-les avant toute mise en service. Un rôle sensible (admin, `gestion.staff`, `caisse.close`, `caisse.settings`, `caisse.fec`) exige un PIN à 6 chiffres, les autres 4.
 
 ### Scripts utiles
 

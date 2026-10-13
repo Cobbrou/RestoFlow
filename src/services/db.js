@@ -1,4 +1,5 @@
 import { openDB } from "idb";
+import { isSensitiveRole } from "../utils/permissions.js";
 
 const DB_NAME = "restoflow_db";
 const DB_VERSION = 1;
@@ -183,12 +184,9 @@ export async function clearOfflineActionsFromDB() {
 
 // ── Cache & Vérification des PINs pour le mode hors-ligne ───
 
-// Droits qui ne doivent jamais pouvoir être obtenus en retrouvant un PIN depuis le cache de la tablette
-const SENSITIVE_PERMISSIONS = ["gestion.staff", "caisse.settings", "caisse.close", "caisse.fec"];
-
+// Droits sensibles : ils ne doivent jamais pouvoir être obtenus en retrouvant un PIN depuis le cache de la tablette
 export function canCachePinOffline(staff) {
-  const permissions = staff?.permissions || staff?.role?.permissions || [];
-  return staff?.roleId !== "admin" && !permissions.some((p) => SENSITIVE_PERMISSIONS.includes(p));
+  return !isSensitiveRole(staff?.roleId, staff?.permissions || staff?.role?.permissions || []);
 }
 
 // PBKDF2 salé par équipier : ralentit l'essai des 10 000 PIN possibles (sans le rendre impossible)

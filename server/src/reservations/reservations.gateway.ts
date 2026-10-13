@@ -1,7 +1,7 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody } from "@nestjs/websockets";
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server } from "socket.io";
-import { WsAuthGuard, STAFF_ROOM } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, STAFF_ROOM, SENSITIVE, emitWithContacts } from "../auth/guards/ws-auth.guard";
 import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
@@ -31,7 +31,7 @@ export class ReservationsGateway {
   create(@MessageBody() data: any) {
     return this.run(async () => {
       const reservation = await this.reservations.create(data);
-      this.server.to(STAFF_ROOM).emit("reservation:created", reservation);
+      emitWithContacts(this.server, "reservation:created", reservation, SENSITIVE.reservationContacts);
       return { ok: true, reservation };
     });
   }
@@ -40,7 +40,7 @@ export class ReservationsGateway {
   updateStatus(@MessageBody() data: { id: string; status: string }) {
     return this.run(async () => {
       const reservation = await this.reservations.updateStatus(data?.id, data?.status);
-      this.server.to(STAFF_ROOM).emit("reservation:updated", reservation);
+      emitWithContacts(this.server, "reservation:updated", reservation, SENSITIVE.reservationContacts);
       return { ok: true, reservation };
     });
   }
@@ -49,7 +49,7 @@ export class ReservationsGateway {
   assignTable(@MessageBody() data: { id: string; tableId: string | null }) {
     return this.run(async () => {
       const reservation = await this.reservations.assignTable(data?.id, data?.tableId);
-      this.server.to(STAFF_ROOM).emit("reservation:updated", reservation);
+      emitWithContacts(this.server, "reservation:updated", reservation, SENSITIVE.reservationContacts);
       return { ok: true, reservation };
     });
   }

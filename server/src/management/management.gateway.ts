@@ -1,9 +1,9 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket } from "@nestjs/websockets";
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server, Socket } from "socket.io";
-import { WsAuthGuard, STAFF_ROOM, SENSITIVE, authenticateSocket, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, STAFF_ROOM, SENSITIVE, authenticateSocket, emitWithContacts, hasAnyPermission } from "../auth/guards/ws-auth.guard";
 import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
-import { AuthService, SESSION_MS } from "../auth/auth.service";
+import { AuthService } from "../auth/auth.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
 import { ClientActionInterceptor } from "../websocket/client-action.interceptor";
@@ -38,10 +38,7 @@ export class ManagementGateway {
         }
       }
       if (event === "staff:list") {
-        // Coordonnées (e-mail, téléphone) réservées aux gestionnaires de l'équipe
-        const managers = permRooms(SENSITIVE.staffContacts);
-        this.server.to(managers).emit(event, list);
-        this.server.to(STAFF_ROOM).except(managers).emit(event, list.map(({ email: _e, phone: _p, ...s }: any) => s));
+        emitWithContacts(this.server, event, list, SENSITIVE.staffContacts);
       } else {
         this.server.to(STAFF_ROOM).emit(event, list);
       }
@@ -148,17 +145,24 @@ export class ManagementGateway {
   // Tout équipier connecté pointe ; staffId fourni pour un rejeu hors-ligne après changement d'opérateur (comme operatorId à l'encaissement)
   @RequirePermissions("salle.view", "cuisine.view", "caisse.checkout", "dashboard.view", "gestion.staff")
   @SubscribeMessage("shift:clock")
-  async clock(@ConnectedSocket() client: Socket, @MessageBody() data: { id?: string; staffId?: string; action: string; at?: number }) {
+  async clock(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { id?: string; staffId?: string; action: string; at?: number; operatorToken?: string }
+  ) {
     const res = await this.broadcast("shifts:open", async () => {
       const session = client.data.user;
-      const staffId = data?.staffId || session.staffId;
-      // 🔒 Pointer un collègue : gestionnaire, ou rejeu d'un pointage saisi avant l'ouverture de cette session
-      const queuedBefore = Number(data?.at) < session.exp - SESSION_MS;
-      if (staffId !== session.staffId && !queuedBefore && !hasAnyPermission(session, ["gestion.staff"])) {
+      const { operatorToken, ...clockData } = data || ({} as typeof data);
+      const staffId = clockData.staffId || session.staffId;
+      // 🔒 Pointer un collègue : gestionnaire, ou rejeu signé par le jeton de session du collègue
+      if (
+        staffId !== session.staffId &&
+        !hasAnyPermission(session, ["gestion.staff"]) &&
+        !this.authService.isOperatorToken(operatorToken, staffId)
+      ) {
         throw new Error("Chacun pointe pour soi : le pointage d'un collègue est réservé au gestionnaire");
       }
-      const shift = await this.management.clock({ ...data, staffId });
-      if (shift) await this.journal.log(data.action === "in" ? "SHIFT_IN" : "SHIFT_OUT", this.actor(client), { shiftId: shift.id, staffId: shift.staffId });
+      const shift = await this.management.clock({ ...clockData, staffId });
+      if (shift) await this.journal.log(clockData.action === "in" ? "SHIFT_IN" : "SHIFT_OUT", this.actor(client), { shiftId: shift.id, staffId: shift.staffId });
       return this.management.listOpenShifts();
     });
     return res;

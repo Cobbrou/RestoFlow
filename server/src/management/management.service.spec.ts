@@ -56,6 +56,48 @@ describe("Équipe et rôles : pas d'escalade de droits", () => {
   });
 });
 
+describe("Équipe : longueur du PIN selon le rôle", () => {
+  const admin = { staffId: "a", roleId: "admin", permissions: [] };
+  const make = () => {
+    const roles: Record<string, string[]> = { admin: [], gerant: ["caisse.close"], serveur: ["salle.order"] };
+    const staff: Record<string, any> = { s3: { id: "s3", roleId: "serveur" }, s4: { id: "s4", roleId: "gerant" } };
+    const writes: any[] = [];
+    const prisma: any = {
+      staff: {
+        findUnique: async ({ where }: any) => staff[where.id] ?? null,
+        create: async ({ data }: any) => writes.push(data),
+        update: async ({ data }: any) => writes.push(data),
+        findMany: async () => [],
+      },
+      role: {
+        findUnique: async ({ where }: any) => (roles[where.id] ? { id: where.id, permissions: JSON.stringify(roles[where.id]) } : null),
+      },
+    };
+    return { writes, service: new ManagementService(prisma) };
+  };
+
+  it("exige 6 chiffres pour un rôle sensible, 4 pour les autres", async () => {
+    const { writes, service } = make();
+    await expect(service.createStaff({ name: "Gérant", roleId: "admin", pin: "1234" }, admin)).rejects.toThrow("6 chiffres");
+    await expect(service.createStaff({ name: "Chef", roleId: "gerant", pin: "1234" }, admin)).rejects.toThrow("6 chiffres");
+    await expect(service.createStaff({ name: "Léa", roleId: "serveur", pin: "123456" }, admin)).rejects.toThrow("4 chiffres");
+    await service.createStaff({ name: "Chef", roleId: "gerant", pin: "123456" }, admin);
+    await service.createStaff({ name: "Léa", roleId: "serveur", pin: "1234" }, admin);
+    expect(writes).toHaveLength(2);
+  });
+
+  it("un changement de rôle qui change la longueur exige un nouveau PIN", async () => {
+    const { writes, service } = make();
+    await expect(service.updateStaff("s3", { roleId: "gerant" }, admin)).rejects.toThrow("saisissez un nouveau PIN");
+    await expect(service.updateStaff("s4", { roleId: "serveur" }, admin)).rejects.toThrow("saisissez un nouveau PIN");
+    await expect(service.updateStaff("s4", { pin: "1234" }, admin)).rejects.toThrow("6 chiffres");
+    await service.updateStaff("s3", { roleId: "gerant", pin: "654321" }, admin);
+    await service.updateStaff("s3", { roleId: "serveur", pin: "4321" }, admin);
+    await service.updateStaff("s4", { name: "Inès" }, admin);
+    expect(writes.map((w) => w.roleId ?? w.name)).toEqual(["gerant", "serveur", "Inès"]);
+  });
+});
+
 describe("Pointage", () => {
   const make = () => {
     const shifts: any[] = [];

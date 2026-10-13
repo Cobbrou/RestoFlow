@@ -171,7 +171,7 @@ const INITIAL_STAFF = [
     id: "stf_3",
     name: "Inès Benali",
     roleId: "head_waiter",
-    pin: "3033",
+    pin: "303303",
     email: "ines.benali@restoflow.fr",
     phone: "06 34 56 78 90",
     active: true,
@@ -191,7 +191,7 @@ const INITIAL_STAFF = [
     id: "stf_5",
     name: "Sarah Laurent",
     roleId: "admin",
-    pin: "5055",
+    pin: "505505",
     email: "sarah.laurent@restoflow.fr",
     phone: "06 56 78 90 12",
     active: true,
@@ -357,7 +357,7 @@ async function seedVierge() {
   });
   await createCategoriesAndRoles();
 
-  const pin = String(crypto.randomInt(0, 10000)).padStart(4, "0");
+  const pin = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
   await prisma.staff.create({
     data: { id: "stf_admin", name: "Gérant", roleId: "admin", pin: bcrypt.hashSync(pin, 10), active: true, avatarBg: "#C1440E" },
   });

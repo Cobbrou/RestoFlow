@@ -49,7 +49,7 @@ export default function ReservationModal({
       const matchDate = filterDate ? r.date === filterDate : true;
       const matchStatus = statusFilter === "all" ? true : r.status === statusFilter;
       const matchQuery = searchQuery
-        ? (r.customerName + " " + r.phone + " " + (r.notes || "")).toLowerCase().includes(searchQuery.toLowerCase())
+        ? (r.customerName + " " + (r.phone || "") + " "+ (r.notes || "")).toLowerCase().includes(searchQuery.toLowerCase())
         : true;
       return matchDate && matchStatus && matchQuery;
     });
@@ -253,9 +253,11 @@ export default function ReservationModal({
                           </div>
 
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#6B6355] mt-1">
-                            <span className="flex items-center gap-1">
-                              <Phone size={11} className="text-[#8A8378]" /> {res.phone}
-                            </span>
+                            {res.phone && (
+                              <span className="flex items-center gap-1">
+                                <Phone size={11} className="text-[#8A8378]" /> {res.phone}
+                              </span>
+                            )}
                             {res.email && (
                               <span className="flex items-center gap-1">
                                 <Mail size={11} className="text-[#8A8378]" /> {res.email}

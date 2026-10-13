@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Delete, ShieldAlert, ArrowLeft, Loader2 } from "lucide-react";
 import Modal from "./Modal.jsx";
-import { getRoleName } from "../utils/permissions.js";
+import { getRoleName, pinLengthFor } from "../utils/permissions.js";
 import { getSocket } from "../services/socket.js";
 import { saveStaffOfflinePin, verifyStaffOfflinePin } from "../services/db.js";
 
@@ -19,6 +19,9 @@ export default function PinPadModal({
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
+  const pinLength = selectedStaff
+    ? pinLengthFor(selectedStaff.roleId, roles.find((r) => r.id === selectedStaff.roleId)?.permissions)
+    : 4;
 
   useEffect(() => {
     if (isOpen) {
@@ -31,12 +34,12 @@ export default function PinPadModal({
 
   const handleDigit = (digit) => {
     if (isVerifying) return;
-    if (pin.length < 4) {
+    if (pin.length < pinLength) {
       const nextPin = pin + digit;
       setPin(nextPin);
       setError("");
 
-      if (nextPin.length === 4) {
+      if (nextPin.length === pinLength) {
         verifyPin(nextPin);
       }
     }
@@ -199,17 +202,17 @@ export default function PinPadModal({
             </div>
 
             <p className="text-xs text-[#6B6355] text-center mb-2">
-              Saisissez le code PIN à 4 chiffres
+              Saisissez le code PIN à {pinLength} chiffres
             </p>
 
-            {/* Affichage des 4 chiffres masqués */}
-            <div className="flex justify-center items-center gap-3 my-2">
-              {[0, 1, 2, 3].map((idx) => {
+            {/* Affichage des chiffres masqués */}
+            <div className="flex justify-center items-center gap-2 my-2">
+              {Array.from({ length: pinLength }, (_, idx) => {
                 const hasChar = pin.length > idx;
                 return (
                   <div
                     key={idx}
-                    className={`w-11 h-12 rounded-xl flex items-center justify-center text-xl font-bold transition-all border-2 ${
+                    className={`w-10 h-12 rounded-xl flex items-center justify-center text-xl font-bold transition-all border-2 ${
                       hasChar
                         ? "border-[#C1440E] bg-[#C1440E]/10 text-[#C1440E] shadow-sm"
                         : "border-black/15 bg-black/5 text-[#8A8378]"

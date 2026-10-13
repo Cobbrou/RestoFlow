@@ -1,3 +1,5 @@
+import { csvRows } from "./csv.js";
+
 /**
  * Suggestion de commande fournisseur : tout ingrédient actif au seuil d'alerte ou dessous
  * est recommandé jusqu'au stock idéal, regroupé par fournisseur.
@@ -25,7 +27,6 @@ export function reorderBySupplier(ingredients = []) {
 /** Export CSV (séparateur « ; », décimales à virgule pour Excel FR) */
 export function reorderCsv(groups) {
   const num = (n) => String(n).replace(".", ",");
-  const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const rows = [["Fournisseur", "Référence", "Ingrédient", "Quantité", "Unité", "Prix unitaire HT", "Total HT"]];
   for (const g of groups) {
     for (const l of g.lines) {
@@ -33,5 +34,5 @@ export function reorderCsv(groups) {
       rows.push([g.supplier, i.supplierRef || "", i.name, num(l.qty), i.unit, num(i.costPerUnit || 0), num((l.totalCents / 100).toFixed(2))]);
     }
   }
-  return rows.map((r) => r.map(cell).join(";")).join("\r\n");
+  return csvRows(rows);
 }

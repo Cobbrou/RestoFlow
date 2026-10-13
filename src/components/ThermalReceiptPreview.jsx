@@ -166,20 +166,12 @@ export default function ThermalReceiptPreview({
     setDirectPrintStatus(null);
 
     try {
-      const blob = buildEscPosBinary(currentTicketText, {
-        autoCut: true,
-        beep: activeTab === "cuisine",
-        openDrawer: activeTab === "caisse",
-      });
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = Array.from(new Uint8Array(arrayBuffer));
-
       const socket = getSocket();
       if (socket && socket.connected) {
         // Sans ack (droits refusés via "exception", coupure) : on débloque le bouton au bout de 10 s
         socket.timeout(10000).emit(
-          "printer:send_raw",
-          { ip: printer.ip, port: printer.port || 9100, buffer: bytes },
+          "printer:print_text",
+          { ip: printer.ip, text: currentTicketText, beep: activeTab === "cuisine" },
           (err, res) => {
             setDirectPrinting(false);
             if (err) {
@@ -187,7 +179,7 @@ export default function ThermalReceiptPreview({
             } else if (res?.success) {
               setDirectPrintStatus({
                 ok: true,
-                msg: `Envoyé à ${printer.name || printer.ip} (${res.bytesWritten || bytes.length} o) !`,
+                msg: `Envoyé à ${printer.name || printer.ip} (${res.bytesWritten} o) !`,
               });
             } else {
               setDirectPrintStatus({

@@ -8,7 +8,7 @@ let socket = null;
 const statusListeners = new Set();
 let isConnected = false;
 
-function getSavedToken() {
+export function getSessionToken() {
   try {
     return localStorage.getItem("rf_session_token") || null;
   } catch {
@@ -21,7 +21,7 @@ function getSavedToken() {
  * Lecture de l'expiration seulement : la signature reste vérifiée par le serveur.
  */
 export function hasValidSessionToken() {
-  const token = getSavedToken();
+  const token = getSessionToken();
   try {
     const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
     return typeof payload.exp === "number" && payload.exp > Date.now();
@@ -60,7 +60,7 @@ export function setSocketToken(token) {
 
 export function getSocket() {
   if (!socket) {
-    const token = getSavedToken();
+    const token = getSessionToken();
     socket = io(BACKEND_URL, {
       transports: ["websocket", "polling"],
       auth: token ? { token } : {},

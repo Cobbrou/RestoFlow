@@ -18,6 +18,37 @@ const makeGateway = (deps: { config?: any; printer?: any } = {}) =>
     {} as any
   );
 
+describe("Synchronisation initiale : coordonnées", () => {
+  const list = (rows: any[] = []) => vi.fn().mockResolvedValue(rows);
+  const gateway = new WebsocketGateway(
+    { reservation: { findMany: list([{ id: "r1", customerName: "Martin", phone: "0612345678", email: "m@exemple.fr" }]) } } as any,
+    {} as any,
+    { findActive: list() } as any,
+    {} as any,
+    { getConfig: vi.fn().mockResolvedValue({}) } as any,
+    { findAllIngredients: list() } as any,
+    {} as any,
+    {} as any,
+    { listItems: list() } as any,
+    {} as any,
+    { getProducts: list(), getMenus: list() } as any,
+    {} as any,
+    { listTables: list(), listRoles: list(), listStaff: list([{ id: "s1", name: "Léa", email: "lea@exemple.fr", phone: "0600000000" }]) } as any
+  );
+  const user = (permissions: string[]) => ({ staffId: "s1", name: "Léa", roleId: "r", permissions, exp: Date.now() + 60000 });
+
+  it("retire téléphone et e-mail des clients et de l'équipe sans la permission correspondante", async () => {
+    const state = await gateway.getFullState(user(["cuisine.view"]));
+    expect(state.reservations).toEqual([{ id: "r1", customerName: "Martin" }]);
+    expect(state.staff).toEqual([{ id: "s1", name: "Léa" }]);
+  });
+
+  it("garde les coordonnées des clients pour qui gère les réservations", async () => {
+    const state = await gateway.getFullState(user(["salle.reservations"]));
+    expect(state.reservations[0]).toMatchObject({ phone: "0612345678", email: "m@exemple.fr" });
+  });
+});
+
 describe("Impression directe depuis un poste", () => {
   const setup = () => {
     const printer = { sendRaw: vi.fn().mockResolvedValue({ success: true }), testPrinter: vi.fn().mockResolvedValue({ success: true }) };
@@ -27,9 +58,9 @@ describe("Impression directe depuis un poste", () => {
 
   it("utilise le port configuré, jamais celui fourni par le client", async () => {
     const { printer, gateway } = setup();
-    await gateway.handlePrinterSendRaw({ ip: "192.168.1.50", port: 22, buffer: [0x1b, 0x40] } as any);
+    await gateway.handlePrintText({ ip: "192.168.1.50", port: 22, text: "Addition" } as any);
     await gateway.handlePrinterTest({ ip: "192.168.1.50", port: 22 } as any);
-    expect(printer.sendRaw).toHaveBeenCalledWith("192.168.1.50", 9101, Buffer.from([0x1b, 0x40]));
+    expect(printer.sendRaw).toHaveBeenCalledWith("192.168.1.50", 9101, expect.any(Buffer));
     expect(printer.testPrinter).toHaveBeenCalledWith("192.168.1.50", 9101);
   });
 
@@ -52,8 +83,26 @@ describe("Impression directe depuis un poste", () => {
 
   it("refuse une IP absente de la configuration", async () => {
     const { printer, gateway } = setup();
-    expect(await gateway.handlePrinterSendRaw({ ip: "127.0.0.1", buffer: [] })).toMatchObject({ success: false });
-    expect(await gateway.handlePrinterSendRaw({ ip: undefined as any, buffer: [] })).toMatchObject({ success: false });
+    expect(await gateway.handlePrintText({ ip: "127.0.0.1", text: "Addition" })).toMatchObject({ success: false });
+    expect(await gateway.handlePrintText({ ip: undefined as any, text: "Addition" })).toMatchObject({ success: false });
+    expect(printer.sendRaw).not.toHaveBeenCalled();
+  });
+
+  it("une addition imprimée depuis un poste n'ouvre jamais le tiroir-caisse", async () => {
+    const { printer, gateway } = setup();
+    const drawerKick = "\x1b\x70\x00\x19\xfa";
+    await gateway.handlePrintText({ ip: "192.168.1.50", text: `TOTAL 42,00${drawerKick}\nMerci` });
+
+    const [, , bytes] = printer.sendRaw.mock.calls[0];
+    expect(bytes.includes(Buffer.from([0x1b, 0x70]))).toBe(false);
+    expect(bytes.toString("latin1")).toContain("TOTAL 42,00 p  \xfa\nMerci");
+  });
+
+  it("refuse un ticket vide, trop long ou qui n'est pas du texte", async () => {
+    const { printer, gateway } = setup();
+    for (const text of ["", "  \n", "x".repeat(20001), [0x1b, 0x70] as any, undefined as any]) {
+      expect(await gateway.handlePrintText({ ip: "192.168.1.50", text })).toMatchObject({ success: false });
+    }
     expect(printer.sendRaw).not.toHaveBeenCalled();
   });
 });

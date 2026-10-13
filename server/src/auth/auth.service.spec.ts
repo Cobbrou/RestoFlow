@@ -36,6 +36,22 @@ describe("Connexion par PIN", () => {
     await expect(service.verifyPin("1234", "s-burst")).rejects.toThrow(/Trop de tentatives/);
   });
 
+  it("un profil sensible n'ouvre une session qu'avec un PIN à 6 chiffres", async () => {
+    const weak = bcrypt.hashSync("1234", 4);
+    const strong = bcrypt.hashSync("123456", 4);
+    const accounts: Record<string, any> = {
+      admin4: { roleId: "admin", pin: weak, role: { permissions: "[]" } },
+      chef6: { roleId: "chef", pin: strong, role: { permissions: '["caisse.close"]' } },
+      serveur6: { roleId: "serveur", pin: strong, role: { permissions: '["salle.order"]' } },
+    };
+    const prisma: any = { staff: { findFirst: async ({ where }: any) => ({ id: where.id, name: where.id, ...accounts[where.id] }) } };
+    const service = new AuthService(prisma, { log: async () => {} } as any);
+
+    await expect(service.verifyPin("1234", "admin4")).rejects.toThrow("6 chiffres");
+    await expect(service.verifyPin("123456", "serveur6")).rejects.toThrow("4 chiffres");
+    expect((await service.verifyPin("123456", "chef6")).ok).toBe(true);
+  });
+
   it("un bon PIN remet le compteur à zéro", async () => {
     const { service } = make(["s-ok"]);
     for (let i = 0; i < 4; i++) await expect(service.verifyPin("0000", "s-ok")).rejects.toThrow(/incorrect/);

@@ -20,6 +20,8 @@ import { getSocket } from "../../services/socket.js";
 import { hoursByStaff, formatMinutes } from "../../utils/stats.js";
 import { money } from "../../utils/index.js";
 import { triggerFileDownload } from "../../utils/fec.js";
+import { csvRows } from "../../utils/csv.js";
+import { pinLengthFor } from "../../utils/permissions.js";
 
 const PRESET_COLORS = [
   "#C1440E", // RestoFlow Rust
@@ -643,8 +645,11 @@ function StaffFormModal({ member, roles, onClose, onSave }) {
   const [phone, setPhone] = useState(member?.phone ?? "");
   const [active, setActive] = useState(member?.active ?? true);
 
-  // PIN obligatoire à la création ; en modification, vide = inchangé
-  const pinOk = member ? pin === "" || /^\d{4,6}$/.test(pin) : /^\d{4,6}$/.test(pin);
+  const pinLengthOf = (id) => pinLengthFor(id, roles.find((r) => r.id === id)?.permissions);
+  const pinLength = pinLengthOf(roleId);
+  // PIN obligatoire à la création, ou si le nouveau rôle exige une autre longueur ; sinon vide = inchangé
+  const pinRequired = !member || pinLengthOf(member.roleId) !== pinLength;
+  const pinOk = pin.length === pinLength || (!pinRequired && pin === "");
   const isValid = name.trim().length > 0 && roleId && pinOk;
 
   return (
@@ -670,15 +675,15 @@ function StaffFormModal({ member, roles, onClose, onSave }) {
           </select>
         </Field>
 
-        <Field label={member ? "Nouveau code PIN (vide = inchangé)" : "Code PIN (4 à 6 chiffres) *"}>
+        <Field label={pinRequired ? `Code PIN (${pinLength} chiffres) *` : `Nouveau code PIN (${pinLength} chiffres, vide = inchangé)`}>
           <input
             type="text"
             inputMode="numeric"
-            maxLength={6}
+            maxLength={pinLength}
             className={inputCls + " font-mono tracking-widest text-center"}
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-            placeholder="Ex : 1234"
+            placeholder={"123456".slice(0, pinLength)}
           />
         </Field>
       </div>
@@ -1102,11 +1107,10 @@ function TipsDistribution({ roles }) {
   const roleName = (id) => roles.find((r) => r.id === id)?.name || id;
 
   const exportCsv = () => {
-    const cell = (v) => `"${String(v).replace(/"/g, '""')}"`;
     const rows = [["Équipier", "Rôle", "Heures", "Part (€)"]].concat(
       report.rows.map((r) => [r.name, roleName(r.roleId), formatMinutes(r.minutes), (r.shareCents / 100).toFixed(2).replace(".", ",")])
     );
-    triggerFileDownload("﻿" + rows.map((r) => r.map(cell).join(";")).join("\r\n"), `pourboires-${from}-au-${to}.csv`);
+    triggerFileDownload("﻿" + csvRows(rows), `pourboires-${from}-au-${to}.csv`);
   };
 
   return (

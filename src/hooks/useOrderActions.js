@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { uid } from "../data/seed.js";
 import { getProductEffectivePrice, resolveOptions, resolveMenuOptions, heldToRelease, isOffPremise, orderLabel } from "../utils/index.js";
-import { getSocket } from "../services/socket.js";
+import { getSocket, getSessionToken } from "../services/socket.js";
 import { menuVatSplit } from "../utils/vat.js";
 
 /**
@@ -389,6 +389,7 @@ export function useOrderActions(store, {
       payments: paymentList,
       tip: Number(meta?.tip || 0),
       operatorId: currentStaff?.id,
+      operatorToken: getSessionToken(),
       printReceipt: meta?.printReceipt !== false,
     });
 
@@ -415,6 +416,7 @@ export function useOrderActions(store, {
       paymentMethod: payments.length === 1 ? payments[0].method : "partage",
       tip: 0,
       operatorId: currentStaff?.id,
+      operatorToken: getSessionToken(),
       printReceipt,
     });
     pushToast(`Ticket émis : ${payments[0]?.label || "convive"} (${amount.toFixed(2)} €)`, "server");

@@ -22,7 +22,7 @@ model Staff {
   name      String
   roleId    String
   role      Role     @relation(fields: [roleId], references: [id])
-  pin       String   // PIN code (4 digits, e.g. "1011")
+  pin       String   // Empreinte bcrypt du PIN (4 à 6 chiffres), jamais le PIN en clair
   email     String?
   phone     String?
   active    Boolean  @default(true)

@@ -23,7 +23,7 @@ cp .env.example .env
 Éditez `server/.env` :
 
 ```ini
-JWT_SECRET=<résultat de : openssl rand -hex 32>
+JWT_SECRET=<résultat de : openssl rand -hex 32>   # obligatoire : sans lui, le serveur refuse de démarrer
 CORS_ORIGIN=https://192.168.1.10
 DATABASE_URL=file:/opt/restoflow/data/restoflow.db
 BACKUP_DIR=/mnt/usb/restoflow-backups
@@ -70,14 +70,15 @@ sudo systemctl restart caddy
 Utilisez [NSSM](https://nssm.cc/) pour transformer les deux programmes en services Windows :
 
 ```powershell
-nssm install RestoFlow "C:\Program Files\nodejs\node.exe" "--env-file=.env dist/src/main.js"
+nssm install RestoFlow "C:\Program Files\nodejs\npm.cmd" "run start:prod"
 nssm set RestoFlow AppDirectory C:\restoflow\server
+nssm set RestoFlow AppEnvironmentExtra NODE_ENV=production
 nssm install Caddy C:\caddy\caddy.exe "run --config C:\restoflow\deploy\Caddyfile"
 nssm set Caddy AppEnvironmentExtra RESTOFLOW_HOST=192.168.1.10 RESTOFLOW_DIST=C:/restoflow/dist
 nssm start RestoFlow; nssm start Caddy
 ```
 
-Ouvrez le port 443 dans le pare-feu Windows. Lancez `npm run db:migrate` à la main après chaque mise à jour.
+Ouvrez le port 443 dans le pare-feu Windows. `start:prod` applique les migrations à chaque démarrage du service.
 Vérifiez que le fuseau horaire de Windows est « Paris » : numéros d'appel, happy hour et heures imprimées en dépendent.
 
 ## 3. Certificat sur les tablettes

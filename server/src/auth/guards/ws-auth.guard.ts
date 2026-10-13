@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, Logger } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { WsException } from "@nestjs/websockets";
-import { Socket } from "socket.io";
+import { Server, Socket } from "socket.io";
 import { AuthService, SessionPayload } from "../auth.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 
@@ -13,11 +13,21 @@ export const SENSITIVE = {
   closings: ["caisse.close", "caisse.history", "caisse.fec"],
   stockMovements: ["gestion.stocks", "gestion.recipes"],
   staffContacts: ["gestion.staff"],
+  reservationContacts: ["salle.reservations"],
 };
 
 const ADMIN_ROOM = "perm:*";
 /** Rooms des postes ayant au moins une des permissions (l'admin les a toutes) : server.to(permRooms(...)) */
 export const permRooms = (perms: string[]) => [ADMIN_ROOM, ...perms.map((p) => `perm:${p}`)];
+
+export const withoutContacts = <T extends object>({ email: _e, phone: _p, ...rest }: T & { email?: unknown; phone?: unknown }) => rest;
+
+/** Coordonnées (e-mail, téléphone) diffusées aux seuls postes ayant une des permissions, retirées pour les autres */
+export function emitWithContacts(server: Server, event: string, data: object | object[], perms: string[]) {
+  const allowed = permRooms(perms);
+  server.to(allowed).emit(event, data);
+  server.to(STAFF_ROOM).except(allowed).emit(event, Array.isArray(data) ? data.map(withoutContacts) : withoutContacts(data));
+}
 
 export const hasAnyPermission = (user: SessionPayload | null, perms: string[]) =>
   !!user && (user.roleId === "admin" || perms.some((p) => (user.permissions || []).includes(p)));

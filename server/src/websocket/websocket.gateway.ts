@@ -17,7 +17,7 @@ import { BillingService } from "../billing/billing.service";
 import { ConfigService } from "../config/config.service";
 import { StockService } from "../stock/stock.service";
 import { TablesService } from "../tables/tables.service";
-import { PrinterService, ESCPOS_INIT, encodeCp1252, escposText as t } from "../printer/printer.service";
+import { PrinterService, ESCPOS_INIT, encodeCp1252, escposText as t, textTicket } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
@@ -25,7 +25,7 @@ import { JournalService } from "../journal/journal.service";
 import { ManagementService } from "../management/management.service";
 import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
-import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
+import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission, withoutContacts } from "../auth/guards/ws-auth.guard";
 import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
 import { Public } from "../auth/decorators/public.decorator";
 import { ALLOWED_ORIGINS } from "../cors";
@@ -143,13 +143,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       products,
       menus,
       roles,
-      staff: can(SENSITIVE.staffContacts) ? staff : staff.map(({ email: _e, phone: _p, ...s }) => s),
+      staff: can(SENSITIVE.staffContacts) ? staff : staff.map(withoutContacts),
       history: history.map(toClientHistory),
       ingredients,
       recipes,
       stockMovements,
       config,
-      reservations,
+      reservations: can(SENSITIVE.reservationContacts) ? reservations : reservations.map(withoutContacts),
       closings,
     };
   }
@@ -672,10 +672,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody(new ValidationPipe({ whitelist: true, transform: true })) data: CheckoutDto
   ) {
     try {
-      // Rejeu hors-ligne : le ticket porte l'équipier d'origine, le journal garde aussi la session qui rejoue
+      // Rejeu hors-ligne : le ticket porte l'équipier d'origine (prouvé par son jeton), le journal garde aussi la session qui rejoue
       const session = client.data.user;
       const operator =
-        data.operatorId && data.operatorId !== session.staffId
+        data.operatorId && data.operatorId !== session.staffId && this.authService.isOperatorToken(data.operatorToken, data.operatorId)
           ? await this.prisma.staff.findUnique({ where: { id: data.operatorId }, select: { id: true, name: true } })
           : null;
       const res = await this.billingService.processCheckout({ ...data, serverName: operator?.name || session.name });
@@ -764,15 +764,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // Addition imprimée par un serveur (caisse.checkout) ou test depuis les réglages
   @RequirePermissions("caisse.checkout", "caisse.settings")
-  @SubscribeMessage("printer:send_raw")
-  async handlePrinterSendRaw(@MessageBody() data: { ip: string; buffer: number[] | string }) {
+  @SubscribeMessage("printer:print_text")
+  async handlePrintText(@MessageBody() data: { ip: string; text: string; beep?: boolean }) {
     try {
-      const printer = await this.knownPrinter(data?.ip);
-      const buffer = Array.isArray(data.buffer)
-        ? Buffer.from(data.buffer)
-        : Buffer.from(data.buffer, "base64");
-      const res = await this.printerService.sendRaw(printer.ip, printer.port, buffer);
-      return res;
+      const ticket = textTicket(data?.text, { beep: data?.beep === true });
+      const printer = await this.knownPrinter(data.ip);
+      return await this.printerService.sendRaw(printer.ip, printer.port, ticket);
     } catch (err: any) {
       return { success: false, error: err.message };
     }

@@ -2,6 +2,15 @@
  * Helper de vérification des permissions et du contrôle d'accès RBAC de RestoFlow.
  */
 
+// Copie côté serveur : server/src/auth/auth.service.ts (pinLengthFor)
+const SENSITIVE_PERMISSIONS = ["gestion.staff", "caisse.settings", "caisse.close", "caisse.fec"];
+
+export const isSensitiveRole = (roleId, permissions = []) =>
+  roleId === "admin" || permissions.some((p) => SENSITIVE_PERMISSIONS.includes(p));
+
+/** PIN à 6 chiffres pour un profil sensible, 4 sinon */
+export const pinLengthFor = (roleId, permissions) => (isSensitiveRole(roleId, permissions) ? 6 : 4);
+
 export function hasPermission(staff, roleObj, permissionId) {
   if (!staff) return false;
   if (staff.roleId === "admin") return true;
