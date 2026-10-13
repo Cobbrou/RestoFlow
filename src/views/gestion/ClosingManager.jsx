@@ -578,6 +578,7 @@ export default function ClosingManager({
                 value={zSearch}
                 onChange={(e) => setZSearch(e.target.value)}
                 placeholder="Rechercher par n° de rapport Z, date ou collaborateur..."
+                aria-label="Rechercher par n° de rapport Z, date ou collaborateur"
                 className="bg-transparent outline-none text-xs flex-1 text-[#2B2622]"
               />
             </div>

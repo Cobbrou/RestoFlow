@@ -1,8 +1,9 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket } from "@nestjs/websockets";
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server, Socket } from "socket.io";
-import { WsAuthGuard, STAFF_ROOM, SENSITIVE, authenticateSocket, permRooms } from "../auth/guards/ws-auth.guard";
-import { AuthService } from "../auth/auth.service";
+import { WsAuthGuard, STAFF_ROOM, SENSITIVE, authenticateSocket, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
+import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
+import { AuthService, SESSION_MS } from "../auth/auth.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
 import { ClientActionInterceptor } from "../websocket/client-action.interceptor";
@@ -15,7 +16,7 @@ import { ManagementService } from "./management.service";
  * (tables:list, menus:list, staff:list, roles:list) à tous les terminaux.
  */
 @WebSocketGateway({ cors: { origin: ALLOWED_ORIGINS } })
-@UseGuards(WsAuthGuard, WsPermissionsGuard)
+@UseGuards(ScalarIdsGuard, WsAuthGuard, WsPermissionsGuard)
 @UseInterceptors(ClientActionInterceptor)
 export class ManagementGateway {
   @WebSocketServer()
@@ -138,7 +139,7 @@ export class ManagementGateway {
   @RequirePermissions("gestion.staff")
   @SubscribeMessage("role:delete")
   async deleteRole(@ConnectedSocket() client: Socket, @MessageBody() data: { id: string }) {
-    const res = await this.broadcast("roles:list", () => this.management.deleteRole(data?.id));
+    const res = await this.broadcast("roles:list", () => this.management.deleteRole(data?.id, client.data.user));
     if (res.ok) await this.journal.log("ROLE_DELETE", this.actor(client), { roleId: data?.id });
     return res;
   }
@@ -149,7 +150,14 @@ export class ManagementGateway {
   @SubscribeMessage("shift:clock")
   async clock(@ConnectedSocket() client: Socket, @MessageBody() data: { id?: string; staffId?: string; action: string; at?: number }) {
     const res = await this.broadcast("shifts:open", async () => {
-      const shift = await this.management.clock({ ...data, staffId: data?.staffId || client.data.user.staffId });
+      const session = client.data.user;
+      const staffId = data?.staffId || session.staffId;
+      // 🔒 Pointer un collègue : gestionnaire, ou rejeu d'un pointage saisi avant l'ouverture de cette session
+      const queuedBefore = Number(data?.at) < session.exp - SESSION_MS;
+      if (staffId !== session.staffId && !queuedBefore && !hasAnyPermission(session, ["gestion.staff"])) {
+        throw new Error("Chacun pointe pour soi : le pointage d'un collègue est réservé au gestionnaire");
+      }
+      const shift = await this.management.clock({ ...data, staffId });
       if (shift) await this.journal.log(data.action === "in" ? "SHIFT_IN" : "SHIFT_OUT", this.actor(client), { shiftId: shift.id, staffId: shift.staffId });
       return this.management.listOpenShifts();
     });

@@ -14,6 +14,8 @@ body {
   height: 100%;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Pas de zoom au double tap (taps rapides en service), le zoom au pincement reste possible */
+  touch-action: manipulation;
 }
 
 #root {
@@ -21,6 +23,14 @@ body {
   min-height: 100vh;
   display: flex;
   align-items: stretch;
+}
+
+/* ── Focus clavier ────────────────────────────────────────────
+   Hors @layer à dessein : l'emporte sur les utilitaires `outline-none` posés sur les champs et boutons.
+   Les conteneurs focalisés par programme (tabindex="-1", ex. fenêtres modales) restent sans contour. */
+:focus-visible:not([tabindex="-1"]) {
+  outline: 2px solid #C1440E;
+  outline-offset: 2px;
 }
 
 /* ── Impression thermique ESC/POS ─────────────────────────── */

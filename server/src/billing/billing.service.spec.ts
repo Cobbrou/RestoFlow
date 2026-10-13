@@ -123,6 +123,15 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       expect(res.history.payments[0]).toMatchObject({ id: "p1", method: "carte", amount: 2 });
     });
 
+    it("fige les règlements au centime et refuse un montant illisible", async () => {
+      mockPrisma.order.findUnique.mockResolvedValue({ id: "o1", tableId: null, server: "A", items: [{ id: "i", name: "Café", price: 2, qty: 1, status: "served" }] });
+      const res = await billingService.processCheckout({ orderId: "o1", payments: [{ amount: 1.004, method: "carte" }, { amount: 0.996, method: "especes" }] });
+      expect(res.history.payments.map((p: any) => p.amount)).toEqual([1, 1]);
+      await expect(
+        billingService.processCheckout({ orderId: "o1", payments: [{ amount: "abc", method: "carte" }, { amount: 2, method: "especes" }] })
+      ).rejects.toThrow("Montant de paiement invalide");
+    });
+
     it("encaisse une commande à emporter sans table et fige son libellé sur le ticket", async () => {
       mockPrisma.order.findUnique.mockResolvedValue({
         id: "order_emp",
@@ -301,6 +310,14 @@ describe("BillingService (Unitaire & Intégrité Financière)", () => {
       expect(first.total + rest.total).toBeCloseTo(-23.4, 10);
 
       await expect(billingService.refundTicket("h1", "encore", "Admin")).rejects.toThrow("entièrement remboursé");
+    });
+
+    it("avoir total : mode de remboursement choisi, pourboire non remboursé", async () => {
+      const full = await billingService.refundTicket("h1", "erreur de table", "Admin", null, "especes");
+      expect(full.total).toBe(-23.4);
+      expect(full.tip).toBe(0);
+      expect(full.paymentMethod).toBe("especes");
+      expect(full.payments).toEqual([expect.objectContaining({ method: "especes", amount: -23.4 })]);
     });
 
     it("refuse une quantité au-delà du reste ou une ligne inconnue", async () => {

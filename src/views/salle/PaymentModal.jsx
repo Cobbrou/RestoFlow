@@ -19,6 +19,7 @@ import {
   Wifi,
   HeartHandshake,
 } from "lucide-react";
+import Modal, { Dialog } from "../../components/Modal.jsx";
 import { money, orderLabel } from "../../utils/index.js";
 import TpeModal from "../../components/TpeModal.jsx";
 import { calculateVatBreakdown, partialNetCents } from "../../utils/vat.js";
@@ -91,6 +92,10 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   // Chaque élément : { id, label, amount, method, items, paidAt }
   const [payments, setPayments] = useState([]);
 
+  // Fermeture volontaire (Annuler, ×) avec des règlements saisis : confirmation avant de les perdre
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const requestCancel = () => (payments.length === 0 ? onCancel() : setConfirmCancel(true));
+
   // Montant déjà réglé et reste à payer
   const paidAmount = useMemo(
     () => payments.reduce((s, p) => s + p.amount, 0),
@@ -124,7 +129,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
       });
     }
     return list;
-  }, [total, guestCount]);
+  }, [effectiveTotal, guestCount]);
 
   // ── Mode Proportionnel / Libre ─────────────────────────────
   const [customAmountStr, setCustomAmountStr] = useState("");
@@ -383,13 +388,14 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-3 sm:p-5"
-      onClick={onCancel}
-    >
-      <div
+    <>
+      <Dialog
+        onClose={onCancel}
+        label="Encaissement"
+        // Un tap hors de la fenêtre ou Échap ne doit jamais effacer des paiements déjà saisis
+        dismissible={payments.length === 0}
+        overlayClassName="bg-black/60 p-3 sm:p-5"
         className="rf-anim-pop bg-[#FAF6EE] rounded-3xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-black/10"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* ── EN-TÊTE MODAL ───────────────────────────────────── */}
         <div className="px-5 py-3.5 bg-white border-b border-black/10 flex items-center justify-between">
@@ -416,7 +422,8 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
           </div>
 
           <button
-            onClick={onCancel}
+            onClick={requestCancel}
+            aria-label="Fermer"
             className="rf-tap p-2 rounded-full bg-black/5 hover:bg-black/10 text-[#5B5346]"
             title="Fermer"
           >
@@ -528,6 +535,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
                       <strong className="text-[#2E9E5B] ml-0.5">{money(p.amount)}</strong>
                       <button
                         onClick={() => removePayment(p.id)}
+                        aria-label="Annuler ce règlement"
                         className="text-[#8A8378] hover:text-[#C1361B] ml-1 p-0.5 rounded"
                         title="Annuler ce règlement"
                       >
@@ -1230,7 +1238,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
         {/* ── PIED DU MODAL / BOUTONS D'ACTION ─────────────────── */}
         <div className="px-5 py-3.5 bg-white border-t border-black/10 flex items-center justify-between gap-3">
           <button
-            onClick={onCancel}
+            onClick={requestCancel}
             className="rf-tap px-4 py-2.5 rounded-xl text-xs font-bold text-[#5B5346] bg-black/5 hover:bg-black/10"
           >
             Annuler
@@ -1275,7 +1283,7 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
             )}
           </div>
         </div>
-      </div>
+      </Dialog>
 
       {/* Modal TPE interactif */}
       {tpeSession && (
@@ -1290,6 +1298,31 @@ export default function PaymentModal({ order, table, config = {}, onCancel, onCo
           }}
         />
       )}
-    </div>
+
+      {confirmCancel && (
+        <Modal title="Abandonner l'encaissement ?" onClose={() => setConfirmCancel(false)}>
+          <p className="text-sm text-[#2B2622]">
+            {payments.length} règlement{payments.length > 1 ? "s" : ""} saisi{payments.length > 1 ? "s" : ""} ({money(paidAmount)}) {payments.length > 1 ? "seront perdus" : "sera perdu"}.
+          </p>
+          <p className="text-xs text-[#6B6355] mt-1.5">Un paiement carte déjà débité sur le TPE devra être ressaisi ou remboursé.</p>
+          <div className="flex gap-2 mt-5">
+            <button
+              type="button"
+              onClick={() => setConfirmCancel(false)}
+              className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-[#2B2622]"
+            >
+              Reprendre l'encaissement
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-[#C1361B] bg-[#C1361B]/10 hover:bg-[#C1361B]/15"
+            >
+              Abandonner
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

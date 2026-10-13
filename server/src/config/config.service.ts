@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import * as crypto from "crypto";
+import { printerAddressError } from "../printer/printer.service";
 
 const JSON_FIELDS: [string, "array" | "object"][] = [
   ["printers", "array"],
@@ -23,6 +24,15 @@ export function jsonField(field: string, value: unknown, shape: "array" | "objec
   const ok = shape === "array" ? Array.isArray(parsed) : !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
   if (!ok) throw new BadRequestException(`${field} : ${shape === "array" ? "liste" : "objet"} attendu`);
   return JSON.stringify(parsed);
+}
+
+/** Imprimantes réseau : IP littérale du LAN et port valide (une imprimante USB n'a pas d'IP) */
+export function assertPrinters(printers: any[]) {
+  for (const p of printers) {
+    if (!p?.ip) continue;
+    const refused = printerAddressError(p.ip, p.port ?? 9100);
+    if (refused) throw new BadRequestException(refused);
+  }
 }
 
 @Injectable()
@@ -139,6 +149,7 @@ export class ConfigService {
     for (const [field, shape] of JSON_FIELDS) {
       if (data[field] !== undefined) updatePayload[field] = jsonField(field, data[field], shape);
     }
+    if (updatePayload.printers) assertPrinters(JSON.parse(updatePayload.printers));
 
     await this.getConfig(); // crée la config (et une clé NF525 aléatoire) si absente
     await this.prisma.restaurantConfig.update({

@@ -227,6 +227,7 @@ export default function StockManager({
                 <input
                   type="text"
                   placeholder="Rechercher un ingrédient ou fournisseur…"
+                  aria-label="Rechercher un ingrédient ou fournisseur"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-white border border-black/10 focus:outline-none focus:border-[#C1440E]"
@@ -699,6 +700,7 @@ function IngredientPicker({ ingredients, selectedId, onSelect }) {
         <input
           type="text"
           placeholder="Rechercher un ingrédient ou fournisseur…"
+          aria-label="Rechercher un ingrédient ou fournisseur"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-9 pr-8 py-2 text-xs rounded-xl bg-black/5 border border-black/10 focus:outline-none focus:border-[#C1440E] focus:bg-white transition-all font-medium"
@@ -952,7 +954,7 @@ function InventoryModal({ ingredients, onClose, onSave }) {
 
   return (
     <Modal title="📋 Inventaire physique" onClose={onClose} wide>
-      <input className={inputCls + " mb-3"} placeholder="Rechercher un ingrédient…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <input className={inputCls + " mb-3"} placeholder="Rechercher un ingrédient…" aria-label="Rechercher un ingrédient" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="max-h-[50vh] overflow-y-auto rf-scrollbar divide-y divide-black/5 border border-black/10 rounded-xl">
         {shown.map((i) => {
           const v = counts[i.id] ?? "";

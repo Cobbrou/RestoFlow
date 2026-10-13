@@ -388,6 +388,15 @@ export class OrdersService {
     } else {
       // Options des composants (cuisson du burger…) : composition[g].options[i] = picks de productIds[i]
       const groups = checkMenuComposition(JSON.parse(menu.groups || "[]"), data.composition);
+      const componentIds = (data.composition as any[]).flatMap((g) => g.productIds as string[]);
+      const productsById = new Map(
+        (
+          await this.prisma.product.findMany({
+            where: { id: { in: componentIds } },
+            select: { id: true, name: true, options: true, price: true, vatRate: true },
+          })
+        ).map((p) => [p.id, p])
+      );
       const parts: string[] = [];
       const components: { price: number; vatRate: number }[] = [];
       const composition: any[] = [];
@@ -396,10 +405,7 @@ export class OrdersService {
         const ids: string[] = g.productIds;
         const names: string[] = [];
         for (const [i, pid] of ids.entries()) {
-          const p = await this.prisma.product.findUnique({
-            where: { id: pid },
-            select: { name: true, options: true, price: true, vatRate: true },
-          });
+          const p = productsById.get(pid);
           if (!p) throw new BadRequestException(`${groups[gi].title || "Menu"} : produit introuvable`);
           components.push(p);
           names.push(p.name);
@@ -471,12 +477,20 @@ export class OrdersService {
     return { dbProduct, menu: null, name: dbProduct.name, price: effectivePrice(dbProduct, hh, at), vatRate: dbProduct.vatRate };
   }
 
-  async changeQty(orderId: string, itemId: string, delta: number) {
-    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
-    if (!item) throw new NotFoundException("Article non trouvé");
-    if (item.status !== 'draft') {
-      throw new BadRequestException(`Impossible de modifier un article en statut "${item.status}". Seuls les articles brouillons peuvent être modifiés.`);
+  /** Article brouillon de cette commande, encore ouverte : seul cas modifiable sans annulation */
+  private async draftItemOf(orderId: string, itemId: string, verb: string) {
+    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId }, include: { order: true } });
+    if (!item || item.orderId !== orderId) throw new NotFoundException("Article introuvable");
+    if (item.order.status !== "open") throw new BadRequestException("Commande déjà encaissée");
+    if (item.status !== "draft") {
+      throw new BadRequestException(`Impossible de ${verb} un article en statut "${item.status}". Seuls les articles brouillons peuvent l'être.`);
     }
+    return item;
+  }
+
+  async changeQty(orderId: string, itemId: string, delta: number) {
+    if (!Number.isInteger(delta) || delta === 0) throw new BadRequestException("Variation de quantité invalide");
+    const item = await this.draftItemOf(orderId, itemId, "modifier");
 
     const newQty = item.qty + delta;
     if (newQty <= 0) {
@@ -496,11 +510,7 @@ export class OrdersService {
   }
 
   async removeItem(orderId: string, itemId: string) {
-    const item = await this.prisma.orderItem.findUnique({ where: { id: itemId } });
-    if (!item) throw new NotFoundException('Article introuvable');
-    if (item.status !== 'draft') {
-      throw new BadRequestException(`Impossible de supprimer un article en statut "${item.status}". Seuls les articles brouillons peuvent être supprimés.`);
-    }
+    await this.draftItemOf(orderId, itemId, "supprimer");
     await this.prisma.orderItem.delete({ where: { id: itemId } });
     const updated = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -576,26 +586,22 @@ export class OrdersService {
     const cfg = await this.prisma.restaurantConfig.findUnique({ where: { id: "default" }, select: { modulesConfig: true } });
     const pacingEnabled = (cfg?.modulesConfig ? JSON.parse(cfg.modulesConfig) : {}).enableCoursePacing ?? true;
     const released = heldToRelease(order.items, pacingEnabled);
-    if (released.length > 0) {
-      await this.prisma.orderItem.updateMany({ where: { id: { in: released } }, data: { courseStatus: "direct" } });
-    }
-
-    const now = new Date();
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        sentAt: now,
-        server: serverName ? serverName : undefined,
-      },
-    });
+    const drafts = order.items.filter((i) => i.status === "draft");
 
     // 🔒 Passage conditionnel ligne par ligne : deux envois simultanés (double appui, deux terminaux)
-    // ne réclament jamais la même ligne ; seules les lignes réellement envoyées ici sont déstockées et imprimées
-    const sentIds: string[] = [];
-    for (const item of order.items.filter((i) => i.status === "draft")) {
-      const res = await this.prisma.orderItem.updateMany({ where: { id: item.id, status: "draft" }, data: { status: "new" } });
-      if (res.count === 1) sentIds.push(item.id);
-    }
+    // ne réclament jamais la même ligne ; seules les lignes réellement envoyées ici sont déstockées et imprimées.
+    // Une seule transaction : un seul commit disque au lieu d'un par ligne
+    const [, , ...claims] = await this.prisma.$transaction([
+      this.prisma.orderItem.updateMany({ where: { id: { in: released } }, data: { courseStatus: "direct" } }),
+      this.prisma.order.update({
+        where: { id: order.id },
+        data: { sentAt: new Date(), server: serverName ? serverName : undefined },
+      }),
+      ...drafts.map((item) =>
+        this.prisma.orderItem.updateMany({ where: { id: item.id, status: "draft" }, data: { status: "new" } })
+      ),
+    ]);
+    const sentIds = drafts.filter((_, k) => claims[k].count === 1).map((i) => i.id);
 
     const updated = await this.prisma.order.findUnique({
       where: { id: order.id },
@@ -631,10 +637,7 @@ export class OrdersService {
   }
 
   async markReady(orderId: string, station?: string) {
-    const existing = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { items: true, table: true },
-    });
+    const existing = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!existing) throw new NotFoundException("Commande introuvable");
 
     const whereClause: any = { orderId, status: "preparing", courseStatus: { not: "held" } };

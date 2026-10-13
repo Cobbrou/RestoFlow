@@ -17,7 +17,7 @@ import { BillingService } from "../billing/billing.service";
 import { ConfigService } from "../config/config.service";
 import { StockService } from "../stock/stock.service";
 import { TablesService } from "../tables/tables.service";
-import { PrinterService, ESCPOS_INIT, encodeCp1252 } from "../printer/printer.service";
+import { PrinterService, ESCPOS_INIT, encodeCp1252, escposText as t } from "../printer/printer.service";
 import { RecipesService } from "../recipes/recipes.service";
 import { ClosingService } from "../closing/closing.service";
 import { CatalogService } from "../catalog/catalog.service";
@@ -26,6 +26,7 @@ import { ManagementService } from "../management/management.service";
 import { toClientHistory } from "../billing/billing.service";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { WsAuthGuard, authenticateSocket, STAFF_ROOM, SENSITIVE, permRooms, hasAnyPermission } from "../auth/guards/ws-auth.guard";
+import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
 import { Public } from "../auth/decorators/public.decorator";
 import { ALLOWED_ORIGINS } from "../cors";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
@@ -33,13 +34,22 @@ import { CheckoutDto } from "../orders/dto/checkout.dto";
 import { StockMovementDto } from "../stock/dto/stock-movement.dto";
 import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto";
 
+// Synchronisation initiale : réservations récentes et à venir, l'historique complet grossirait chaque connexion
+// ponytail: fenêtre fixe de 30 jours, requête paginée par date si la consultation d'archives devient utile
+const RESERVATIONS_PAST_DAYS = 30;
+const reservationsFrom = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - RESERVATIONS_PAST_DAYS);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 @WebSocketGateway({
   cors: {
     origin: ALLOWED_ORIGINS,
   },
 })
 // 🔒 Toute action exige une session valide (sauf @Public), puis les permissions déclarées
-@UseGuards(WsAuthGuard, WsPermissionsGuard)
+@UseGuards(ScalarIdsGuard, WsAuthGuard, WsPermissionsGuard)
 // Idempotence : une action déjà appliquée (même clientActionId) n'est jamais rejouée
 @UseInterceptors(ClientActionInterceptor)
 @Injectable()
@@ -120,7 +130,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         this.recipesService.listItems(),
         can(SENSITIVE.stockMovements) ? this.stockService.getMovements(60) : [],
         this.configService.getConfig(),
-        this.prisma.reservation.findMany({ orderBy: [{ date: "asc" }, { time: "asc" }] }),
+        this.prisma.reservation.findMany({
+          where: { date: { gte: reservationsFrom() } },
+          orderBy: [{ date: "asc" }, { time: "asc" }],
+        }),
         can(SENSITIVE.closings) ? this.closingService.getClosingsHistory(50) : [],
       ]);
 
@@ -302,9 +315,18 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @RequirePermissions("salle.order")
   @SubscribeMessage("order:add_item")
-  async handleAddItem(@MessageBody() data: any) {
+  async handleAddItem(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     try {
       const order = await this.ordersService.addItem(data);
+      // Le tarif (happy hour) suit l'heure de saisie fournie par la tablette : un fort décalage est tracé
+      const delayMin = Math.round((Date.now() - Number(data?.addedAt)) / 60000);
+      if (delayMin > 5) {
+        await this.journal.log("ITEM_BACKDATED", { staffId: client.data.user.staffId, name: client.data.user.name }, {
+          orderId: order?.id,
+          productId: data?.product?.id,
+          delayMin,
+        });
+      }
       this.server.to(STAFF_ROOM).emit("order:updated", order);
       return { ok: true, order };
     } catch (err: any) {
@@ -395,8 +417,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       (p: any) => p.type === "kitchen" && p.interface === "network" && p.enabled && p.ip
     );
     if (!kitchenPrinter) return;
-    const rawText = `${ESCPOS_INIT}\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${label.toUpperCase()}\nPar: ${by}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
-      `${qty}x ${name}\nMotif: ${reason}\n\n\n\x1d\x56\x01`;
+    const rawText = `${ESCPOS_INIT}\x1b\x61\x01\x1b\x45\x01*** ANNULATION ***\x1b\x45\x00\n${t(label).toUpperCase()}\nPar: ${t(by)}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
+      `${qty}x ${t(name)}\nMotif: ${t(reason)}\n\n\n\x1d\x56\x01`;
     await this.printOrThrow(kitchenPrinter, rawText);
   }
 
@@ -504,9 +526,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     ] as [any, any[]][]) {
       if (!printer || stationItems.length === 0) continue;
       this.logger.log(`Impression automatique du bon (${stationItems.length} article(s)) vers ${printer.ip}:${printer.port || 9100}`);
-      const rawText = `${ESCPOS_INIT}\x1b\x61\x01--- ${title} ---\n${orderLabel(order).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${order.server}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
+      const rawText = `${ESCPOS_INIT}\x1b\x61\x01--- ${title} ---\n${t(orderLabel(order)).toUpperCase()}${order.pickupAt ? `\nRetrait: ${new Date(order.pickupAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}\nServeur: ${t(order.server)}\nHeure: ${new Date().toLocaleTimeString("fr-FR")}\n\n\x1b\x61\x00` +
         stationItems
-          .map((i: any) => `${i.qty}x ${i.name} ${i.notes ? `(${i.notes})` : ""}${i.options ? `\n   > ${i.options}` : ""}`)
+          .map((i: any) => `${i.qty}x ${t(i.name)} ${i.notes ? `(${t(i.notes)})` : ""}${i.options ? `\n   > ${t(i.options)}` : ""}`)
           .join("\n") +
         `\n\n\n\x1d\x56\x01`;
       await this.printOrThrow(printer, rawText).catch((e) => errors.push(e.message));
@@ -703,15 +725,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const vatLines = (historyRecord.vatDetails?.rates || [])
         .map((r: any) => `TVA ${String(r.rate).padEnd(4)}% HT ${eur(r.ht).padStart(9)}  TVA ${eur(r.vat).padStart(8)}`)
         .join("\n");
-      const rawText = `${ESCPOS_INIT}\x1b\x61\x01${cfg.name || "RestoFlow"}\n${cfg.legalName || ""}\n${cfg.address || ""} ${cfg.city || ""}\nSIRET: ${cfg.siret || ""}\nTVA: ${cfg.vatNumber || ""}\n\nFacture: ${historyRecord.ticketNumber}\n${historyRecord.orderLabel || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
+      const rawText = `${ESCPOS_INIT}\x1b\x61\x01${t(cfg.name || "RestoFlow")}\n${t(cfg.legalName)}\n${t(cfg.address)} ${t(cfg.city)}\nSIRET: ${t(cfg.siret)}\nTVA: ${t(cfg.vatNumber)}\n\nFacture: ${historyRecord.ticketNumber}\n${t(historyRecord.orderLabel) || `Table: ${historyRecord.tableNumber || "?"}`}\nDate: ${new Date(historyRecord.createdAt).toLocaleString("fr-FR")}\n\n\x1b\x61\x00` +
         historyRecord.items
-          .map((i: any) => `${i.qty}x ${i.name.padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${i.options}` : ""}`)
+          .map((i: any) => `${i.qty}x ${t(i.name).slice(0, 20).padEnd(20)} ${Number(i.price * i.qty).toFixed(2)}E${i.options ? `\n   ${t(i.options)}` : ""}`)
           .join("\n") +
         (discount > 0.004 ? `\nRemise: -${eur(discount)}` : "") +
         `\n--------------------------------\n\x1b\x61\x02TOTAL TTC: ${Number(historyRecord.total).toFixed(2)} EUR\n\x1b\x61\x00` +
         (vatLines ? `${vatLines}\n` : "") +
         (historyRecord.tip > 0 ? `Pourboire (hors TVA): ${eur(historyRecord.tip)}\n` : "") +
-        `\n\x1b\x61\x01${cfg.footerNote || "Merci de votre visite"}\n\n\n\x1d\x56\x01` +
+        `\n\x1b\x61\x01${t(cfg.footerNote || "Merci de votre visite")}\n\n\n\x1d\x56\x01` +
         // Tiroir-caisse : uniquement si une partie est réglée en espèces
         (paidCash ? `\x1b\x70\x00\x19\xfa` : "");
       await this.printOrThrow(caissePrinter, rawText);
@@ -720,21 +742,20 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Impression Matérielle Directe (Axe 4) ───────────────────────────
 
-  // Anti-SSRF : seules les IP d'imprimantes déclarées dans la configuration sont joignables
-  private async assertKnownPrinterIp(ip: string) {
+  // Anti-SSRF : seules les imprimantes déclarées sont joignables, sur leur port configuré (jamais celui du client)
+  private async knownPrinter(ip: string) {
     const cfg = await this.configService.getConfig();
-    const allowedIps = (cfg.printers || []).map((p: any) => p.ip).filter(Boolean);
-    if (!allowedIps.includes(ip)) {
-      throw new Error(`IP ${ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.`);
-    }
+    const printer = (cfg.printers || []).find((p: any) => p.ip && p.ip === ip);
+    if (!printer) throw new Error(`IP ${ip} non autorisée. Configurez l'imprimante dans Caisse & Imprimantes.`);
+    return { ip: printer.ip as string, port: Number(printer.port) || 9100 };
   }
 
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("printer:test")
-  async handlePrinterTest(@MessageBody() data: { ip: string; port?: number }) {
+  async handlePrinterTest(@MessageBody() data: { ip: string }) {
     try {
-      await this.assertKnownPrinterIp(data.ip);
-      const res = await this.printerService.testPrinter(data.ip, data.port || 9100);
+      const printer = await this.knownPrinter(data?.ip);
+      const res = await this.printerService.testPrinter(printer.ip, printer.port);
       return res;
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -744,13 +765,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   // Addition imprimée par un serveur (caisse.checkout) ou test depuis les réglages
   @RequirePermissions("caisse.checkout", "caisse.settings")
   @SubscribeMessage("printer:send_raw")
-  async handlePrinterSendRaw(@MessageBody() data: { ip: string; port?: number; buffer: number[] | string }) {
+  async handlePrinterSendRaw(@MessageBody() data: { ip: string; buffer: number[] | string }) {
     try {
-      await this.assertKnownPrinterIp(data.ip);
+      const printer = await this.knownPrinter(data?.ip);
       const buffer = Array.isArray(data.buffer)
         ? Buffer.from(data.buffer)
         : Buffer.from(data.buffer, "base64");
-      const res = await this.printerService.sendRaw(data.ip, data.port || 9100, buffer);
+      const res = await this.printerService.sendRaw(printer.ip, printer.port, buffer);
       return res;
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -758,12 +779,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   // ── Configuration Restaurant (ConfigService) ────────────────────────
-
-  @SubscribeMessage("config:get")
-  async handleGetConfig() {
-    const config = await this.configService.getConfig();
-    return { ok: true, config };
-  }
 
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("config:update")
@@ -793,15 +808,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   // ── Stocks & Recettes (StockService & RecipesService) ───────────────
-
-  @SubscribeMessage("stock:request_sync")
-  async handleStockSync(@ConnectedSocket() client: Socket) {
-    const [ingredients, movements] = await Promise.all([
-      this.stockService.findAllIngredients(),
-      hasAnyPermission(client.data.user, SENSITIVE.stockMovements) ? this.stockService.getMovements(100) : [],
-    ]);
-    return { ok: true, ingredients, movements };
-  }
 
   @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:add_movement")

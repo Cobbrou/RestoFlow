@@ -2,6 +2,7 @@ import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody } from
 import { UseGuards, UseInterceptors } from "@nestjs/common";
 import { Server } from "socket.io";
 import { WsAuthGuard, STAFF_ROOM } from "../auth/guards/ws-auth.guard";
+import { ScalarIdsGuard } from "../auth/guards/scalar-ids.guard";
 import { WsPermissionsGuard } from "../auth/guards/ws-permissions.guard";
 import { RequirePermissions } from "../auth/decorators/permissions.decorator";
 import { ClientActionInterceptor } from "../websocket/client-action.interceptor";
@@ -9,7 +10,7 @@ import { ALLOWED_ORIGINS } from "../cors";
 import { ReservationsService } from "./reservations.service";
 
 @WebSocketGateway({ cors: { origin: ALLOWED_ORIGINS } })
-@UseGuards(WsAuthGuard, WsPermissionsGuard)
+@UseGuards(ScalarIdsGuard, WsAuthGuard, WsPermissionsGuard)
 @UseInterceptors(ClientActionInterceptor)
 @RequirePermissions("salle.reservations")
 export class ReservationsGateway {

@@ -46,6 +46,14 @@ export const PAYMENT_METHODS = ["carte", "especes", "cheque", "titre_resto", "au
 
 const parseJson =(v: string | null, fallback: any = null) => (v ? JSON.parse(v) : fallback);
 
+/** Mode de remboursement d'un avoir : celui choisi s'il est admis, sinon le premier règlement du ticket */
+function refundMethodFor(orig: { payments: string | null; paymentMethod: string }, refundMethod?: string): string {
+  const methods = parseJson(orig.payments, []).map((p: any) => p.method);
+  return refundMethod && ["especes", "carte", "cheque", "autre", ...methods].includes(refundMethod)
+    ? refundMethod
+    : methods[0] || orig.paymentMethod || "carte";
+}
+
 /** Format d'un ticket envoyé aux clients (history:new_entry, sync:init) */
 export function toClientHistory(h: any) {
   return {
@@ -162,6 +170,7 @@ export class BillingService {
           }
 
           const neg = (n: any) => (typeof n === "number" ? -n : n);
+          const method = refundMethodFor(orig, refundMethod);
           const vat = parseJson(orig.vatDetails);
           const discount = parseJson(orig.discount);
           const record = await this.appendTicket(tx, {
@@ -189,11 +198,10 @@ export class BillingService {
                   }
                 : null
             ),
-            paymentMethod: orig.paymentMethod,
-            payments: JSON.stringify(
-              parseJson(orig.payments, []).map((p: any) => ({ ...p, label: "Remboursement", amount: -p.amount }))
-            ),
-            tip: -(orig.tip || 0),
+            // Pourboire jamais remboursé : l'avoir rend le total du ticket, par le mode choisi
+            paymentMethod: method,
+            payments: JSON.stringify([{ id: `pay_${Date.now()}`, label: "Remboursement", method, amount: -orig.total }]),
+            tip: 0,
             type: "CREDIT_NOTE",
             refTicketNumber: orig.ticketNumber,
             reason: motif,
@@ -263,10 +271,7 @@ export class BillingService {
       discountCents > 0 ? { type: "fixed", value: toEuros(discountCents) } : null
     );
 
-    const methods = parseJson(orig.payments, []).map((p: any) => p.method);
-    const method = ["especes", "carte", "cheque", "autre", ...methods].includes(refundMethod)
-      ? refundMethod
-      : methods[0] || orig.paymentMethod || "carte";
+    const method = refundMethodFor(orig, refundMethod);
     const neg = (n: any) => (typeof n === "number" ? -n : n);
 
     return this.appendTicket(tx, {
@@ -439,20 +444,19 @@ export class BillingService {
     // 🔒 Règlements figés dans le ticket signé : modes connus et champs attendus uniquement
     const paymentList = raw.map((p: any) => {
       if (!PAYMENT_METHODS.includes(p?.method)) throw new BadRequestException("Mode de règlement inconnu");
+      const amount = Number(p.amount);
+      if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("Montant de paiement invalide");
       return {
         id: String(p.id || `pay_${Date.now()}`).slice(0, 64),
         label: String(p.label || "").slice(0, 60),
         method: p.method,
-        amount: p.amount,
+        amount: toEuros(toCents(amount)), // figé au centime dans le ticket signé
         paidAt: Number(p.paidAt) || Date.now(),
-        ...(p.tpeData && typeof p.tpeData === "object" && { tpeData: p.tpeData }),
+        // Reçu TPE : quelques champs, taille bornée
+        ...(p.tpeData && typeof p.tpeData === "object" && JSON.stringify(p.tpeData).length <= 2000 && { tpeData: p.tpeData }),
       };
     });
-    const paidCents = paymentList.reduce((sum: number, p: any) => {
-      const amount = Number(p?.amount);
-      if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("Montant de paiement invalide");
-      return sum + toCents(amount);
-    }, 0);
+    const paidCents = paymentList.reduce((sum: number, p: any) => sum + toCents(p.amount), 0);
     if (paidCents !== dueCents + tipCents) {
       throw new BadRequestException(
         `Paiements (${toEuros(paidCents).toFixed(2)} €) différents du total (${toEuros(dueCents + tipCents).toFixed(2)} €)`

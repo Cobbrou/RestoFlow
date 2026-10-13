@@ -3,7 +3,7 @@ import { Table2, Package, LayoutList, Plus, Pencil, Trash2, Lock, Users, Ban, Re
 import { CATEGORIES } from "../../data/categories.js";
 import { productsFromCsv, CSV_TEMPLATE } from "../../utils/catalogImport.js";
 import { isAvailable, money, deduplicateHistory, parseOptionsText, formatOptionsText, PAYMENT_LABELS } from "../../utils/index.js";
-import Modal, { Field, inputCls } from "../../components/Modal.jsx";
+import Modal, { Dialog, Field, inputCls } from "../../components/Modal.jsx";
 import { uid } from "../../data/seed.js";
 import StaffRoleManager from "./StaffRoleManager.jsx";
 import StockManager from "./StockManager.jsx";
@@ -978,6 +978,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Recherche par table, serveur…"
+            aria-label="Recherche par table, serveur"
             className="bg-transparent outline-none text-sm flex-1 placeholder:text-[#9A917E]"
           />
         </div>
@@ -1048,146 +1049,148 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
 
       {/* Modal détail paiement */}
       {detail && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6" onClick={() => setDetailId(null)}>
-          <div className="rf-anim-pop bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto rf-scrollbar shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-black/10 sticky top-0 bg-white">
-              <h3 className="rf-display text-lg font-semibold text-[#2B2622]">
-                Ticket — {detail.tableNumber ? `Table ${detail.tableNumber}` : "—"}
-              </h3>
-              <button onClick={() => setDetailId(null)} className="rf-tap p-1.5 rounded-full bg-black/5 text-lg leading-none">×</button>
+        <Dialog
+          onClose={() => setDetailId(null)}
+          label={`Ticket ${detail.ticketNumber || ""}`}
+          className="rf-anim-pop bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto rf-scrollbar shadow-xl"
+        >
+          <div className="flex items-center justify-between px-5 py-4 border-b border-black/10 sticky top-0 bg-white">
+            <h3 className="rf-display text-lg font-semibold text-[#2B2622]">
+              Ticket — {detail.tableNumber ? `Table ${detail.tableNumber}` : "—"}
+            </h3>
+            <button type="button" onClick={() => setDetailId(null)} className="rf-tap p-1.5 rounded-full bg-black/5 text-lg leading-none" aria-label="Fermer">×</button>
+          </div>
+          <div className="p-5 rf-ticket">
+            <div className="text-center mb-3">
+              <p className="rf-black text-lg tracking-wide">{config?.name || "RESTOFLOW BISTROT"}</p>
+              {config?.siret && <p className="text-[9px] opacity-70">SIRET : {config.siret}</p>}
+              <p className="text-[10px] opacity-70">Ticket de caisse & Facture</p>
             </div>
-            <div className="p-5 rf-ticket">
-              <div className="text-center mb-3">
-                <p className="rf-black text-lg tracking-wide">{config?.name || "RESTOFLOW BISTROT"}</p>
-                {config?.siret && <p className="text-[9px] opacity-70">SIRET : {config.siret}</p>}
-                <p className="text-[10px] opacity-70">Ticket de caisse & Facture</p>
+            <div className="rf-mono text-[11px] space-y-0.5 mb-2">
+              <div className="flex justify-between font-bold text-[#2B2622]">
+                <span>{detail.type === "CREDIT_NOTE" ? "Avoir N°" : "Facture N°"}</span>
+                <span>{detail.ticketNumber || `FAC-${new Date(detail.createdAt).getFullYear()}-${(detail.orderId || detail.id).slice(-4).toUpperCase()}`}</span>
               </div>
-              <div className="rf-mono text-[11px] space-y-0.5 mb-2">
-                <div className="flex justify-between font-bold text-[#2B2622]">
-                  <span>{detail.type === "CREDIT_NOTE" ? "Avoir N°" : "Facture N°"}</span>
-                  <span>{detail.ticketNumber || `FAC-${new Date(detail.createdAt).getFullYear()}-${(detail.orderId || detail.id).slice(-4).toUpperCase()}`}</span>
+              {detail.type === "CREDIT_NOTE" && (
+                <>
+                  <div className="flex justify-between font-bold text-[#C1361B]"><span>Annule</span><span>{detail.refTicketNumber}</span></div>
+                  <div className="flex justify-between gap-3"><span>Motif</span><span className="text-right">{detail.reason}</span></div>
+                </>
+              )}
+              {detail.tableNumber && <div className="flex justify-between"><span>Table</span><span>{detail.tableNumber}</span></div>}
+              <div className="flex justify-between"><span>Commande</span><span>#{(detail.orderId || detail.id).slice(-4).toUpperCase()}</span></div>
+              <div className="flex justify-between"><span>Date</span><span>{new Date(detail.createdAt).toLocaleDateString("fr-FR")}</span></div>
+              <div className="flex justify-between"><span>Heure</span><span>{new Date(detail.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
+              {detail.server && <div className="flex justify-between"><span>Serveur</span><span>{detail.server}</span></div>}
+            </div>
+            <div className="border-t border-dashed border-black/30 my-2" />
+            <div className="space-y-1">
+              {(detail.items || []).map((it, idx) => (
+                <div key={it.id ?? idx} className="rf-mono text-[12px]">
+                  <div className="flex justify-between gap-2">
+                    <span className="flex-1">{it.qty} × {it.name}{it.options && <span className="block text-[10px] text-[#8A8378]">{it.options}</span>}</span>
+                    <span>{money(it.price * it.qty)}</span>
+                  </div>
+                  <div className="text-[10px] opacity-60">{money(it.price)} / unité</div>
                 </div>
-                {detail.type === "CREDIT_NOTE" && (
-                  <>
-                    <div className="flex justify-between font-bold text-[#C1361B]"><span>Annule</span><span>{detail.refTicketNumber}</span></div>
-                    <div className="flex justify-between gap-3"><span>Motif</span><span className="text-right">{detail.reason}</span></div>
-                  </>
-                )}
-                {detail.tableNumber && <div className="flex justify-between"><span>Table</span><span>{detail.tableNumber}</span></div>}
-                <div className="flex justify-between"><span>Commande</span><span>#{(detail.orderId || detail.id).slice(-4).toUpperCase()}</span></div>
-                <div className="flex justify-between"><span>Date</span><span>{new Date(detail.createdAt).toLocaleDateString("fr-FR")}</span></div>
-                <div className="flex justify-between"><span>Heure</span><span>{new Date(detail.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
-                {detail.server && <div className="flex justify-between"><span>Serveur</span><span>{detail.server}</span></div>}
+              ))}
+            </div>
+            <div className="border-t border-dashed border-black/30 my-2" />
+            <div className="rf-mono text-[11px] flex justify-between opacity-80">
+              <span>Sous-total brut</span>
+              <span>{money(detail.subtotal != null ? detail.subtotal : detail.total)}</span>
+            </div>
+            {detail.discount && (
+              <div className="rf-mono text-[11px] flex justify-between text-[#2E9E5B] font-bold">
+                <span>Remise {detail.discount.code ? `[${detail.discount.code}]` : ""}</span>
+                <span>-{money(detail.discount.amount)}</span>
               </div>
-              <div className="border-t border-dashed border-black/30 my-2" />
-              <div className="space-y-1">
-                {(detail.items || []).map((it, idx) => (
-                  <div key={it.id ?? idx} className="rf-mono text-[12px]">
-                    <div className="flex justify-between gap-2">
-                      <span className="flex-1">{it.qty} × {it.name}{it.options && <span className="block text-[10px] text-[#8A8378]">{it.options}</span>}</span>
-                      <span>{money(it.price * it.qty)}</span>
+            )}
+            <div className="rf-mono text-[14px] flex justify-between font-bold mt-1">
+              <span>TOTAL TTC</span>
+              <span>{money(detail.total)}</span>
+            </div>
+            {detail.paymentMethod && (
+              <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
+                <span>Paiement</span><span>{METHOD_LABELS[detail.paymentMethod] || detail.paymentMethod}</span>
+              </div>
+            )}
+            {detail.payments && detail.payments.length > 1 && (
+              <div className="mt-3 pt-2 border-t border-dashed border-black/20">
+                <p className="rf-mono text-[10px] font-bold uppercase tracking-wider mb-1">
+                  Ventilation des règlements ({detail.payments.length}) :
+                </p>
+                <div className="space-y-1">
+                  {detail.payments.map((p, idx) => (
+                    <div key={p.id || idx} className="rf-mono text-[11px] flex justify-between">
+                      <span className="opacity-80">• {p.label} ({METHOD_LABELS[p.method] || p.method})</span>
+                      <span className="font-bold">{money(p.amount)}</span>
                     </div>
-                    <div className="text-[10px] opacity-60">{money(it.price)} / unité</div>
-                  </div>
-                ))}
-              </div>
-              <div className="border-t border-dashed border-black/30 my-2" />
-              <div className="rf-mono text-[11px] flex justify-between opacity-80">
-                <span>Sous-total brut</span>
-                <span>{money(detail.subtotal != null ? detail.subtotal : detail.total)}</span>
-              </div>
-              {detail.discount && (
-                <div className="rf-mono text-[11px] flex justify-between text-[#2E9E5B] font-bold">
-                  <span>Remise {detail.discount.code ? `[${detail.discount.code}]` : ""}</span>
-                  <span>-{money(detail.discount.amount)}</span>
-                </div>
-              )}
-              <div className="rf-mono text-[14px] flex justify-between font-bold mt-1">
-                <span>TOTAL TTC</span>
-                <span>{money(detail.total)}</span>
-              </div>
-              {detail.paymentMethod && (
-                <div className="rf-mono text-[11px] flex justify-between opacity-80 mt-1.5">
-                  <span>Paiement</span><span>{METHOD_LABELS[detail.paymentMethod] || detail.paymentMethod}</span>
-                </div>
-              )}
-              {detail.payments && detail.payments.length > 1 && (
-                <div className="mt-3 pt-2 border-t border-dashed border-black/20">
-                  <p className="rf-mono text-[10px] font-bold uppercase tracking-wider mb-1">
-                    Ventilation des règlements ({detail.payments.length}) :
-                  </p>
-                  <div className="space-y-1">
-                    {detail.payments.map((p, idx) => (
-                      <div key={p.id || idx} className="rf-mono text-[11px] flex justify-between">
-                        <span className="opacity-80">• {p.label} ({METHOD_LABELS[p.method] || p.method})</span>
-                        <span className="font-bold">{money(p.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>
-            </div>
-            {canRefundDetail && (
-              <div className="px-5 pb-3">
-                <p className="text-xs font-bold text-[#2B2622] mb-1.5">Avoir sur ce ticket</p>
-                <p className="text-[11px] text-[#8A8378] mb-1.5">Choisissez les lignes à rembourser, ou laissez tout à 0 pour rembourser tout le reste.</p>
-                <div className="space-y-1 mb-2">
-                  {refundLines.filter((l) => l.remaining > 0).map((l) => {
-                    const q = refundQty[l.key] || 0;
-                    const set = (n) => setRefundQty((prev) => ({ ...prev, [l.key]: Math.max(0, Math.min(l.remaining, n)) }));
-                    return (
-                      <div key={l.key} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="truncate">{l.name} <span className="text-[#8A8378]">({l.remaining} restant{l.remaining > 1 ? "s" : ""})</span></span>
-                        <span className="flex items-center gap-1 shrink-0">
-                          <button type="button" onClick={() => set(q - 1)} className="rf-tap w-6 h-6 rounded-full bg-black/5 font-bold" aria-label={`Retirer ${l.name}`}>−</button>
-                          <span className="w-5 text-center font-bold">{q}</span>
-                          <button type="button" onClick={() => set(q + 1)} className="rf-tap w-6 h-6 rounded-full bg-black/5 font-bold" aria-label={`Ajouter ${l.name}`}>+</button>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <label className="flex items-center gap-2 text-xs mb-2">
-                  Rembourser en
-                  <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="px-2 py-1 rounded-lg border border-black/15">
-                    <option value="carte">Carte</option>
-                    <option value="especes">Espèces</option>
-                    <option value="cheque">Chèque</option>
-                    <option value="autre">Autre</option>
-                  </select>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    value={refundReason}
-                    onChange={(e) => setRefundReason(e.target.value)}
-                    placeholder="Motif obligatoire (ex : erreur d'encaissement)"
-                    className="flex-1 text-sm px-3 py-2 rounded-lg border border-black/15 outline-none"
-                  />
-                  <button
-                    onClick={emitRefund}
-                    disabled={refundBusy || refundReason.trim().length < 3}
-                    className="rf-tap px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
-                    style={{ background: "#C1361B" }}
-                  >
-                    {partialLines.length > 0 ? "Avoir partiel" : "Avoir du reste"}
-                  </button>
+                  ))}
                 </div>
               </div>
             )}
-            <div className="px-5 pb-5 flex gap-2">
-              <button onClick={() => setDetailId(null)} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Fermer</button>
-              <button
-                onClick={() => setThermalPreviewDetail(detail)}
-                className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5"
-                style={{ background: "#C1440E" }}
-              >
-                <Printer size={15} />
-                <span>Format Thermique ESC/POS</span>
-              </button>
-            </div>
+            <p className="text-center text-xs mt-4 opacity-80">Merci et à bientôt !</p>
           </div>
-        </div>
+          {canRefundDetail && (
+            <div className="px-5 pb-3">
+              <p className="text-xs font-bold text-[#2B2622] mb-1.5">Avoir sur ce ticket</p>
+              <p className="text-[11px] text-[#8A8378] mb-1.5">Choisissez les lignes à rembourser, ou laissez tout à 0 pour rembourser tout le reste.</p>
+              <div className="space-y-1 mb-2">
+                {refundLines.filter((l) => l.remaining > 0).map((l) => {
+                  const q = refundQty[l.key] || 0;
+                  const set = (n) => setRefundQty((prev) => ({ ...prev, [l.key]: Math.max(0, Math.min(l.remaining, n)) }));
+                  return (
+                    <div key={l.key} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate">{l.name} <span className="text-[#8A8378]">({l.remaining} restant{l.remaining > 1 ? "s" : ""})</span></span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        <button type="button" onClick={() => set(q - 1)} className="rf-tap w-6 h-6 rounded-full bg-black/5 font-bold" aria-label={`Retirer ${l.name}`}>−</button>
+                        <span className="w-5 text-center font-bold">{q}</span>
+                        <button type="button" onClick={() => set(q + 1)} className="rf-tap w-6 h-6 rounded-full bg-black/5 font-bold" aria-label={`Ajouter ${l.name}`}>+</button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <label className="flex items-center gap-2 text-xs mb-2">
+                Rembourser en
+                <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="px-2 py-1 rounded-lg border border-black/15">
+                  <option value="carte">Carte</option>
+                  <option value="especes">Espèces</option>
+                  <option value="cheque">Chèque</option>
+                  <option value="autre">Autre</option>
+                </select>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  placeholder="Motif obligatoire (ex : erreur d'encaissement)"
+                  className="flex-1 text-sm px-3 py-2 rounded-lg border border-black/15 outline-none"
+                />
+                <button
+                  onClick={emitRefund}
+                  disabled={refundBusy || refundReason.trim().length < 3}
+                  className="rf-tap px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                  style={{ background: "#C1361B" }}
+                >
+                  {partialLines.length > 0 ? "Avoir partiel" : "Avoir du reste"}
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="px-5 pb-5 flex gap-2">
+            <button onClick={() => setDetailId(null)} className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-semibold bg-black/5">Fermer</button>
+            <button
+              onClick={() => setThermalPreviewDetail(detail)}
+              className="rf-tap flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5"
+              style={{ background: "#C1440E" }}
+            >
+              <Printer size={15} />
+              <span>Format Thermique ESC/POS</span>
+            </button>
+          </div>
+        </Dialog>
       )}
 
       {/* Prévisualisation thermique */}
