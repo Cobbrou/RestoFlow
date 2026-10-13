@@ -23,6 +23,14 @@ body {
   align-items: stretch;
 }
 
+/* ── Focus clavier ────────────────────────────────────────────
+   Hors @layer à dessein : l'emporte sur les utilitaires `outline-none` posés sur les champs et boutons.
+   Les conteneurs focalisés par programme (tabindex="-1", ex. fenêtres modales) restent sans contour. */
+:focus-visible:not([tabindex="-1"]) {
+  outline: 2px solid #C1440E;
+  outline-offset: 2px;
+}
+
 /* ── Impression thermique ESC/POS ─────────────────────────── */
 @media print {
   body {
