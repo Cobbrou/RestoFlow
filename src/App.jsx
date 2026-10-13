@@ -387,114 +387,116 @@ export default function App() {
 
       <CoversPicker table={coversPrompt?.table} onPick={openTableWithCovers} onClose={() => setCoversPrompt(null)} />
 
-      {/* ── Vue Salle ── */}
-      {role === "serveur" && serverView === "plan" && (
-        <ErrorBoundary label="Plan de salle">
-          <FloorPlan
-            tables={tables}
-            orders={orders}
-            reservations={reservations}
-            onOpen={openTable}
-            onOpenOffPremise={openOffPremise}
-            onToggleAlert={toggleAlert}
-            onOpenReservations={() => setIsReservationModalOpen(true)}
-            onOpenTableAction={(mode, table) => setTableActionModal({ mode, sourceTable: table })}
-            isMobile={isMobile}
-          />
-        </ErrorBoundary>
-      )}
-      {/* Hors salle : l'écran reste monté une fois la commande encaissée, le temps d'afficher le ticket */}
-      {role === "serveur" && serverView === "commande" && (activeTable || activeOrderId) && (
-        <ErrorBoundary label="Prise de commande">
-          <OrderTaking
-            table={activeTable}
-            order={activeOrder}
-            products={combinedProducts}
-            recipes={recipes}
-            ingredients={ingredients}
-            config={config}
-            tables={tables}
-            orders={orders}
-            isMobile={isMobile}
-            currentStaff={currentStaff}
-            roles={roles}
-            onToggleProductAvailable={management.onToggleProductAvailable}
-            onBack={() => setServerView("plan")}
-            onAdd={(p, optionPicks) => addProductToOrder(orderTarget, p, optionPicks)}
-            onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(orderTarget, menuProduct, composition)}
-            onQty={(itemId, d) => changeQty(activeOrder.id, itemId, d)}
-            onRemove={(itemId) => removeItem(activeOrder.id, itemId)}
-            onVoid={(itemId, qty, reason, done) => voidItem(activeOrder.id, itemId, qty, reason, done)}
-            onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
-            onSetCovers={(n) => setOrderCovers(activeOrder.id, n)}
-            onRequestBill={(requested) => setBillRequested(activeOrder.id, requested)}
-            onSend={() => sendToKitchen(activeOrder.id)}
-            onServe={() => serveAndMaybeFree(activeOrder.id)}
-            onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}
-            onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
-            onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
-            onPartialCheckout={(lines, payments, amount, print) => partialCheckout(activeOrder.id, lines, payments, amount, print)}
-            onCancelOrder={() => {
-              cancelOffPremiseOrder(activeOrder.id);
-              setServerView("plan");
-            }}
-            onBackToPlan={() => setServerView("plan")}
-            onCallCourse={(courseOrOrderId, maybeCourse) => {
-              const course = maybeCourse || courseOrOrderId;
-              handleCallCourse(activeOrder.id, course);
-            }}
-            onChangeItemCourse={(itemId, course) => handleChangeItemCourse(activeOrder.id, itemId, course)}
-            onTransferTable={(fromId, toId) => handleTransferTable(fromId, toId)}
-            onMergeTable={(fromId, toId) => handleMergeTable(fromId, toId)}
-          />
-        </ErrorBoundary>
-      )}
-
-      {/* ── Vue Cuisine ── */}
-      {role === "cuisine" && (
-        <ErrorBoundary label="Cuisine KDS">
-          <CuisineShell
-            view={cuisineView}
-            setView={setCuisineView}
-            tables={tables}
-            orders={orders}
-            products={combinedProducts}
-            config={config}
-            onStart={startPrep}
-            onReady={markReady}
-            onToggleProductAvailable={
-              ["cuisine.status", "gestion.tables", "gestion.products"].some((p) =>
-                hasPermission(currentStaff, currentRole, p)
-              )
-                ? management.onToggleProductAvailable
-                : null
-            }
-          />
-        </ErrorBoundary>
-      )}
-
-      {/* ── Dashboard (Lazy Loaded) ── */}
-      {role === "dashboard" && (
-        <ErrorBoundary label="Dashboard">
-          <Suspense fallback={<ViewFallback />}>
-            <Dashboard history={history} orders={orders} tables={tables} />
-          </Suspense>
-        </ErrorBoundary>
-      )}
-
-      {/* ── Gestion (Lazy Loaded & Sans Prop Drilling) ── */}
-      {role === "gestion" && (
-        <ErrorBoundary label="Gestion">
-          <Suspense fallback={<ViewFallback />}>
-            <Gestion
-              view={gestionView}
-              setView={setGestionView}
-              closings={closings}
-              onProcessZ={management.onProcessZ}
+      <main>
+        {/* ── Vue Salle ── */}
+        {role === "serveur" && serverView === "plan" && (
+          <ErrorBoundary label="Plan de salle">
+            <FloorPlan
+              tables={tables}
+              orders={orders}
+              reservations={reservations}
+              onOpen={openTable}
+              onOpenOffPremise={openOffPremise}
+              onToggleAlert={toggleAlert}
+              onOpenReservations={() => setIsReservationModalOpen(true)}
+              onOpenTableAction={(mode, table) => setTableActionModal({ mode, sourceTable: table })}
+              isMobile={isMobile}
             />
-          </Suspense>
-        </ErrorBoundary>
-      )}
+          </ErrorBoundary>
+        )}
+        {/* Hors salle : l'écran reste monté une fois la commande encaissée, le temps d'afficher le ticket */}
+        {role === "serveur" && serverView === "commande" && (activeTable || activeOrderId) && (
+          <ErrorBoundary label="Prise de commande">
+            <OrderTaking
+              table={activeTable}
+              order={activeOrder}
+              products={combinedProducts}
+              recipes={recipes}
+              ingredients={ingredients}
+              config={config}
+              tables={tables}
+              orders={orders}
+              isMobile={isMobile}
+              currentStaff={currentStaff}
+              roles={roles}
+              onToggleProductAvailable={management.onToggleProductAvailable}
+              onBack={() => setServerView("plan")}
+              onAdd={(p, optionPicks) => addProductToOrder(orderTarget, p, optionPicks)}
+              onAddComposedMenu={(menuProduct, composition) => addComposedMenuToOrder(orderTarget, menuProduct, composition)}
+              onQty={(itemId, d) => changeQty(activeOrder.id, itemId, d)}
+              onRemove={(itemId) => removeItem(activeOrder.id, itemId)}
+              onVoid={(itemId, qty, reason, done) => voidItem(activeOrder.id, itemId, qty, reason, done)}
+              onNote={(itemId, n) => setItemNote(activeOrder.id, itemId, n)}
+              onSetCovers={(n) => setOrderCovers(activeOrder.id, n)}
+              onRequestBill={(requested) => setBillRequested(activeOrder.id, requested)}
+              onSend={() => sendToKitchen(activeOrder.id)}
+              onServe={() => serveAndMaybeFree(activeOrder.id)}
+              onApplyDiscount={(orderId, disc) => handleApplyDiscount(orderId, disc)}
+              onRemoveDiscount={(orderId) => handleRemoveDiscount(orderId)}
+              onCheckout={(method, payments, meta) => checkoutOrder(activeOrder.id, method, payments, meta)}
+              onPartialCheckout={(lines, payments, amount, print) => partialCheckout(activeOrder.id, lines, payments, amount, print)}
+              onCancelOrder={() => {
+                cancelOffPremiseOrder(activeOrder.id);
+                setServerView("plan");
+              }}
+              onBackToPlan={() => setServerView("plan")}
+              onCallCourse={(courseOrOrderId, maybeCourse) => {
+                const course = maybeCourse || courseOrOrderId;
+                handleCallCourse(activeOrder.id, course);
+              }}
+              onChangeItemCourse={(itemId, course) => handleChangeItemCourse(activeOrder.id, itemId, course)}
+              onTransferTable={(fromId, toId) => handleTransferTable(fromId, toId)}
+              onMergeTable={(fromId, toId) => handleMergeTable(fromId, toId)}
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* ── Vue Cuisine ── */}
+        {role === "cuisine" && (
+          <ErrorBoundary label="Cuisine KDS">
+            <CuisineShell
+              view={cuisineView}
+              setView={setCuisineView}
+              tables={tables}
+              orders={orders}
+              products={combinedProducts}
+              config={config}
+              onStart={startPrep}
+              onReady={markReady}
+              onToggleProductAvailable={
+                ["cuisine.status", "gestion.tables", "gestion.products"].some((p) =>
+                  hasPermission(currentStaff, currentRole, p)
+                )
+                  ? management.onToggleProductAvailable
+                  : null
+              }
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* ── Dashboard (Lazy Loaded) ── */}
+        {role === "dashboard" && (
+          <ErrorBoundary label="Dashboard">
+            <Suspense fallback={<ViewFallback />}>
+              <Dashboard history={history} orders={orders} tables={tables} />
+            </Suspense>
+          </ErrorBoundary>
+        )}
+
+        {/* ── Gestion (Lazy Loaded & Sans Prop Drilling) ── */}
+        {role === "gestion" && (
+          <ErrorBoundary label="Gestion">
+            <Suspense fallback={<ViewFallback />}>
+              <Gestion
+                view={gestionView}
+                setView={setGestionView}
+                closings={closings}
+                onProcessZ={management.onProcessZ}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        )}
+      </main>
 
       {/* ── Modale Gestion des Réservations & Widget (Phase 4) ── */}
       {isReservationModalOpen && (

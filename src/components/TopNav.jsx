@@ -102,7 +102,7 @@ export default function TopNav({
 
   if (isMobile) {
     return (
-      <div className={`border-b ${dark ? "border-white/10" : "border-black/10"}`}>
+      <header className={`border-b ${dark ? "border-white/10" : "border-black/10"}`}>
         <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5 gap-2">
           {logo}
           <div className="flex items-center gap-1.5 ml-auto">
@@ -114,7 +114,8 @@ export default function TopNav({
           </div>
         </div>
         {visibleTabs.length > 0 && (
-          <div
+          <nav
+            aria-label="Postes"
             className="grid gap-1 px-2 pb-2"
             style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
           >
@@ -125,6 +126,7 @@ export default function TopNav({
                 <button
                   key={t.id}
                   onClick={() => setRole(t.id)}
+                  aria-current={active ? "page" : undefined}
                   className="rf-tap flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-xl text-[10px] font-semibold"
                   style={{
                     background: active ? (dark ? "#F2ECDD" : "#2B2622") : (dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.05)"),
@@ -136,21 +138,21 @@ export default function TopNav({
                 </button>
               );
             })}
-          </div>
+          </nav>
         )}
-      </div>
+      </header>
     );
   }
 
   return (
-    <div className={`flex items-center justify-between px-5 py-3 border-b ${dark ? "border-white/10" : "border-black/10"}`}>
+    <header className={`flex items-center justify-between px-5 py-3 border-b ${dark ? "border-white/10" : "border-black/10"}`}>
       <div className="flex items-center gap-4">
         {logo}
         <ConnectionBadge dark={dark} />
       </div>
 
       {visibleTabs.length > 0 && (
-        <div className={`flex gap-1 p-1 rounded-full ${dark ? "bg-white/5" : "bg-black/5"}`}>
+        <nav aria-label="Postes" className={`flex gap-1 p-1 rounded-full ${dark ? "bg-white/5" : "bg-black/5"}`}>
           {visibleTabs.map((t) => {
             const Icon = t.icon;
             const active = role === t.id;
@@ -158,6 +160,7 @@ export default function TopNav({
               <button
                 key={t.id}
                 onClick={() => setRole(t.id)}
+                aria-current={active ? "page" : undefined}
                 className={`rf-tap flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium ${active ? "shadow-sm" : ""}`}
                 style={{
                   background: active ? (dark ? "#F2ECDD" : "#2B2622") : "transparent",
@@ -169,7 +172,7 @@ export default function TopNav({
               </button>
             );
           })}
-        </div>
+        </nav>
       )}
 
       <div className="flex items-center gap-2">
@@ -178,6 +181,6 @@ export default function TopNav({
         {logoutBtn}
         {soundBtn}
       </div>
-    </div>
+    </header>
   );
 }
