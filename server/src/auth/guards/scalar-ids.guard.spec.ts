@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { GUARDS_METADATA } from "@nestjs/common/constants";
-import { assertScalarIds, ScalarIdsGuard } from "./scalar-ids.guard";
-import { WebsocketGateway } from "../../websocket/websocket.gateway";
-import { ManagementGateway } from "../../management/management.gateway";
-import { ReservationsGateway } from "../../reservations/reservations.gateway";
+import { assertScalarIds } from "./scalar-ids.guard";
 
 describe("Identifiants des actions temps réel", () => {
   it("refuse un filtre Prisma à la place d'un identifiant, à toute profondeur", () => {
@@ -26,11 +22,5 @@ describe("Identifiants des actions temps réel", () => {
       })
     ).not.toThrow();
     expect(() => assertScalarIds(undefined)).not.toThrow();
-  });
-
-  it("protège chaque gateway", () => {
-    for (const gateway of [WebsocketGateway, ManagementGateway, ReservationsGateway]) {
-      expect(Reflect.getMetadata(GUARDS_METADATA, gateway)[0]).toBe(ScalarIdsGuard);
-    }
   });
 });

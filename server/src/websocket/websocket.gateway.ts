@@ -768,12 +768,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // ── Configuration Restaurant (ConfigService) ────────────────────────
 
-  @SubscribeMessage("config:get")
-  async handleGetConfig() {
-    const config = await this.configService.getConfig();
-    return { ok: true, config };
-  }
-
   @RequirePermissions("caisse.settings")
   @SubscribeMessage("config:update")
   async handleUpdateConfig(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
@@ -802,15 +796,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   // ── Stocks & Recettes (StockService & RecipesService) ───────────────
-
-  @SubscribeMessage("stock:request_sync")
-  async handleStockSync(@ConnectedSocket() client: Socket) {
-    const [ingredients, movements] = await Promise.all([
-      this.stockService.findAllIngredients(),
-      hasAnyPermission(client.data.user, SENSITIVE.stockMovements) ? this.stockService.getMovements(100) : [],
-    ]);
-    return { ok: true, ingredients, movements };
-  }
 
   @RequirePermissions("gestion.stocks")
   @SubscribeMessage("stock:add_movement")
