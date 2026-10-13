@@ -37,7 +37,7 @@ export function encodeCp1252(text: string): Buffer {
  * Texte libre inséré dans un ticket (nom, note, motif…) : caractères de contrôle remplacés par une espace,
  * sinon une note pourrait embarquer une commande ESC/POS (ouverture du tiroir, réglages de l'imprimante)
  */
-export const escposText = (value: unknown) => String(value ?? "").replace(/[\x00-\x1f\x7f]/g, " ");
+export const escposText = (value: unknown) => String(value ?? "").replace(/[\x00-\x1f\x7f]/g, " "); // eslint-disable-line no-control-regex
 
 // 🔒 Jamais la machine elle-même (API d'admin Caddy, base…) ni une adresse locale au lien
 const NOT_A_PRINTER = new net.BlockList();
