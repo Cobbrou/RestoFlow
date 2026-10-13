@@ -189,6 +189,7 @@ export default function StaffRoleManager({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Rechercher par nom, e-mail, téléphone…"
+                aria-label="Rechercher par nom, e-mail, téléphone"
                 className="bg-transparent outline-none text-sm flex-1 placeholder:text-[#9A917E]"
               />
             </div>

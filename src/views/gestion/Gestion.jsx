@@ -978,6 +978,7 @@ function HistoryManager({ history, config, pushToast, canRefund }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Recherche par table, serveur…"
+            aria-label="Recherche par table, serveur"
             className="bg-transparent outline-none text-sm flex-1 placeholder:text-[#9A917E]"
           />
         </div>

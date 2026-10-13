@@ -197,6 +197,7 @@ export default function OrderTaking({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Rechercher un produit…"
+            aria-label="Rechercher un produit"
             className="bg-transparent outline-none text-sm flex-1 placeholder:text-[#9A917E]"
           />
         </div>
