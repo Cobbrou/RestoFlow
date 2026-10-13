@@ -130,6 +130,8 @@ model StockMovement {
   staffId      String?     // Auteur
   reason       String?     // Motif en cas de perte / ajustement
   createdAt    DateTime    @default(now())
+
+  @@index([createdAt])
 }
 
 model Menu {
@@ -169,6 +171,8 @@ model Order {
   items     OrderItem[]
 
   @@unique([channel, externalRef]) // Une commande externe n'est importée qu'une fois
+  @@index([status, tableId]) // Commandes ouvertes ; commande ouverte d'une table
+  @@index([createdAt])       // Numéro d'appel du jour
 }
 
 model OrderItem {
@@ -190,6 +194,8 @@ model OrderItem {
   paidQty     Int      @default(0) // Quantité déjà encaissée sur un ticket partiel (partage par convive)
   vatSplit    String?  // Menu à plusieurs taux : JSON [{ rate, weight }], poids = prix des composants en centimes
   options     String?  // Libellé figé des options choisies, ex. "Saignant · Bacon (+2.00€)" (supplément inclus dans price)
+
+  @@index([orderId])
 }
 
 model Reservation {
@@ -206,6 +212,8 @@ model Reservation {
   notes        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([date])
 }
 
 model OrderHistory {
@@ -234,6 +242,9 @@ model OrderHistory {
   refTicketNumber String? // Ticket d'origine annulé par cet avoir
   reason         String?  // Motif obligatoire d'un avoir
   createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([closedInZId]) // Tickets du service en cours (X, Z)
 }
 
 // Journal des événements techniques (JET, NF525) : append-only, chaîné et signé

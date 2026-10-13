@@ -205,9 +205,11 @@ describe("OrdersService.sendKitchen", () => {
       restaurantConfig: { findUnique: vi.fn().mockResolvedValue(null) },
       // "b" a déjà été réclamé par un envoi concurrent
       orderItem: { updateMany: vi.fn(({ where }) => ({ count: where.id === "b" ? 0 : 1 })) },
+      $transaction: vi.fn((ops) => Promise.all(ops)),
     };
     const { sentIds } = await new OrdersService(prisma).sendKitchen("o1");
     expect(sentIds).toEqual(["a"]);
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
   it("refuse une commande encaissée", async () => {
@@ -243,6 +245,27 @@ describe("Menus : composition validée contre la formule", () => {
       new OrdersService(prisma).addItem({ orderId: "o1", product: { id: "menu_m1", name: "x", price: 1, isMenu: false } })
     ).rejects.toThrow("incomplète");
     expect(prisma.orderItem.create).not.toHaveBeenCalled();
+  });
+
+  it("addItem lit les composants d'un menu en une seule requête", async () => {
+    const products = [
+      { id: "p2", name: "Burger", options: "[]", price: 12, vatRate: 10 },
+      { id: "p3", name: "Tarte", options: "[]", price: 6, vatRate: 10 },
+    ];
+    const prisma: any = {
+      order: { findUnique: vi.fn().mockResolvedValue({ id: "o1", status: "open", items: [] }) },
+      menu: { findUnique: vi.fn().mockResolvedValue({ id: "m1", name: "Menu", price: 15, groups: JSON.stringify(groups) }) },
+      product: { findMany: vi.fn().mockResolvedValue(products), findUnique: vi.fn() },
+      orderItem: { create: vi.fn() },
+    };
+    await new OrdersService(prisma).addItem({
+      orderId: "o1",
+      product: { id: "menu_m1", name: "x", price: 1 },
+      composition: [{ productIds: ["p2"] }, { productIds: ["p3"] }],
+    });
+    expect(prisma.product.findMany).toHaveBeenCalledOnce();
+    expect(prisma.product.findUnique).not.toHaveBeenCalled();
+    expect(JSON.parse(prisma.orderItem.create.mock.calls[0][0].data.composition).map((g: any) => g.names)).toEqual([["Burger"], ["Tarte"]]);
   });
 });
 

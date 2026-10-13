@@ -34,6 +34,15 @@ import { CheckoutDto } from "../orders/dto/checkout.dto";
 import { StockMovementDto } from "../stock/dto/stock-movement.dto";
 import { TransferTableDto, MergeTableDto } from "../tables/dto/table-action.dto";
 
+// Synchronisation initiale : réservations récentes et à venir, l'historique complet grossirait chaque connexion
+// ponytail: fenêtre fixe de 30 jours, requête paginée par date si la consultation d'archives devient utile
+const RESERVATIONS_PAST_DAYS = 30;
+const reservationsFrom = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - RESERVATIONS_PAST_DAYS);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 @WebSocketGateway({
   cors: {
     origin: ALLOWED_ORIGINS,
@@ -121,7 +130,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         this.recipesService.listItems(),
         can(SENSITIVE.stockMovements) ? this.stockService.getMovements(60) : [],
         this.configService.getConfig(),
-        this.prisma.reservation.findMany({ orderBy: [{ date: "asc" }, { time: "asc" }] }),
+        this.prisma.reservation.findMany({
+          where: { date: { gte: reservationsFrom() } },
+          orderBy: [{ date: "asc" }, { time: "asc" }],
+        }),
         can(SENSITIVE.closings) ? this.closingService.getClosingsHistory(50) : [],
       ]);
 
